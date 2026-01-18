@@ -697,6 +697,7 @@ class DossierApp(App):
         Binding("/", "search", "Search", show=True),
         Binding("f", "cycle_filter", "Filter", show=True),
         Binding("?", "help", "Help", show=True),
+        Binding("`", "settings", "Settings", show=False),
         Binding("l", "link_selected", "Link as Project", show=False),
         Binding("d", "delete", "Delete", show=False),
         Binding("c", "add_component", "Add Component", show=False),
@@ -5986,6 +5987,7 @@ Without `:`, typing searches/filters projects. Press Enter to search immediately
 | `/` | Focus search |
 | `f` | Cycle filter (All → Synced → Unsynced) |
 | `?` | Show this help |
+| `` ` `` | Open settings (theme, app info) |
 | `Tab` | Navigate between panels |
 
 ## Component Tree Navigation
@@ -6127,6 +6129,183 @@ Set `GITHUB_TOKEN` environment variable for:
                 self.dismiss()
         
         self.push_screen(HelpScreen())
+    
+    def action_settings(self) -> None:
+        """Show settings overlay with theme selection and app info."""
+        import platform
+        import sys
+        from pathlib import Path
+        
+        from textual.screen import ModalScreen
+        from textual.widgets import Button, RadioButton, RadioSet
+        from textual.containers import Vertical, Horizontal, VerticalScroll
+        
+        from dossier import __version__
+        
+        # Get database path and stats
+        db_path = Path.home() / ".dossier" / "dossier.db"
+        db_size = "N/A"
+        if db_path.exists():
+            size_bytes = db_path.stat().st_size
+            if size_bytes < 1024:
+                db_size = f"{size_bytes} B"
+            elif size_bytes < 1024 * 1024:
+                db_size = f"{size_bytes / 1024:.1f} KB"
+            else:
+                db_size = f"{size_bytes / (1024 * 1024):.1f} MB"
+        
+        # Get project count
+        project_count = 0
+        try:
+            with self.session_factory() as session:
+                from sqlmodel import func
+                result = session.exec(select(func.count()).select_from(Project))
+                project_count = result.one()
+        except Exception:
+            pass
+        
+        # Available themes (Textual built-in themes)
+        available_themes = [
+            ("textual-dark", "Textual Dark"),
+            ("textual-light", "Textual Light"),
+            ("nord", "Nord"),
+            ("gruvbox", "Gruvbox"),
+            ("catppuccin-mocha", "Catppuccin Mocha"),
+            ("dracula", "Dracula"),
+            ("tokyo-night", "Tokyo Night"),
+            ("monokai", "Monokai"),
+            ("solarized-light", "Solarized Light"),
+        ]
+        
+        current_theme = self.theme or "textual-dark"
+        app_ref = self  # Reference to app for theme changes
+        
+        class SettingsScreen(ModalScreen):
+            """Settings screen with theme selection and app info."""
+            
+            CSS = """
+            SettingsScreen {
+                align: center middle;
+            }
+            
+            #settings-dialog {
+                width: 70;
+                height: auto;
+                max-height: 85%;
+                padding: 1 2;
+                background: $surface;
+                border: solid $primary;
+            }
+            
+            #settings-scroll {
+                height: auto;
+                max-height: 60;
+            }
+            
+            .settings-section {
+                margin-bottom: 1;
+            }
+            
+            .settings-label {
+                text-style: bold;
+                margin-bottom: 1;
+                color: $primary;
+            }
+            
+            .info-row {
+                height: 1;
+                margin-bottom: 0;
+            }
+            
+            .info-label {
+                width: 20;
+                color: $text-muted;
+            }
+            
+            .info-value {
+                width: 1fr;
+            }
+            
+            #theme-select {
+                margin: 1 0;
+                height: auto;
+            }
+            
+            #settings-buttons {
+                margin-top: 1;
+                height: auto;
+                align: center middle;
+            }
+            
+            #settings-buttons Button {
+                margin: 0 1;
+            }
+            """
+            
+            BINDINGS = [
+                Binding("escape", "close", "Close"),
+                Binding("q", "close", "Close"),
+            ]
+            
+            def compose(self) -> ComposeResult:
+                with Vertical(id="settings-dialog"):
+                    with VerticalScroll(id="settings-scroll"):
+                        # App Info Section
+                        yield Static("⚙️  App Info", classes="settings-label")
+                        with Vertical(classes="settings-section"):
+                            with Horizontal(classes="info-row"):
+                                yield Static("Version:", classes="info-label")
+                                yield Static(f"{__version__}", classes="info-value")
+                            with Horizontal(classes="info-row"):
+                                yield Static("Python:", classes="info-label")
+                                yield Static(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}", classes="info-value")
+                            with Horizontal(classes="info-row"):
+                                yield Static("Platform:", classes="info-label")
+                                yield Static(f"{platform.system()} {platform.release()}", classes="info-value")
+                            with Horizontal(classes="info-row"):
+                                yield Static("Database:", classes="info-label")
+                                yield Static(f"{db_path}", classes="info-value")
+                            with Horizontal(classes="info-row"):
+                                yield Static("DB Size:", classes="info-label")
+                                yield Static(f"{db_size}", classes="info-value")
+                            with Horizontal(classes="info-row"):
+                                yield Static("Projects:", classes="info-label")
+                                yield Static(f"{project_count}", classes="info-value")
+                        
+                        yield Rule()
+                        
+                        # Theme Section
+                        yield Static("🎨 Theme", classes="settings-label")
+                        with RadioSet(id="theme-select"):
+                            for theme_id, theme_name in available_themes:
+                                yield RadioButton(
+                                    theme_name, 
+                                    value=(theme_id == current_theme),
+                                    id=f"theme-{theme_id}",
+                                )
+                    
+                    with Horizontal(id="settings-buttons"):
+                        yield Button("Close", id="close-btn", variant="default")
+            
+            @on(RadioSet.Changed, "#theme-select")
+            def on_theme_changed(self, event: RadioSet.Changed) -> None:
+                """Handle theme selection change."""
+                if event.pressed:
+                    # Extract theme ID from the radio button's ID
+                    radio_id = event.pressed.id
+                    if radio_id and radio_id.startswith("theme-"):
+                        theme_id = radio_id[6:]  # Remove "theme-" prefix
+                        app_ref.theme = theme_id
+                        self.notify(f"Theme changed to {theme_id}")
+            
+            @on(Button.Pressed, "#close-btn")
+            def on_close(self) -> None:
+                self.dismiss()
+            
+            def action_close(self) -> None:
+                self.dismiss()
+        
+        self.push_screen(SettingsScreen())
 
 
 def run_tui() -> None:

@@ -419,6 +419,58 @@ class TestTUIFilterStates:
 
 
 @pytest.mark.screenshot
+class TestTUISettingsScreen:
+    """Screenshot tests for the settings overlay.
+    
+    Run with: uv run pytest tests/test_tui.py -k SettingsScreen --screenshots -v
+    """
+    
+    @pytest.mark.asyncio
+    async def test_screenshot_settings_screen(self, screenshot_helper) -> None:
+        """Capture screenshot of the settings screen."""
+        from dossier.tui import DossierApp
+        
+        app = DossierApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            
+            # Press ` to open settings
+            await pilot.press("`")
+            await pilot.pause()
+            await pilot.pause()
+            
+            path = await screenshot_helper.capture(
+                app,
+                "dashboard_settings",
+                title="Settings Screen"
+            )
+            if path:
+                assert path.exists()
+    
+    @pytest.mark.asyncio
+    async def test_screenshot_settings_theme_selection(self, screenshot_helper) -> None:
+        """Capture screenshot of settings with theme selection visible."""
+        from dossier.tui import DossierApp
+        
+        app = DossierApp()
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            
+            # Press ` to open settings
+            await pilot.press("`")
+            await pilot.pause()
+            await pilot.pause()
+            
+            path = await screenshot_helper.capture(
+                app,
+                "dashboard_settings_themes",
+                title="Settings - Theme Selection"
+            )
+            if path:
+                assert path.exists()
+
+
+@pytest.mark.screenshot
 class TestTUIScreenshotsParameterized:
     """Parameterized screenshot tests for all tabs and resolutions.
     

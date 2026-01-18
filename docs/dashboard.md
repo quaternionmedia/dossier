@@ -300,6 +300,7 @@ Click on documentation in the tree or docs tab to open the **Content Viewer**:
 | `/` | Focus search/command bar |
 | `f` | Cycle filter (All → Synced → Unsynced → Starred) |
 | `?` | Show help |
+| `` ` `` | Open settings (theme, app info) |
 | `Tab` | Navigate between panels |
 
 ### Multi-Selection
