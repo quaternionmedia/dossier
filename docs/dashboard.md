@@ -493,6 +493,7 @@ Make sure you're clicking on a doc node (📝), not a folder (📚).
 ## Related Documentation
 
 - [Quickstart](quickstart.md) — Installation and first steps
+- [Settings](settings.md) — Theme selection and app info
 - [Workflows](workflows.md) — Copy-paste command examples
 - [Architecture](architecture.md) — How the TUI is built
 - [Keyboard Reference](#keyboard-shortcuts) — Full shortcut list

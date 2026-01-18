@@ -8,6 +8,7 @@
 |----------|-------------|
 | [Quickstart](quickstart.md) | Get running in 5 minutes |
 | [Dashboard Guide](dashboard.md) | Complete TUI dashboard reference |
+| [Settings](settings.md) | Theme selection and app info |
 | [Overview](overview.md) | Core concepts and use cases |
 | [Workflows](workflows.md) | Copy-paste ready examples |
 | [Architecture](architecture.md) | Cache-merge design and data models |
