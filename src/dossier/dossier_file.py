@@ -66,6 +66,7 @@ from dossier.models import (
     ProjectLanguage,
     ProjectPullRequest,
     ProjectRelease,
+    ProjectVersion,
 )
 
 
@@ -212,6 +213,38 @@ def generate_dossier(
             "branches": len(branches),
             "default_branch": default_branch,
         }
+    
+    # Add versions (semver)
+    versions = session.exec(
+        select(ProjectVersion)
+        .where(ProjectVersion.project_id == project.id)
+        .order_by(ProjectVersion.major.desc(), ProjectVersion.minor.desc(), ProjectVersion.patch.desc())
+    ).all()
+    
+    if versions:
+        dossier["versions"] = [
+            {
+                "version": ver.version,
+                "semver": {
+                    "major": ver.major,
+                    "minor": ver.minor,
+                    "patch": ver.patch,
+                    "prerelease": ver.prerelease,
+                    "build_metadata": ver.build_metadata,
+                },
+                "source": ver.source,
+                "is_latest": ver.is_latest,
+                "release_url": ver.release_url,
+                "changelog_url": ver.changelog_url,
+                "release_date": ver.release_date.isoformat() if ver.release_date else None,
+            }
+            for ver in versions
+        ]
+        
+        # Find and mark the latest version
+        latest_ver = next((v for v in versions if v.is_latest), versions[0] if versions else None)
+        if latest_ver:
+            dossier["project"]["version"] = latest_ver.version
     
     # Add links
     if project.github_owner and project.github_repo:

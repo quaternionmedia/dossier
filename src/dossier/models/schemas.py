@@ -189,6 +189,104 @@ class ProjectRelease(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class ProjectVersion(SQLModel, table=True):
+    """A semantic version tracked for a project.
+    
+    This model represents versions as linkable entities that can be:
+    - Extracted from releases (tag_name)
+    - Parsed from pyproject.toml, package.json, etc.
+    - Manually specified
+    
+    Versions follow semver (https://semver.org/) format: MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]
+    """
+    
+    __tablename__ = "project_version"
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    project_id: int = Field(foreign_key="project.id", index=True)
+    version: str  # Full version string (e.g., "1.2.3-beta.1+build.123")
+    major: int = 0  # Major version number
+    minor: int = 0  # Minor version number
+    patch: int = 0  # Patch version number
+    prerelease: Optional[str] = None  # Prerelease identifier (e.g., "alpha.1", "beta.2", "rc.1")
+    build_metadata: Optional[str] = None  # Build metadata (e.g., "build.123")
+    source: str = "release"  # Where this version came from: release, pyproject, package_json, manual
+    release_id: Optional[int] = Field(default=None, foreign_key="project_release.id")  # Link to release if from release
+    is_latest: bool = False  # Whether this is the latest version
+    release_url: Optional[str] = None  # URL to the release page
+    changelog_url: Optional[str] = None  # URL to changelog for this version
+    release_date: Optional[datetime] = None  # When this version was released
+    created_at: datetime = Field(default_factory=utcnow)
+    
+    @classmethod
+    def parse_version(cls, version_str: str) -> dict:
+        """Parse a semver string into its components.
+        
+        Args:
+            version_str: Version string like "1.2.3", "v1.2.3-beta.1+build.123"
+            
+        Returns:
+            Dictionary with major, minor, patch, prerelease, build_metadata
+        """
+        import re
+        
+        # Strip leading 'v' if present
+        ver = version_str.lstrip("vV")
+        
+        # Semver regex pattern
+        # Matches: MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]
+        pattern = r'^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$'
+        match = re.match(pattern, ver)
+        
+        if match:
+            major = int(match.group(1)) if match.group(1) else 0
+            minor = int(match.group(2)) if match.group(2) else 0
+            patch = int(match.group(3)) if match.group(3) else 0
+            prerelease = match.group(4)
+            build_metadata = match.group(5)
+        else:
+            # Fallback: try to extract numbers
+            numbers = re.findall(r'\d+', ver)
+            major = int(numbers[0]) if len(numbers) > 0 else 0
+            minor = int(numbers[1]) if len(numbers) > 1 else 0
+            patch = int(numbers[2]) if len(numbers) > 2 else 0
+            prerelease = None
+            build_metadata = None
+        
+        return {
+            "version": version_str,
+            "major": major,
+            "minor": minor,
+            "patch": patch,
+            "prerelease": prerelease,
+            "build_metadata": build_metadata,
+        }
+    
+    @classmethod
+    def from_version_string(cls, project_id: int, version_str: str, **kwargs) -> "ProjectVersion":
+        """Create a ProjectVersion from a version string.
+        
+        Args:
+            project_id: The project ID
+            version_str: Version string to parse
+            **kwargs: Additional fields (source, release_id, etc.)
+            
+        Returns:
+            ProjectVersion instance
+        """
+        parsed = cls.parse_version(version_str)
+        return cls(
+            project_id=project_id,
+            version=parsed["version"],
+            major=parsed["major"],
+            minor=parsed["minor"],
+            patch=parsed["patch"],
+            prerelease=parsed["prerelease"],
+            build_metadata=parsed["build_metadata"],
+            **kwargs,
+        )
+
+
 class DocumentationQuery(SQLModel):
     """Query parameters for documentation requests."""
     
