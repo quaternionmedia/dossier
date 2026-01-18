@@ -9,13 +9,22 @@ Copy-paste ready workflows for common use cases. All commands assume you've inst
 ## Prerequisites
 
 ```bash
-# One-time setup
+# One-time setup (copy-paste this block)
 git clone https://github.com/quaternionmedia/dossier.git
 cd dossier
 uv sync
 
 # Set GitHub token (get one at https://github.com/settings/tokens)
+# Linux/macOS:
 export GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+# Windows PowerShell:
+$env:GITHUB_TOKEN = "ghp_xxxxxxxxxxxxxxxxxxxx"
+```
+
+**Verify it works:**
+```bash
+uv run dossier github sync-user YOUR_USERNAME --limit 1
+# Should show: 📊 Rate limit: 4999/5000 remaining
 ```
 
 ---
@@ -25,30 +34,61 @@ export GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 **Goal**: Track all your GitHub repositories in one place.
 
 ```bash
-# Step 1: Sync all your repos
+# Step 1: Sync all your repos (replace YOUR_GITHUB_USERNAME)
 uv run dossier github sync-user YOUR_GITHUB_USERNAME
 
 # Step 2: Launch dashboard to browse
 uv run dossier dashboard
+# → Use arrow keys to navigate the project tree
+# → Tab to switch between panels
+# → Click docs in the tree to preview
 
-# Step 3: List projects sorted by stars
+# Step 3: List projects sorted by stars (CLI)
 uv run dossier projects list -v
 
 # Step 4: Export portfolio overview
+mkdir -p ./my-portfolio
 uv run dossier export all -d ./my-portfolio
 ```
 
-**Verify it worked**:
+**Verify it worked:**
 ```bash
-# Check project count
 uv run dossier dev status
-
 # Should show: Projects: N | Synced: N | ...
 ```
 
 ---
 
-## Workflow 2: Multi-Org Team Visibility
+## Workflow 2: Documentation Browsing
+
+**Goal**: Browse project documentation without leaving the terminal.
+
+```bash
+# Step 1: Sync a project
+uv run dossier github sync pallets/flask
+
+# Step 2: Launch dashboard
+uv run dossier dashboard
+
+# Step 3: Navigate the documentation tree
+# → Expand the project in the left tree
+# → Click 📚 Docs folder to expand
+# → Click any doc file to open the viewer
+# → Use n/p or j/k to navigate between docs
+# → Press q to close the viewer
+```
+
+**Keyboard navigation in the viewer:**
+| Key | Action |
+|-----|--------|
+| `n` or `j` | Next document |
+| `p` or `k` | Previous document |
+| `o` | Open in browser |
+| `q` or `Esc` | Close viewer |
+
+---
+
+## Workflow 3: Multi-Org Team Visibility
 
 **Goal**: Unified view across multiple GitHub organizations.
 
@@ -84,7 +124,7 @@ uv run dossier components list acme-platform
 
 ---
 
-## Workflow 3: Offline-First Development
+## Workflow 4: Offline-First Development
 
 **Goal**: Work without network, sync when connected.
 
@@ -107,7 +147,7 @@ uv run dossier github sync-user myusername --force
 
 ---
 
-## Workflow 4: Daily Standup Prep
+## Workflow 5: Daily Standup Prep
 
 **Goal**: Quick overview of project activity for standup.
 
@@ -125,7 +165,7 @@ uv run dossier projects show myorg/current-sprint-project
 
 ---
 
-## Workflow 5: Dependency Audit
+## Workflow 6: Dependency Audit
 
 **Goal**: See what dependencies your projects use.
 
@@ -153,7 +193,7 @@ uv run dossier dashboard
 
 ---
 
-## Workflow 6: Onboarding New Team Member
+## Workflow 7: Onboarding New Team Member
 
 **Goal**: Get a new developer up to speed on team projects.
 
@@ -171,19 +211,23 @@ uv run dossier github sync-org your-team-org
 
 # Step 4: Launch dashboard and explore
 uv run dossier dashboard
+```
 
-# Navigation tips:
-#   j/k or arrows = navigate project list
-#   Tab = switch detail tabs
-#   / = search projects
-#   s = sync selected project
-#   o = open in GitHub browser
-#   ? = help
+**Navigation tips:**
+```
+Arrows / j,k   = Navigate project tree
+Tab            = Switch between panels
+Enter          = Expand/select tree node
+/              = Search projects
+s              = Sync selected project
+o              = Open in GitHub browser
+n / p          = Next/prev doc in viewer
+?              = Help
 ```
 
 ---
 
-## Workflow 7: Release Tracking
+## Workflow 8: Release Tracking
 
 **Goal**: Track versions and releases across projects.
 
@@ -203,7 +247,59 @@ cat fastapi_fastapi.dossier
 
 ---
 
-## Workflow 8: CI/CD Integration
+## Workflow 9: Entity Graph Building
+
+**Goal**: Build navigable entity graphs with proper disambiguation.
+
+```bash
+# Step 1: Sync some projects
+uv run dossier github sync-org your-org --limit 20
+
+# Step 2: Build entity graph for one project
+uv run dossier graph build your-org/main-repo
+
+# Step 3: View what was created
+uv run dossier graph stats
+```
+
+**Understanding Entity Scoping**:
+```bash
+# After building a graph, entities get unique names:
+
+# Repo-scoped (unique per repository):
+#   your-org/main-repo/branch/main
+#   your-org/main-repo/issue/123
+#   your-org/main-repo/pr/456
+#   your-org/main-repo/ver/v1.0.0
+#   your-org/main-repo/doc/readme
+
+# App-scoped (same user across all repos):
+#   github/user/contributor-name
+
+# Global (shared everywhere):
+#   lang/python
+#   pkg/fastapi
+
+# View a linked entity as a project
+uv run dossier projects show github/user/contributor-name
+uv run dossier projects show lang/python
+```
+
+**Build graphs for all projects**:
+```bash
+# Build graphs for everything
+uv run dossier graph build-all
+
+# Skip certain entity types
+uv run dossier graph build-all --no-issues --no-prs
+
+# Limit entities per project
+uv run dossier graph build-all --max-contributors 5 --max-issues 20
+```
+
+---
+
+## Workflow 10: CI/CD Integration
 
 **Goal**: Use Dossier in automated pipelines.
 
@@ -250,7 +346,7 @@ jobs:
 
 ---
 
-## Workflow 9: Backup & Migration
+## Workflow 11: Backup & Migration
 
 **Goal**: Export data for backup or migration to another machine.
 
@@ -275,7 +371,7 @@ uv run dossier projects list
 
 ---
 
-## Workflow 10: API-Driven Integration
+## Workflow 12: API-Driven Integration
 
 **Goal**: Build integrations using the REST API.
 
@@ -344,6 +440,15 @@ uv run dossier projects show owner/repo            # Show details
 uv run dossier export dossier owner/repo           # Export .dossier
 uv run dossier export show owner/repo              # Preview only
 uv run dossier export all -d ./exports             # Export all
+```
+
+### Graph
+```bash
+uv run dossier graph build owner/repo              # Build for one project
+uv run dossier graph build-all                     # Build for all projects
+uv run dossier graph stats                         # Show statistics
+uv run dossier graph build owner/repo --no-issues  # Skip issues
+uv run dossier graph build-all --max-contributors 5 # Limit entities
 ```
 
 ### Manage

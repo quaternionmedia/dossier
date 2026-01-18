@@ -10,7 +10,7 @@ Dossier is a **decentralized project tracking system** built for modern, distrib
 
 1. **Replaces proprietary trackers** — Unified view of issues, PRs, releases, dependencies across all your projects
 2. **Cache-merge architecture** — Work offline, sync incrementally, merge changes from multiple sources
-3. **Data-modeled** — 12 structured SQLModel schemas (not arbitrary fields) for consistent querying
+3. **Data-modeled** — 13 structured SQLModel schemas (not arbitrary fields) for consistent querying
 4. **Cross-domain** — Track projects across GitHub orgs, teams, repos — even non-GitHub sources
 5. **Fixed-layout TUI** — Consistent interface across all projects for keyboard-driven speed
 
@@ -47,43 +47,62 @@ Every piece of information in Dossier has a **typed schema** — not arbitrary J
 - Consistent exports and migrations
 - Reliable integrations via API
 
-### The 12 Data Models
+### The 13 Data Models
 
-| Model | Purpose | Linkable |
-|-------|---------|----------|
-| `Project` | Core entity — repos, orgs, collections | ✔️ |
-| `ProjectVersion` | Semver-parsed releases with metadata | ✔️ |
-| `DocumentSection` | Parsed docs at multiple detail levels | ✔️ |
-| `ProjectLanguage` | Language breakdown with extensions | ✔️ |
-| `ProjectBranch` | Branches with commit info | ✔️ |
-| `ProjectDependency` | Deps from manifests (pyproject, package.json) | ✔️ |
-| `ProjectContributor` | Top contributors by commit count | ✔️ |
-| `ProjectIssue` | Issues with state, labels, authors | ✔️ |
-| `ProjectPullRequest` | PRs with merge status, diff stats | ✔️ |
-| `ProjectRelease` | Releases with tags, prerelease flags | ✔️ |
-| `ProjectComponent` | Parent-child project relationships | ✔️ |
+| Model | Purpose | Linkable | Scoping |
+|-------|---------|----------|--------|
+| `Project` | Core entity — repos, orgs, collections | ✔️ | `owner/repo` |
+| `ProjectVersion` | Semver-parsed releases with metadata | ✔️ | `owner/repo/ver/v{version}` |
+| `DocumentSection` | Parsed docs at multiple detail levels | ✔️ | `owner/repo/doc/{slug}` |
+| `ProjectLanguage` | Language breakdown with extensions | ✔️ | `lang/{language}` (global) |
+| `ProjectBranch` | Branches with commit info | ✔️ | `owner/repo/branch/{name}` |
+| `ProjectDependency` | Deps from manifests (pyproject, package.json) | ✔️ | `pkg/{package}` (global) |
+| `ProjectContributor` | Top contributors by commit count | ✔️ | `github/user/{username}` (app) |
+| `ProjectIssue` | Issues with state, labels, authors | ✔️ | `owner/repo/issue/{number}` |
+| `ProjectPullRequest` | PRs with merge status, diff stats | ✔️ | `owner/repo/pr/{number}` |
+| `ProjectRelease` | Releases with tags, prerelease flags | ✔️ | `owner/repo/ver/v{tag}` |
+| `ProjectComponent` | Parent-child project relationships | ✔️ | — |
+| `Entity` | Named entities for graph linking | ✔️ | scoped by type |
+| `Link` | Relationships between entities | ✔️ | project/entity scoped |
 
-### Fixed-Layout TUI
+### Hierarchical TUI with Fixed Layouts
 
-The TUI uses **consistent layouts** regardless of which project you're viewing:
+The TUI uses **hierarchical project organization** and **consistent tab layouts**:
 
+**Project Tree (Left Panel):**
+```
+🏢 astral-sh (3)           # Organization grouping
+  🔄 ruff ⭐12000          # Repo with stars
+    📚 Docs (5)            # Inline documentation tree
+      📝 README.md         # Click to preview
+      📝 docs/guide.md
+  🔄 uv
+👤 Users (2)               # Global user entities
+  github/user/astral-sh
+💻 Languages (3)           # Global language entities
+  lang/python
+📦 Packages (5)            # Global package entities
+  pkg/fastapi
+```
+
+**Tab Panels (Right Panel):**
 ```
 ┌───────────────────────────────────────────────────┐
 │ Tab 1: Dossier    │ Overview with component tree      │
 │ Tab 2: Details    │ Metadata, links, timestamps       │
-│ Tab 3: Docs       │ Parsed documentation sections     │
+│ Tab 3: Docs       │ Tree view grouped by source file  │
 │ Tab 4: Languages  │ Language breakdown + extensions   │
 │ Tab 5: Branches   │ Branches with commit info         │
-│ Tab 6: Deps       │ Dependencies from manifests       │
+│ Tab 6: Deps       │ Dependencies (click to link)      │
 │ Tab 7: People     │ Contributors by commit count      │
-│ Tab 8: Issues     │ Open/closed issues with labels    │
-│ Tab 9: PRs        │ Pull requests with merge status   │
-│ Tab 10: Releases  │ Version releases with tags        │
+│ Tab 8: Issues     │ Issues (click to link entity)     │
+│ Tab 9: PRs        │ Pull requests (click to link)     │
+│ Tab 10: Releases  │ Version releases (click to link)  │
 │ Tab 11: Links     │ Component relationships           │
 └───────────────────────────────────────────────────┘
 ```
 
-**Why fixed layouts?** You learn the positions once. After a week, you navigate by muscle memory — Tab-Tab-Tab to Dependencies, every project, every time.
+**Why this design?** You learn the positions once. After a week, you navigate by muscle memory — Tab-Tab-Tab to Dependencies, every project, every time. The project tree groups repos by org, so you can quickly find projects across organizations.
 
 ### Cache-Merge Sync
 
@@ -98,6 +117,39 @@ This means:
 - ✔️ Fast reads (no network round-trips)
 - ✔️ You control when to sync
 
+### Entity Graphs & Disambiguation
+
+Every linkable entity gets a **unique, scoped project name** to avoid ambiguity:
+
+```
+# Repo-scoped (unique per repository)
+astral-sh/ruff/branch/main
+astral-sh/ruff/issue/123
+astral-sh/ruff/pr/456
+astral-sh/ruff/ver/v0.1.0
+astral-sh/ruff/doc/readme
+
+# App-scoped (same across all repos)
+github/user/charliermarsh
+
+# Global (same everywhere)
+lang/python
+pkg/fastapi
+```
+
+**Build entity graphs** to auto-link all entities in your projects:
+
+```bash
+# Build graph for one project
+uv run dossier graph build astral-sh/ruff
+
+# Build graphs for all synced projects
+uv run dossier graph build-all
+
+# View graph statistics
+uv run dossier graph stats
+```
+
 ## Interfaces (All Headless)
 
 Dossier is **headless-first** — every feature works without a browser.
@@ -110,9 +162,11 @@ The **Textual**-based dashboard is the primary interface:
 uv run dossier dashboard
 ```
 
+- **Hierarchical project tree** — Org grouping with inline docs
 - **Fixed tab layout** — Same positions, every project
-- **Keyboard-driven** — `Tab`, `j/k`, `/search`, `s`ync, `q`uit
-- **Component tree** — Navigate linked entities (docs, versions, issues, etc.)
+- **Keyboard-driven** — `Tab`, `j/k`, `/search`, `s`ync, `a`dd, `d`elete, `o`pen GitHub, `q`uit
+- **Content viewer** — Click tree items to preview docs, issues, and PRs inline
+- **Navigation** — Use `n`/`p` or `j`/`k` to browse between docs
 - **Multi-select** — Batch sync/delete with `Space` or `Ctrl+A`
 
 ### CLI
@@ -200,7 +254,7 @@ All data stored locally in `~/.dossier/dossier.db`:
 - Portable — copy the file to another machine
 - No server — no Docker, no PostgreSQL, no setup
 
-### 12 Data Tables
+### 13 Data Tables
 
 | Table | Purpose |
 |-------|---------|
@@ -215,6 +269,8 @@ All data stored locally in `~/.dossier/dossier.db`:
 | `project_issue` | Issues with labels |
 | `project_pull_request` | PRs with diff stats |
 | `project_release` | Releases with tags |
+| `entity` | Named entities for graph linking |
+| `link` | Entity relationships |
 
 ### Management Commands
 

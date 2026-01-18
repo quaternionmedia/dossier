@@ -42,7 +42,7 @@ git clone https://github.com/YOUR-USERNAME/dossier.git
 cd dossier
 
 # Add upstream remote
-git remote add upstream https://github.com/your-org/dossier.git
+git remote add upstream https://github.com/quaternionmedia/dossier.git
 ```
 
 ## Development Setup
@@ -83,8 +83,8 @@ uv run pytest
 # Run linting
 uv run ruff check .
 
-# Run type checking
-uv run mypy src/
+# Format code
+uv run ruff format .
 ```
 
 ## Making Changes
@@ -314,7 +314,6 @@ Aim for:
 - [ ] All tests pass (`uv run pytest`)
 - [ ] Code is formatted (`uv run ruff format .`)
 - [ ] Linting passes (`uv run ruff check .`)
-- [ ] Type checking passes (`uv run mypy src/`)
 - [ ] Documentation updated if needed
 - [ ] Commit messages follow conventions
 

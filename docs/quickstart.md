@@ -4,7 +4,29 @@
 
 ---
 
-Get Dossier up and running in under 5 minutes. By the end, you'll have a local cache of your projects with a keyboard-driven TUI for tracking issues, PRs, versions, and dependencies — no browser required.
+Get Dossier up and running in under 5 minutes. By the end, you'll have a local cache of your GitHub projects with a keyboard-driven TUI for tracking issues, PRs, versions, and dependencies — no browser required.
+
+## TL;DR - Copy-Paste Quick Start
+
+```bash
+# 1. Clone and install
+git clone https://github.com/quaternionmedia/dossier.git
+cd dossier
+uv sync
+
+# 2. Set GitHub token (get one at https://github.com/settings/tokens)
+export GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+
+# 3. Sync your repos
+uv run dossier github sync-user YOUR_GITHUB_USERNAME
+
+# 4. Launch dashboard
+uv run dossier dashboard
+```
+
+**That's it!** You now have a local project tracker. Read on for details.
+
+---
 
 ## Prerequisites
 
@@ -67,12 +89,15 @@ uv run dossier dashboard
 | `r` | Refresh project list |
 | `s` | Sync selected project(s) |
 | `a` | Add new project |
-| `o` | Open GitHub in browser |
+| `o` | Open GitHub in browser (context-aware) |
 | `d` | Delete selected project(s) |
-| `/` | Focus search |
-| `f` | Cycle filter (All → Synced → Unsynced) |
+| `l` | Link selected tree item as project |
+| `/` | Focus search / command bar |
+| `f` | Cycle filter (All → Synced → Unsynced → Starred) |
 | `?` | Show help |
 | `Tab` | Navigate panels |
+| `n` / `p` | Next/Previous document (in viewer) |
+| `j` / `k` | Next/Previous document (vim-style) |
 
 ### Multi-Selection
 
@@ -86,18 +111,50 @@ uv run dossier dashboard
 
 Selected projects are highlighted. Use with Sync (`s`) or Delete (`d`) for batch operations.
 
-The dashboard shows:
-- **Project List** - Searchable list with sync status (🔄/○) and star counts
+### Hierarchical Project Browser
+
+The left panel shows a **tree view** of all projects, automatically organized:
+
+```
+🏢 astral-sh (3)           # Organization group
+  🔄 ruff ⭐12000          # Synced repo with stars
+    📚 Docs (5)            # Documentation tree
+      📝 README.md         # Click to open viewer
+      📝 docs/guide.md
+  🔄 uv ⭐8000
+👤 Users (2)               # Contributors category
+  github/user/astral-sh
+💻 Languages (3)           # Global language entities
+  lang/python
+  lang/rust
+📦 Packages (5)            # Global package entities
+  pkg/fastapi
+  pkg/click
+```
+
+**Click any doc node** to open the markdown viewer with prev/next navigation.
+
+### Content Viewer
+
+Click on documentation, issues, or PRs in the tree to open the **content viewer**:
+
+- **File path shown in title** - See exactly which file you're viewing
+- **Prev/Next navigation** - Browse through related documents
+- **Keyboard shortcuts** - `n`/`p` or `j`/`k` to navigate, `q` to close
+- **Open in browser** - Jump to GitHub for full context
+
+### ### The dashboard shows:
+- **Project Tree** - Hierarchical browser with org grouping and inline docs
 - **Dossier Tab** - Formatted project overview with component tree (languages, dependencies, contributors)
 - **Details Tab** - Project metadata, clickable GitHub links, timestamps
-- **Documentation Tab** - Parsed documentation sections
+- **Documentation Tab** - Tree view of docs grouped by source file (click to preview)
 - **Languages Tab** - Language breakdown with file extensions and encoding
 - **Branches Tab** - Repository branches with default/protected status, latest commits
-- **Dependencies Tab** - Clickable links to PyPI/npm packages
-- **Contributors Tab** - Top contributors with clickable GitHub profile links
-- **Issues Tab** - Clickable issue numbers linking to GitHub
-- **Pull Requests Tab** - PRs with merge status and diff stats
-- **Releases Tab** - Version releases with tags
+- **Dependencies Tab** - Clickable links to entity projects (creates `pkg/name` entities)
+- **Contributors Tab** - Top contributors (non-clickable, view only)
+- **Issues Tab** - Click to navigate to issue entity (`owner/repo/issue/123`)
+- **Pull Requests Tab** - PRs with merge status (click to navigate to PR entity)
+- **Releases Tab** - Version releases with tags (click to navigate to version entity)
 - **Components Tab** - Child project relationships
 
 ## GitHub Authentication Setup
@@ -338,6 +395,8 @@ uv run dossier projects show owner/repo
 
 **For more detailed workflows, see [Workflows & Examples](workflows.md).**
 
+**For complete dashboard documentation, see [Dashboard Guide](dashboard.md).**
+
 ## Troubleshooting
 
 ### Rate limit errors
@@ -353,6 +412,20 @@ uv run dossier projects show owner/repo
 ```bash
 # Check if project exists
 uv run dossier projects list | grep project-name
+
+# Note: Use full name with owner
+uv run dossier projects show owner/repo  # ✅ Correct
+uv run dossier projects show repo        # ❌ Won't work
+```
+
+### Dashboard not showing projects
+
+```bash
+# Make sure you've synced some projects
+uv run dossier github sync-user YOUR_USERNAME
+
+# Check project count
+uv run dossier dev status
 ```
 
 ### Database issues
@@ -363,6 +436,9 @@ uv run dossier dev status
 
 # Reset if needed
 uv run dossier dev reset -y
+
+# Run migrations
+uv run dossier db upgrade
 ```
 
 ### Timezone errors
@@ -371,6 +447,7 @@ If you see `TypeError: can't subtract offset-naive and offset-aware datetimes`, 
 
 ## Next Steps
 
+- [Dashboard Guide](dashboard.md) — Complete TUI reference with all shortcuts
 - [Workflows & Examples](workflows.md) — Copy-paste ready examples for common use cases
 - [Understand the Architecture](architecture.md) — How it works under the hood
 - [Extending Dossier](extending.md) — Customize for your needs

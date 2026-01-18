@@ -28,7 +28,8 @@ dossier/
 │       ├── parsers/
 │       │   ├── __init__.py
 │       │   ├── base.py     # Documentation parsers
-│       │   └── github.py   # GitHub API client
+│       │   ├── github.py   # GitHub API client
+│       │   └── autolinker.py # Entity graph builder
 │       └── tui/
 │           ├── __init__.py
 │           └── app.py      # Textual TUI dashboard
@@ -45,8 +46,12 @@ dossier/
 │   ├── index.md
 │   ├── overview.md
 │   ├── quickstart.md
+│   ├── dashboard.md    # TUI dashboard guide
+│   ├── workflows.md
 │   ├── architecture.md
-│   └── contributing.md
+│   ├── extending.md
+│   ├── contributing.md
+│   └── roadmap.md
 ├── pyproject.toml
 └── README.md
 ```
@@ -54,7 +59,8 @@ dossier/
 ## Data Models
 
 ### Core Models (in schemas.py)
-- **Project** - Main project entity with GitHub metadata
+- **Project** - Main project entity with GitHub metadata and URL helper methods
+- **ProjectVersion** - Semver-parsed releases with metadata
 - **DocumentSection** - Parsed documentation content with levels
 - **ProjectComponent** - Parent-child project relationships
 - **ProjectLanguage** - Language breakdown with file_extensions and encoding
@@ -64,6 +70,8 @@ dossier/
 - **ProjectIssue** - Issues with state, labels, and authors
 - **ProjectPullRequest** - PRs with merge status, branches, and diff stats
 - **ProjectRelease** - Version releases with tags and prerelease status
+- **Entity** - Named entities for graph linking
+- **Link** - Relationships between entities
 
 ## Development Commands
 - `uv run dossier` - Run CLI
@@ -94,6 +102,17 @@ dossier/
 - `uv run dossier export show owner/repo` - Preview dossier (no save)
 - `uv run dossier export all -d ./exports` - Export all projects
 - `uv run dossier init projectname` - Create template .dossier file
+
+## Graph Commands (Entity Linking)
+- `uv run dossier graph build owner/repo` - Build entity graph for one project
+- `uv run dossier graph build-all` - Build graphs for all synced projects
+- `uv run dossier graph stats` - Show graph statistics
+
+### Entity Scoping Patterns
+Entities are namespaced for disambiguation:
+- **Global**: `lang/{language}`, `pkg/{package}` (same everywhere)
+- **App-scoped**: `github/user/{username}` (same user across all repos)
+- **Repo-scoped**: `{owner}/{repo}/branch/{name}`, `{owner}/{repo}/issue/{number}`, `{owner}/{repo}/pr/{number}`, `{owner}/{repo}/ver/v{version}`, `{owner}/{repo}/doc/{slug}`
 
 ## Database Migration Commands
 - `uv run dossier db upgrade` - Apply pending migrations

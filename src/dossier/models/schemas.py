@@ -37,7 +37,8 @@ class Project(SQLModel, table=True):
     """A project being documented."""
     
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(index=True, unique=True)
+    name: str = Field(index=True, unique=True)  # Short name or owner/repo
+    full_name: Optional[str] = Field(default=None, index=True)  # owner/repo format
     description: Optional[str] = None
     repository_url: Optional[str] = None
     documentation_path: Optional[str] = None
@@ -51,6 +52,113 @@ class Project(SQLModel, table=True):
     
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+    
+    def get_full_name(self) -> str:
+        """Get owner/repo format name, computing it if not stored."""
+        if self.full_name:
+            return self.full_name
+        if self.github_owner and self.github_repo:
+            return f"{self.github_owner}/{self.github_repo}"
+        # Try to extract from repository_url
+        if self.repository_url:
+            url = self.repository_url.rstrip("/")
+            if "github.com" in url:
+                parts = url.split("github.com/")[-1].split("/")
+                if len(parts) >= 2:
+                    return f"{parts[0]}/{parts[1]}"
+        # Try to extract from name if it has / format
+        if "/" in self.name:
+            return self.name
+        return self.name
+    
+    @property
+    def github_url(self) -> Optional[str]:
+        """Get the GitHub repository URL, constructing it if necessary."""
+        if self.repository_url:
+            return self.repository_url
+        if self.github_owner and self.github_repo:
+            return f"https://github.com/{self.github_owner}/{self.github_repo}"
+        # Try from full_name
+        if self.full_name and "/" in self.full_name:
+            return f"https://github.com/{self.full_name}"
+        # Try to construct from name if it looks like owner/repo
+        if "/" in self.name:
+            return f"https://github.com/{self.name}"
+        return None
+    
+    @property
+    def github_owner_url(self) -> Optional[str]:
+        """Get the GitHub owner (user/org) URL."""
+        owner = self._get_owner()
+        if owner:
+            return f"https://github.com/{owner}"
+        return None
+    
+    def _get_owner(self) -> Optional[str]:
+        """Extract owner from various sources."""
+        if self.github_owner:
+            return self.github_owner
+        if self.full_name and "/" in self.full_name:
+            return self.full_name.split("/")[0]
+        if self.repository_url:
+            url = self.repository_url.rstrip("/")
+            if "github.com" in url:
+                parts = url.split("github.com/")[-1].split("/")
+                if parts:
+                    return parts[0]
+        if "/" in self.name:
+            return self.name.split("/")[0]
+        return None
+    
+    def _get_repo(self) -> Optional[str]:
+        """Extract repo name from various sources."""
+        if self.github_repo:
+            return self.github_repo
+        if self.full_name and "/" in self.full_name:
+            return self.full_name.split("/")[-1]
+        if self.repository_url:
+            url = self.repository_url.rstrip("/")
+            if "github.com" in url:
+                parts = url.split("github.com/")[-1].split("/")
+                if len(parts) >= 2:
+                    return parts[1]
+        if "/" in self.name:
+            return self.name.split("/")[-1]
+        return self.name
+    
+    def github_issues_url(self, issue_number: Optional[int] = None) -> Optional[str]:
+        """Get URL for issues or a specific issue."""
+        base = self.github_url
+        if not base:
+            return None
+        if issue_number:
+            return f"{base}/issues/{issue_number}"
+        return f"{base}/issues"
+    
+    def github_pulls_url(self, pr_number: Optional[int] = None) -> Optional[str]:
+        """Get URL for PRs or a specific PR."""
+        base = self.github_url
+        if not base:
+            return None
+        if pr_number:
+            return f"{base}/pull/{pr_number}"
+        return f"{base}/pulls"
+    
+    def github_branch_url(self, branch_name: str) -> Optional[str]:
+        """Get URL for a specific branch."""
+        base = self.github_url
+        if not base:
+            return None
+        return f"{base}/tree/{branch_name}"
+    
+    def github_releases_url(self, tag: Optional[str] = None) -> Optional[str]:
+        """Get URL for releases or a specific release."""
+        base = self.github_url
+        if not base:
+            return None
+        if tag:
+            return f"{base}/releases/tag/{tag}"
+        return f"{base}/releases"
 
 
 class DocumentSection(SQLModel, table=True):

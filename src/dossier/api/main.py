@@ -16,6 +16,7 @@ from dossier.models import (
     DocumentSection,
     Project,
     ProjectComponent,
+    utcnow,
 )
 from dossier.parsers import GitHubClient, GitHubParser
 
@@ -248,7 +249,8 @@ def sync_github_repo(request: GitHubSyncRequest) -> GitHubSyncResponse:
                     detail=f"Error fetching repository: {str(e)}",
                 )
             
-            project_name = request.name or repo.name
+            # Use owner/repo format for disambiguation
+            project_name = request.name or f"{repo.owner}/{repo.name}"
             
             # Check if project exists
             existing = session.exec(
@@ -258,6 +260,12 @@ def sync_github_repo(request: GitHubSyncRequest) -> GitHubSyncResponse:
             if existing:
                 existing.description = request.description or repo.description
                 existing.repository_url = repo.html_url
+                existing.github_owner = repo.owner
+                existing.github_repo = repo.name
+                existing.github_stars = repo.stars
+                existing.github_language = repo.language
+                existing.last_synced_at = utcnow()
+                existing.updated_at = utcnow()
                 project = existing
                 
                 # Remove old sections
@@ -271,8 +279,14 @@ def sync_github_repo(request: GitHubSyncRequest) -> GitHubSyncResponse:
             else:
                 project = Project(
                     name=project_name,
+                    full_name=f"{repo.owner}/{repo.name}",
                     description=request.description or repo.description,
                     repository_url=repo.html_url,
+                    github_owner=repo.owner,
+                    github_repo=repo.name,
+                    github_stars=repo.stars,
+                    github_language=repo.language,
+                    last_synced_at=utcnow(),
                 )
                 session.add(project)
                 session.flush()

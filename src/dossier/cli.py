@@ -578,6 +578,7 @@ def github_sync(
                 click.echo(f"Creating new project: {project_name}")
                 project = Project(
                     name=project_name,
+                    full_name=f"{repo.owner}/{repo.name}",
                     description=description or repo.description,
                     repository_url=repo.html_url,
                     github_owner=repo.owner,
@@ -933,6 +934,7 @@ def _sync_repos_batch(
                         else:
                             project = Project(
                                 name=project_name,
+                                full_name=f"{repo.owner}/{repo.name}",
                                 description=repo.description,
                                 repository_url=repo.html_url,
                                 github_owner=repo.owner,
@@ -1213,6 +1215,7 @@ def github_sync_user(
                 click.echo(f"Creating parent project: {parent}")
                 parent_project = Project(
                     name=parent,
+                    full_name=f"github/user/{username}",
                     description=f"GitHub repositories for {username}",
                     github_owner=username,
                 )
@@ -1313,6 +1316,7 @@ def github_sync_org(
                 click.echo(f"Creating parent project: {parent}")
                 parent_project = Project(
                     name=parent,
+                    full_name=f"github/org/{org}",
                     description=f"GitHub repositories for {org}",
                     github_owner=org,
                 )
@@ -1782,6 +1786,7 @@ def dev_seed(example: bool) -> None:
             # Create a sample project
             project = Project(
                 name="example-project",
+                full_name="example/project",
                 description="An example project for testing Dossier",
                 repository_url="https://github.com/example/project",
                 documentation_path="./docs",
@@ -2134,6 +2139,257 @@ def db_stamp(revision: str) -> None:
     except Exception as e:
         click.echo(click.style(f"✗ Failed to stamp: {e}", fg="red"))
         raise click.Abort()
+
+
+# =============================================================================
+# Graph/Autolinker Commands
+# =============================================================================
+
+
+@cli.group("graph")
+def graph_group() -> None:
+    """Build and manage entity/link graphs.
+    
+    Automatically discover and link entities within projects to build
+    a hierarchical graph of related projects.
+    
+    Entity Scoping:
+      - Global: lang/*, pkg/* (same entity everywhere)
+      - App-scoped: github/user/* (same user across all repos)
+      - Repo-scoped: owner/repo/branch/*, owner/repo/issue/*, etc.
+    
+    Examples:
+        dossier graph build owner/repo    Build graph for one project
+        dossier graph build-all           Build graphs for all projects
+        dossier graph stats               Show graph statistics
+    """
+    pass
+
+
+@graph_group.command("build")
+@click.argument("project_name")
+@click.option("--no-contributors", is_flag=True, help="Skip contributors")
+@click.option("--no-languages", is_flag=True, help="Skip languages")
+@click.option("--no-dependencies", is_flag=True, help="Skip dependencies")
+@click.option("--no-branches", is_flag=True, help="Skip branches")
+@click.option("--no-issues", is_flag=True, help="Skip issues")
+@click.option("--no-prs", is_flag=True, help="Skip pull requests")
+@click.option("--no-versions", is_flag=True, help="Skip versions/releases")
+@click.option("--no-docs", is_flag=True, help="Skip documentation")
+@click.option("--max-contributors", default=10, help="Max contributors to link")
+@click.option("--max-issues", default=50, help="Max issues to link")
+@click.option("--max-prs", default=50, help="Max PRs to link")
+def graph_build(
+    project_name: str,
+    no_contributors: bool,
+    no_languages: bool,
+    no_dependencies: bool,
+    no_branches: bool,
+    no_issues: bool,
+    no_prs: bool,
+    no_versions: bool,
+    no_docs: bool,
+    max_contributors: int,
+    max_issues: int,
+    max_prs: int,
+) -> None:
+    """Build entity graph for a project.
+    
+    PROJECT_NAME is the project to build graph for (e.g., owner/repo).
+    
+    This command discovers all entities (contributors, languages, dependencies,
+    branches, issues, PRs, versions, docs) and creates linked project nodes
+    for each, building a navigable entity graph.
+    
+    Examples:
+        dossier graph build microsoft/vscode
+        dossier graph build astral-sh/ruff --no-issues --no-prs
+        dossier graph build myorg/myrepo --max-contributors 5
+    """
+    from dossier.parsers.autolinker import AutoLinker
+    
+    with get_session() as session:
+        project = session.exec(
+            select(Project).where(Project.name == project_name)
+        ).first()
+        
+        if not project:
+            click.echo(click.style(f"Project '{project_name}' not found", fg="red"))
+            raise click.Abort()
+        
+        click.echo(f"🔗 Building entity graph for {project_name}...")
+        
+        linker = AutoLinker(session)
+        stats = linker.build_graph(
+            project,
+            include_contributors=not no_contributors,
+            include_languages=not no_languages,
+            include_dependencies=not no_dependencies,
+            include_branches=not no_branches,
+            include_issues=not no_issues,
+            include_prs=not no_prs,
+            include_versions=not no_versions,
+            include_docs=not no_docs,
+            max_contributors=max_contributors,
+            max_issues=max_issues,
+            max_prs=max_prs,
+        )
+        
+        click.echo(f"\n✓ Graph built successfully!")
+        click.echo(f"  Projects: {stats.projects_created} created, {stats.projects_found} existing")
+        click.echo(f"  Links: {stats.links_created} created, {stats.links_found} existing")
+        
+        if stats.errors:
+            click.echo(click.style(f"\n⚠ {len(stats.errors)} errors occurred:", fg="yellow"))
+            for error in stats.errors[:5]:
+                click.echo(f"    • {error}")
+            if len(stats.errors) > 5:
+                click.echo(f"    ... and {len(stats.errors) - 5} more")
+
+
+@graph_group.command("build-all")
+@click.option("--no-contributors", is_flag=True, help="Skip contributors")
+@click.option("--no-languages", is_flag=True, help="Skip languages")
+@click.option("--no-dependencies", is_flag=True, help="Skip dependencies")
+@click.option("--no-branches", is_flag=True, help="Skip branches")
+@click.option("--no-issues", is_flag=True, help="Skip issues")
+@click.option("--no-prs", is_flag=True, help="Skip pull requests")
+@click.option("--no-versions", is_flag=True, help="Skip versions/releases")
+@click.option("--no-docs", is_flag=True, help="Skip documentation")
+@click.option("--max-contributors", default=10, help="Max contributors per project")
+@click.option("--max-issues", default=50, help="Max issues per project")
+@click.option("--max-prs", default=50, help="Max PRs per project")
+def graph_build_all(
+    no_contributors: bool,
+    no_languages: bool,
+    no_dependencies: bool,
+    no_branches: bool,
+    no_issues: bool,
+    no_prs: bool,
+    no_versions: bool,
+    no_docs: bool,
+    max_contributors: int,
+    max_issues: int,
+    max_prs: int,
+) -> None:
+    """Build entity graphs for all synced projects.
+    
+    This processes all projects with GitHub owner/repo info and builds
+    their entity graphs, creating a fully-linked knowledge base.
+    
+    Examples:
+        dossier graph build-all
+        dossier graph build-all --no-issues --no-prs
+        dossier graph build-all --max-contributors 5
+    """
+    from dossier.parsers.autolinker import AutoLinker
+    
+    with get_session() as session:
+        # Count projects first
+        projects = session.exec(
+            select(Project).where(
+                Project.github_owner.isnot(None),
+                Project.github_repo.isnot(None),
+            )
+        ).all()
+        
+        if not projects:
+            click.echo(click.style("No synced projects found", fg="yellow"))
+            return
+        
+        click.echo(f"🔗 Building entity graphs for {len(projects)} projects...")
+        
+        linker = AutoLinker(session)
+        total_stats = linker.build_all_graphs(
+            include_contributors=not no_contributors,
+            include_languages=not no_languages,
+            include_dependencies=not no_dependencies,
+            include_branches=not no_branches,
+            include_issues=not no_issues,
+            include_prs=not no_prs,
+            include_versions=not no_versions,
+            include_docs=not no_docs,
+            max_contributors=max_contributors,
+            max_issues=max_issues,
+            max_prs=max_prs,
+        )
+        
+        click.echo(f"\n✓ All graphs built successfully!")
+        click.echo(f"  Projects: {total_stats.projects_created} created, {total_stats.projects_found} existing")
+        click.echo(f"  Links: {total_stats.links_created} created, {total_stats.links_found} existing")
+        
+        if total_stats.errors:
+            click.echo(click.style(f"\n⚠ {len(total_stats.errors)} errors occurred", fg="yellow"))
+
+
+@graph_group.command("stats")
+def graph_stats() -> None:
+    """Show graph statistics.
+    
+    Display counts of projects and links by type, showing the
+    structure of the entity graph.
+    """
+    with get_session() as session:
+        # Count projects by type
+        all_projects = session.exec(select(Project)).all()
+        
+        # Categorize by prefix
+        categories = {
+            "GitHub Repos": 0,
+            "Users (github/user/)": 0,
+            "Languages (lang/)": 0,
+            "Packages (pkg/)": 0,
+            "Branches": 0,
+            "Issues": 0,
+            "PRs": 0,
+            "Versions": 0,
+            "Docs": 0,
+            "Other": 0,
+        }
+        
+        for p in all_projects:
+            name = p.name
+            if name.startswith("github/user/"):
+                categories["Users (github/user/)"] += 1
+            elif name.startswith("lang/"):
+                categories["Languages (lang/)"] += 1
+            elif name.startswith("pkg/"):
+                categories["Packages (pkg/)"] += 1
+            elif "/branch/" in name:
+                categories["Branches"] += 1
+            elif "/issue/" in name:
+                categories["Issues"] += 1
+            elif "/pr/" in name:
+                categories["PRs"] += 1
+            elif "/ver/" in name:
+                categories["Versions"] += 1
+            elif "/doc/" in name:
+                categories["Docs"] += 1
+            elif "/" in name and not any(x in name for x in ["/branch/", "/issue/", "/pr/", "/ver/", "/doc/"]):
+                categories["GitHub Repos"] += 1
+            else:
+                categories["Other"] += 1
+        
+        # Count links by type
+        links = session.exec(select(ProjectComponent)).all()
+        link_types: dict[str, int] = {}
+        for link in links:
+            rel_type = link.relationship_type or "unknown"
+            link_types[rel_type] = link_types.get(rel_type, 0) + 1
+        
+        click.echo("📊 Graph Statistics\n")
+        click.echo("Projects by Type:")
+        for cat, count in categories.items():
+            if count > 0:
+                click.echo(f"  {cat}: {count}")
+        click.echo(f"  {'─' * 30}")
+        click.echo(f"  Total: {len(all_projects)}")
+        
+        click.echo("\nLinks by Relationship:")
+        for rel_type, count in sorted(link_types.items()):
+            click.echo(f"  {rel_type}: {count}")
+        click.echo(f"  {'─' * 30}")
+        click.echo(f"  Total: {len(links)}")
 
 
 # =============================================================================

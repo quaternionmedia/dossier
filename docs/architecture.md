@@ -14,7 +14,7 @@ Dossier uses an **offline-first, cache-merge** pattern:
 
 ### 2. Data-Modeled, Not Schema-Free
 Every entity has a **defined SQLModel schema**:
-- 12 tables with typed fields and relationships
+- 13 tables with typed fields and relationships
 - Foreign keys enforce data integrity
 - Query with SQL, not arbitrary JSON paths
 
@@ -65,28 +65,40 @@ class DossierApp(App):
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("r", "refresh", "Refresh"),
-        ("s", "sync_project", "Sync"),
-        ("a", "add_project", "Add"),
-        ("d", "delete_project", "Delete"),
-        ("slash", "focus_search", "Search"),
-        ("question_mark", "show_help", "Help"),
+        ("s", "sync", "Sync"),
+        ("a", "add", "Add Project"),
+        ("o", "open_github", "Open GitHub"),
+        ("/", "search", "Search"),
+        ("f", "cycle_filter", "Filter"),
+        ("?", "help", "Help"),
+        ("l", "link_selected", "Link as Project"),
+        ("d", "delete", "Delete"),
     ]
 ```
 
 Components:
-- `ProjectListItem` - Individual project in list view
 - `ProjectDetailPanel` - Tabbed detail view
 - `SyncStatusWidget` - Sync status indicator
 - `StatsWidget` - Project statistics
+- `ContentViewerScreen` - Modal for viewing docs/issues/PRs with prev/next navigation
 
-Tabs (8 total):
+Project Tree Features:
+- **Hierarchical grouping** - Projects organized by org (`🏢 owner`)
+- **Inline documentation** - Docs tree under each repo (`📚 Docs`)
+- **Entity categories** - Users (`👤`), Languages (`💻`), Packages (`📦`)
+- **Click to navigate** - Select docs to open viewer, entities to link
+
+Tabs (11 total):
+- **Dossier** - Formatted project overview with component tree
 - **Details** - Project info, GitHub metadata, clickable links
-- **Documentation** - Parsed doc sections table
+- **Documentation** - Tree view grouped by source file (click to preview)
 - **Languages** - Language breakdown with file extensions and encoding
 - **Branches** - Repository branches with default/protected status, latest commits
-- **Dependencies** - Runtime/dev/optional deps from manifest files
+- **Dependencies** - Runtime/dev/optional deps (click to link entity)
 - **Contributors** - Top contributors by commit count
-- **Issues** - Open/closed issues with labels
+- **Issues** - Open/closed issues (click to link entity)
+- **PRs** - Pull requests with merge status (click to link entity)
+- **Releases** - Version releases (click to link entity)
 - **Components** - Child project relationships
 
 #### Command Explorer (`trogon` integration)
@@ -131,6 +143,10 @@ dossier
 │   ├── seed
 │   ├── vacuum
 │   └── dump
+├── graph           # Entity graph building
+│   ├── build       # Build graph for one project
+│   ├── build-all   # Build graphs for all projects
+│   └── stats       # Show graph statistics
 ├── serve           # API server
 ├── dashboard       # TUI dashboard
 └── tui             # Command explorer
@@ -165,13 +181,14 @@ Endpoints:
 
 #### Data Models (`src/dossier/models/schemas.py`)
 
-Dossier uses **12 typed SQLModel schemas** — not arbitrary JSON. This enables SQL queries, consistent exports, and reliable API contracts.
+Dossier uses **13 typed SQLModel schemas** — not arbitrary JSON. This enables SQL queries, consistent exports, and reliable API contracts.
 
 ```python
 # Core entity
 class Project(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True)  # "owner/repo" or custom
+    full_name: str | None = Field(default=None, index=True)  # Computed from various sources
     description: str = ""
     github_stars: int = 0
     last_synced: datetime | None = None
@@ -202,12 +219,36 @@ class ProjectIssue(SQLModel, table=True):       # Issues + labels
 class ProjectPullRequest(SQLModel, table=True): # PRs + diff stats
 class ProjectRelease(SQLModel, table=True):     # Releases + tags
 class ProjectComponent(SQLModel, table=True):   # Parent-child links
+
+# Entity graph models
+class Entity(SQLModel, table=True):             # Named entities for linking
+class Link(SQLModel, table=True):               # Entity relationships
 ```
 
 **Why typed schemas?**
 - Query across your portfolio: `SELECT * FROM project_issue WHERE state = 'open'`
 - Consistent exports: Every `.dossier` file has the same structure
 - API contracts: Clients know exactly what to expect
+
+#### Entity Scoping & Disambiguation
+
+Every linkable entity gets a unique, namespaced project identifier:
+
+| Scope | Pattern | Example | Rationale |
+|-------|---------|---------|----------|
+| **Global** | `lang/{language}` | `lang/python` | Same language everywhere |
+| **Global** | `pkg/{package}` | `pkg/fastapi` | Same package everywhere |
+| **App-scoped** | `github/user/{username}` | `github/user/astral-sh` | Same user across all GitHub repos |
+| **Repo-scoped** | `{owner}/{repo}/branch/{name}` | `astral-sh/ruff/branch/main` | Branches are per-repo |
+| **Repo-scoped** | `{owner}/{repo}/issue/{number}` | `astral-sh/ruff/issue/123` | Issues are per-repo |
+| **Repo-scoped** | `{owner}/{repo}/pr/{number}` | `astral-sh/ruff/pr/456` | PRs are per-repo |
+| **Repo-scoped** | `{owner}/{repo}/ver/v{version}` | `astral-sh/ruff/ver/v0.1.0` | Versions are per-repo |
+| **Repo-scoped** | `{owner}/{repo}/doc/{slug}` | `astral-sh/ruff/doc/readme` | Docs are per-repo |
+
+**Why scoping matters:**
+- `issue/123` could be from any repo — ambiguous
+- `astral-sh/ruff/issue/123` is unambiguous and navigable
+- Contributors are app-scoped because the same GitHub user contributes to multiple repos
 
 #### Parsers
 
@@ -263,6 +304,25 @@ class RateLimitInfo:
     def is_limited(self) -> bool:
         return self.remaining <= 0
 ```
+
+**AutoLinker** (`src/dossier/parsers/autolinker.py`):
+
+Automatically builds entity graphs from synced project data:
+
+```python
+class AutoLinker:
+    """Automatically builds entity/link graphs from project data."""
+    
+    def build_graph(self, project: Project, **options) -> LinkStats:
+        """Build entity graph for a single project."""
+        pass
+    
+    def build_all_graphs(self, **options) -> LinkStats:
+        """Build graphs for all synced projects."""
+        pass
+```
+
+Entity linking follows the scoping patterns above — contributors become `github/user/{username}`, languages become `lang/{language}`, and repo-specific entities get the full `{owner}/{repo}/{type}/{id}` path.
 
 #### Database
 

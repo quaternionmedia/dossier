@@ -12,12 +12,16 @@ Dossier aims to be the **decentralized alternative to Jira** — a data-modeled,
 
 Dossier currently provides:
 
-- ✅ **12 data models** — Projects, Versions, Docs, Languages, Branches, Dependencies, Contributors, Issues, PRs, Releases, Components
+- ✅ **13 data models** — Projects, Versions, Docs, Languages, Branches, Dependencies, Contributors, Issues, PRs, Releases, Components, Entities, Links
 - ✅ **Cache-merge sync** — GitHub repos, users, and organizations with offline-first SQLite
 - ✅ **Fixed-layout TUI** — 11 tabs with consistent navigation across all projects
 - ✅ **Linkable entities** — Every data model element navigable in the component tree
+- ✅ **Content viewer** — Click tree items to preview docs, issues, and PRs inline
+- ✅ **Entity graphs** — Auto-build scoped entity graphs with disambiguation
+- ✅ **Vim-style commands** — `:q`, `:r`, `:s`, `:filter`, `:sort`, `:clear` in command bar
 - ✅ **Headless interfaces** — CLI, TUI dashboard, REST API
 - ✅ **Portable exports** — `.dossier` YAML files for sharing
+- ✅ **Database migrations** — Alembic-managed schema evolution
 
 ---
 
@@ -48,7 +52,7 @@ Dossier currently provides:
 
 ### 1.3 Dependency Graph
 
-- **Auto-Link Dependencies** - Parse manifests:
+- ✅ **Auto-Link Dependencies** - Parse manifests:
   - `pyproject.toml`, `package.json`, `Cargo.toml`
   - Create `ProjectComponent` links automatically
   - Visualize in TUI component tree
@@ -169,8 +173,8 @@ We welcome contributions! See [contributing.md](contributing.md) for guidelines.
 
 ### Current Priorities
 
-1. 🔴 **Multi-Org Workspaces** - Track projects across GitHub orgs
-2. 🔴 **Dependency Graph** - Auto-link from manifests
+1. � **Multi-Org Workspaces** - Track projects across GitHub orgs
+2. ✅ **Dependency Graph** - Auto-link from manifests (implemented)
 3. 🟡 **Kanban Board Tab** - Card-based issue view in TUI
 4. 🟡 **GitLab Support** - Second forge integration
 5. 🟢 **Sprint Planning** - Time-boxed iteration support

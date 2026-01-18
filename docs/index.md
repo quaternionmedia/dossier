@@ -7,8 +7,9 @@
 | Document | Description |
 |----------|-------------|
 | [Quickstart](quickstart.md) | Get running in 5 minutes |
-| [Workflows](workflows.md) | Copy-paste ready examples |
+| [Dashboard Guide](dashboard.md) | Complete TUI dashboard reference |
 | [Overview](overview.md) | Core concepts and use cases |
+| [Workflows](workflows.md) | Copy-paste ready examples |
 | [Architecture](architecture.md) | Cache-merge design and data models |
 | [Extending](extending.md) | Customize for personal/team needs |
 | [Contributing](contributing.md) | Development guide |
@@ -21,7 +22,7 @@ Dossier is a **decentralized project tracking system** designed for teams workin
 - **Jira replacement** — Issues, PRs, releases, versions in one unified view
 - **Offline-first** — Local SQLite cache, sync when you have connectivity  
 - **Cross-domain** — Track projects across GitHub orgs, teams, even non-Git sources
-- **Data-modeled** — 12 structured schemas, not arbitrary JSON blobs
+- **Data-modeled** — 13 structured schemas, not arbitrary JSON blobs
 - **Headless-native** — CLI, TUI, API — no browser tax
 
 ## Key Benefits
@@ -33,10 +34,13 @@ Stop paying per-seat for Jira, Linear, or Notion. Dossier is free, open-source, 
 Work offline, sync when connected. No real-time websockets, no polling, no network dependency for reads.
 
 ### 📊 Data-Modeled, Not Schema-Free
-12 typed SQLModel schemas with relationships — query with SQL, not arbitrary JSON paths.
+13 typed SQLModel schemas with relationships — query with SQL, not arbitrary JSON paths.
 
 ### 🌐 Cross-Domain Tracking
 Unified view across multiple GitHub orgs, teams, repos. One dashboard, consistent layouts.
+
+### 📂 Hierarchical Project Browser
+Projects auto-organized by org with inline documentation tree. Click docs to preview with prev/next navigation.
 
 ### ⌨️ Fixed-Layout TUI
 Same 11 tabs, same keybindings, every project. Build muscle memory, gain speed.
@@ -60,7 +64,7 @@ Same 11 tabs, same keybindings, every project. Build muscle memory, gain speed.
 ### 1. Install
 
 ```bash
-git clone https://github.com/your-org/dossier.git
+git clone https://github.com/quaternionmedia/dossier.git
 cd dossier
 uv sync
 ```

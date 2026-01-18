@@ -2,13 +2,28 @@
 
 > **Decentralized project tracking for cross-domain teams.** Replace proprietary tools like Jira with a data-modeled, cache-merge architecture that works offline-first and syncs across repos, teams, and organizations.
 
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Tests](https://github.com/quaternionmedia/dossier/actions/workflows/test.yml/badge.svg)](https://github.com/quaternionmedia/dossier/actions)
 
 <p align="center">
   <img src="docs/dashboard.svg" alt="Dossier TUI Dashboard" width="800">
 </p>
+
+## ⚡ TL;DR - Get Running in 60 Seconds
+
+```bash
+# Install
+git clone https://github.com/quaternionmedia/dossier.git && cd dossier && uv sync
+
+# Set GitHub token (get one at https://github.com/settings/tokens)
+export GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+
+# Sync your repos and launch
+uv run dossier github sync-user YOUR_USERNAME && uv run dossier dashboard
+```
+
+**That's it!** Navigate with arrow keys, `Tab` between panels, `s` to sync, `q` to quit.
 
 ---
 
@@ -26,17 +41,18 @@
 | Feature | Description |
 |---------|-------------|
 | 🎯 **Cross-Domain Tracking** | Unified view across repos, teams, orgs — no more tab sprawl |
-| 📦 **Data-Modeled** | 12 SQLModel schemas: Projects, Issues, PRs, Versions, Branches, Dependencies, Contributors, and more |
+| 📦 **Data-Modeled** | 13 SQLModel schemas: Projects, Issues, PRs, Versions, Branches, Dependencies, Contributors, and more |
 | 🔄 **Cache-Merge Architecture** | Offline-first local cache, merge upstream changes on sync |
-| 🖥️ **Fixed-Layout TUI** | Consistent 11-tab dashboard — build muscle memory, gain speed |
-| 🔗 **Linkable Entities** | Every model element (docs, versions, issues, PRs) is navigable and linkable |
+| 🖥️ **Hierarchical Project Tree** | Auto-organized by org with inline documentation tree |
+| 📄 **Content Viewer** | Click docs/issues/PRs to preview inline with prev/next navigation |
+| 🔗 **Linkable Entities** | Every model element is navigable: `owner/repo/issue/123`, `lang/python`, `pkg/fastapi` |
 | ⌨️ **Headless-First** | CLI, TUI, and API — no browser required |
 | 📤 **Portable Exports** | `.dossier` YAML files for sharing and archival |
 | 🐙 **GitHub Native** | Deep integration with repos, users, orgs — but not locked to it |
 
-### Fixed-Layout TUI Tabs
+### Hierarchical Project Browser + 11 Tabs
 
-Same 11 tabs, same positions, every project. Build muscle memory:
+Projects auto-organized by org, with docs tree inline. Same 11 tabs, same positions, every project:
 
 `Dossier` • `Details` • `Documentation` • `Languages` • `Branches` • `Dependencies` • `Contributors` • `Issues` • `Pull Requests` • `Releases` • `Components`
 
@@ -59,24 +75,20 @@ uv sync
 uv run dossier dashboard
 ```
 
-Keyboard shortcuts: `q` quit | `r` refresh | `s` sync | `o` open GitHub | `a` add | `d` delete | `/` search | `f` filter | `?` help
+Keyboard shortcuts: `q` quit | `r` refresh | `s` sync | `o` open GitHub | `a` add | `d` delete | `l` link | `/` search | `f` filter | `?` help | `n`/`p` next/prev doc
 
 ### CLI Usage
 
 ```bash
-# Add a project
-uv run dossier projects add my-project -d "My awesome project"
+# Sync from GitHub (copy-paste these!)
+uv run dossier github sync astral-sh/ruff              # Single repo
+uv run dossier github sync-user YOUR_USERNAME          # All your repos
+uv run dossier github sync-org microsoft --limit 10   # Org repos
 
-# Sync from GitHub (recommended)
-uv run dossier github sync https://github.com/owner/repo
-
-# Sync all repos from a user or org
-uv run dossier github sync-user astral-sh
-uv run dossier github sync-org microsoft --limit 10
-
-# List and query projects
-uv run dossier projects list -v
-uv run dossier query my-project --level summary
+# Browse and query
+uv run dossier dashboard                               # Interactive TUI
+uv run dossier projects list -v                        # List all projects
+uv run dossier projects show astral-sh/ruff            # Show details
 
 # Start the API server
 uv run dossier serve --reload
@@ -127,6 +139,7 @@ uv run dossier github sync-user yourname --limit 1
 | Document | Description |
 |----------|-------------|
 | [Quickstart](docs/quickstart.md) | Get running in 5 minutes |
+| [Dashboard Guide](docs/dashboard.md) | Complete TUI reference |
 | [Workflows](docs/workflows.md) | Copy-paste ready examples |
 | [Overview](docs/overview.md) | Core concepts |
 | [Architecture](docs/architecture.md) | System design |
@@ -158,7 +171,27 @@ The `.dossier` format includes:
 - Activity metrics (issues, PRs, releases, contributors)
 - Useful links
 
-## 🗄️ Database Migrations
+## � Entity Graphs
+
+Build navigable graphs of project entities with proper disambiguation:
+
+```bash
+# Build entity graph for a project
+uv run dossier graph build owner/repo
+
+# Build graphs for all synced projects
+uv run dossier graph build-all
+
+# View graph statistics
+uv run dossier graph stats
+```
+
+**Entity Scoping:**
+- Repo-scoped: `owner/repo/branch/main`, `owner/repo/issue/123`, `owner/repo/pr/456`
+- App-scoped: `github/user/username` (same user across all repos)
+- Global: `lang/python`, `pkg/fastapi` (shared everywhere)
+
+## �🗄️ Database Migrations
 
 Manage database schema changes with Alembic:
 
