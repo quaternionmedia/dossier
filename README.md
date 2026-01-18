@@ -1,33 +1,48 @@
 # Dossier
 
-Documentation standardization tool that auto-parses project documentation and provides different levels of information through consistent, data-modeled queries.
+> Documentation standardization tool that auto-parses project documentation and provides different levels of information through consistent, data-modeled queries.
 
-## Features
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Tests](https://github.com/quaternionmedia/dossier/actions/workflows/test.yml/badge.svg)](https://github.com/quaternionmedia/dossier/actions)
 
-- **Multi-level Documentation**: Query documentation at different detail levels (summary, overview, detailed, technical)
-- **Automatic Parsing**: Parse markdown documentation files into structured sections
-- **Interactive TUI Dashboard**: Full-featured Textual terminal UI with 11 tabs:
-  - Dossier (default), Details, Documentation, Languages, Branches, Dependencies, Contributors, Issues, Pull Requests, Releases, Components
-- **Advanced Filtering**: Filter projects by sync status (synced/unsynced), sort by stars, full-text search
-- **GitHub Integration**: Sync repositories, users, and organizations with intelligent batching
-- **Extended GitHub Data**: Fetches languages, branches, dependencies, contributors, issues, PRs, and releases
-- **Project Components**: Link projects as subprojects, dependencies, or related projects via CLI or API
-- **CLI Interface**: Comprehensive command-line tools with Trogon command explorer
-- **REST API**: FastAPI-powered API with full CRUD for projects and components
-- **SQLModel Backend**: Structured data storage with SQLite (11 tables)
+<p align="center">
+  <img src="docs/dashboard.svg" alt="Dossier TUI Dashboard" width="800">
+</p>
 
-## Installation
+---
+
+## ✨ Features
+
+| Feature | Description |
+|---------|-------------|
+| 📊 **Multi-level Documentation** | Query documentation at different detail levels (summary, overview, detailed, technical) |
+| 🔍 **Automatic Parsing** | Parse markdown documentation files into structured sections |
+| 🖥️ **Interactive TUI Dashboard** | Full-featured Textual terminal UI with 11 tabs |
+| 🎛️ **Advanced Filtering** | Filter projects by sync status, sort by stars, full-text search |
+| 🐙 **GitHub Integration** | Sync repositories, users, and organizations with intelligent batching |
+| 📈 **Extended GitHub Data** | Fetches languages, branches, dependencies, contributors, issues, PRs, and releases |
+| 🔗 **Project Components** | Link projects as subprojects, dependencies, or related projects |
+| ⌨️ **CLI Interface** | Comprehensive command-line tools with Trogon command explorer |
+| 🌐 **REST API** | FastAPI-powered API with full CRUD for projects and components |
+| 💾 **SQLModel Backend** | Structured data storage with SQLite (11 tables) |
+
+### TUI Dashboard Tabs
+
+`Dossier` • `Details` • `Documentation` • `Languages` • `Branches` • `Dependencies` • `Contributors` • `Issues` • `Pull Requests` • `Releases` • `Components`
+
+## 📦 Installation
 
 ```bash
 # Clone the repository
-git clone <repo-url>
+git clone https://github.com/quaternionmedia/dossier.git
 cd dossier
 
 # Install with uv
 uv sync
 ```
 
-## Quick Start
+## 🚀 Quick Start
 
 ### Launch the TUI Dashboard
 
@@ -58,7 +73,7 @@ uv run dossier query my-project --level summary
 uv run dossier serve --reload
 ```
 
-## GitHub Authentication Setup
+## 🔐 GitHub Authentication Setup
 
 GitHub integration works without authentication but is **rate-limited to 60 requests/hour**. For better performance:
 
@@ -98,7 +113,7 @@ uv run dossier github sync-user yourname --limit 1
 | Public repos only | Public + private repos |
 | May hit rate limits | Reliable batch syncing |
 
-## Documentation Levels
+## 📚 Documentation Levels
 
 | Level | Description |
 |-------|-------------|
@@ -107,7 +122,7 @@ uv run dossier github sync-user yourname --limit 1
 | `detailed` | Full documentation with examples |
 | `technical` | Implementation details for developers |
 
-## Dossier File Format
+## 📄 Dossier File Format
 
 Export standardized project overviews to `.dossier` files (YAML format):
 
@@ -132,7 +147,7 @@ The `.dossier` format includes:
 - Activity metrics (issues, PRs, releases, contributors)
 - Useful links
 
-## Database Migrations
+## 🗄️ Database Migrations
 
 Manage database schema changes with Alembic:
 
@@ -153,7 +168,7 @@ uv run dossier db revision "add new field"
 uv run dossier db downgrade
 ```
 
-## Development
+## 🛠️ Development
 
 ```bash
 # Run tests
@@ -172,7 +187,7 @@ uv run dossier dev seed -e       # Create example data
 uv run dossier dev purge         # Remove test projects
 ```
 
-## API Reference
+## 🌐 API Reference
 
 Start the API server with `uv run dossier serve --reload`. Access interactive docs at http://localhost:8000/docs
 
@@ -196,7 +211,7 @@ Start the API server with `uv run dossier serve --reload`. Access interactive do
 | GET | `/github/info` | Get GitHub repo info |
 | GET | `/github/search` | Search GitHub repos |
 
-## Project Structure
+## 📁 Project Structure
 
 ```
 dossier/
@@ -215,6 +230,12 @@ dossier/
 └── pyproject.toml          # Project configuration
 ```
 
-## License
+## 📜 License
 
-MIT
+MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+<p align="center">
+  Made with ❤️ by <a href="https://github.com/quaternionmedia">Quaternion Media</a>
+</p>
