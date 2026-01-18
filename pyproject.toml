@@ -1,0 +1,99 @@
+[project]
+name = "dossier"
+version = "0.1.0"
+description = "Documentation standardization tool - auto-parse project docs and query at different detail levels"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    { name = "Peter Kagstrom", email = "peter.kagstrom@gmail.com" }
+]
+maintainers = [
+    { name = "Peter Kagstrom", email = "peter.kagstrom@gmail.com" }
+]
+keywords = ["documentation", "github", "cli", "tui", "api", "sqlmodel"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Documentation",
+    "Topic :: Software Development :: Documentation",
+    "Typing :: Typed",
+]
+requires-python = ">=3.13"
+dependencies = [
+    "alembic>=1.18.1",
+    "click>=8.3.1",
+    "fastapi>=0.128.0",
+    "httpx>=0.28.1",
+    "pyyaml>=6.0.3",
+    "sqlmodel>=0.0.31",
+    "textual>=0.89.0",
+    "trogon>=0.6.0",
+    "uvicorn>=0.40.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/quaternionmedia/dossier"
+Documentation = "https://github.com/quaternionmedia/dossier/tree/main/docs"
+Repository = "https://github.com/quaternionmedia/dossier.git"
+Issues = "https://github.com/quaternionmedia/dossier/issues"
+Changelog = "https://github.com/quaternionmedia/dossier/blob/main/CHANGELOG.md"
+
+[project.scripts]
+dossier = "dossier.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=6.0.0",
+    "respx>=0.22.0",
+    "ruff>=0.9.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "ignore:'BaseCommand' is deprecated:DeprecationWarning",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # Pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "UP",   # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+    "B008",  # function calls in argument defaults
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["dossier"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

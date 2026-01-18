@@ -1,0 +1,328 @@
+"""Pytest configuration and shared fixtures."""
+
+import os
+import subprocess
+import pytest
+from datetime import datetime, timezone
+from pathlib import Path
+from sqlmodel import Session, SQLModel, create_engine, select
+
+from dossier.models import (
+    DocumentationLevel,
+    DocumentSection,
+    Project,
+    ProjectComponent,
+)
+
+
+# Test database path (only used for file-based tests)
+TEST_DB_PATH = "test_dossier.db"
+TEST_DB_URL = f"sqlite:///{TEST_DB_PATH}"
+
+# Screenshots directory
+SCREENSHOTS_DIR = Path("docs/screenshots")
+
+
+def pytest_addoption(parser):
+    """Add custom pytest command line options."""
+    parser.addoption(
+        "--screenshots",
+        action="store_true",
+        default=False,
+        help="Generate documentation screenshots from TUI tests",
+    )
+
+
+def pytest_configure(config):
+    """Clean up any leftover test data at the start of test run.
+    
+    Uses 'uv run dossier dev purge' to clean test projects from the main database
+    and removes any leftover test database files.
+    """
+    # Register custom marker
+    config.addinivalue_line(
+        "markers", "screenshot: mark test as a screenshot test"
+    )
+    
+    # Create screenshots directory if generating screenshots
+    if config.getoption("--screenshots"):
+        SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # Purge test projects from main database (silently, in case db doesn't exist)
+    try:
+        subprocess.run(
+            ["uv", "run", "dossier", "dev", "purge", "-p", "test", "-y"],
+            capture_output=True,
+            timeout=30,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass  # Ignore errors - db may not exist yet
+    
+    # Clean up test database files that may have been left from previous runs
+    _cleanup_test_db_files()
+
+
+def pytest_unconfigure(config):
+    """Clean up test data at the end of test run."""
+    # Purge any test projects created during the run
+    try:
+        subprocess.run(
+            ["uv", "run", "dossier", "dev", "purge", "-p", "test", "-y"],
+            capture_output=True,
+            timeout=30,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+    
+    _cleanup_test_db_files()
+
+
+def _cleanup_test_db_files():
+    """Remove test database files."""
+    test_db_files = [
+        "test_dossier.db",
+        "test_dossier.db-journal",
+        "test_dossier.db-wal",
+        "test_dossier.db-shm",
+    ]
+    for db_file in test_db_files:
+        if os.path.exists(db_file):
+            try:
+                os.remove(db_file)
+            except OSError:
+                pass  # File may be locked
+
+
+@pytest.fixture(scope="function")
+def test_engine():
+    """Create a test database engine using in-memory SQLite."""
+    # Use in-memory database to avoid file creep
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+    )
+    SQLModel.metadata.create_all(engine)
+    yield engine
+    
+    # Cleanup
+    SQLModel.metadata.drop_all(engine)
+    engine.dispose()
+
+
+@pytest.fixture(scope="function")
+def test_file_engine():
+    """Create a test database engine using a file (for tests that need it)."""
+    # Clean up first in case of leftovers
+    if os.path.exists(TEST_DB_PATH):
+        try:
+            os.remove(TEST_DB_PATH)
+        except OSError:
+            pass
+    
+    engine = create_engine(
+        TEST_DB_URL,
+        connect_args={"check_same_thread": False},
+    )
+    SQLModel.metadata.create_all(engine)
+    yield engine
+    
+    # Cleanup
+    SQLModel.metadata.drop_all(engine)
+    engine.dispose()
+    
+    # Remove the file
+    for suffix in ["", "-journal", "-wal", "-shm"]:
+        path = f"{TEST_DB_PATH}{suffix}"
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
+@pytest.fixture(scope="function")
+def test_session(test_engine):
+    """Create a test database session."""
+    with Session(test_engine) as session:
+        yield session
+
+
+@pytest.fixture(scope="function")
+def seeded_session(test_engine):
+    """Create a test session with sample data."""
+    with Session(test_engine) as session:
+        # Create sample projects
+        project1 = Project(
+            name="test/fastapi",
+            description="FastAPI framework, high performance, easy to learn",
+            repository_url="https://github.com/fastapi/fastapi",
+            github_owner="fastapi",
+            github_repo="fastapi",
+            github_stars=70000,
+            github_language="Python",
+            last_synced_at=datetime.now(timezone.utc),
+        )
+        project2 = Project(
+            name="test/click",
+            description="Python composable command line interface toolkit",
+            repository_url="https://github.com/pallets/click",
+            github_owner="pallets",
+            github_repo="click",
+            github_stars=15000,
+            github_language="Python",
+            last_synced_at=datetime.now(timezone.utc),
+        )
+        project3 = Project(
+            name="test-org/unsynced-repo",
+            description="A repo that has never been synced",
+            repository_url="https://github.com/test-org/unsynced-repo",
+            github_owner="test-org",
+            github_repo="unsynced-repo",
+            github_stars=None,
+            github_language=None,
+            last_synced_at=None,
+        )
+        
+        session.add(project1)
+        session.add(project2)
+        session.add(project3)
+        session.commit()
+        session.refresh(project1)
+        session.refresh(project2)
+        session.refresh(project3)
+        
+        # Create document sections for project1
+        readme_section = DocumentSection(
+            project_id=project1.id,
+            title="FastAPI README",
+            content="# FastAPI\n\nFastAPI framework, high performance, easy to learn.",
+            level=DocumentationLevel.OVERVIEW,
+            section_type="readme",
+            source_file="README.md",
+            order=0,
+        )
+        setup_section = DocumentSection(
+            project_id=project1.id,
+            title="Installation",
+            content="```bash\npip install fastapi\n```",
+            level=DocumentationLevel.DETAILED,
+            section_type="setup",
+            source_file="README.md",
+            order=1,
+        )
+        
+        session.add(readme_section)
+        session.add(setup_section)
+        
+        # Create document sections for project2
+        click_readme = DocumentSection(
+            project_id=project2.id,
+            title="Click README",
+            content="# Click\n\nClick is a Python package for creating beautiful CLIs.",
+            level=DocumentationLevel.OVERVIEW,
+            section_type="readme",
+            source_file="README.md",
+            order=0,
+        )
+        session.add(click_readme)
+        
+        # Create a parent-child relationship (fastapi uses click)
+        component = ProjectComponent(
+            parent_id=project1.id,
+            child_id=project2.id,
+            relationship_type="dependency",
+            order=0,
+        )
+        session.add(component)
+        
+        session.commit()
+        
+        yield session
+
+
+@pytest.fixture
+def sample_project():
+    """Create a sample project instance (not persisted)."""
+    return Project(
+        name="test/sample-project",
+        description="A sample project for testing",
+        repository_url="https://github.com/test/sample-project",
+        github_owner="test",
+        github_repo="sample-project",
+    )
+
+
+@pytest.fixture
+def sample_section(sample_project):
+    """Create a sample document section (not persisted)."""
+    return DocumentSection(
+        project_id=1,  # Will be updated when project is persisted
+        title="Sample Section",
+        content="This is sample content for testing.",
+        level=DocumentationLevel.OVERVIEW,
+        section_type="readme",
+    )
+
+
+@pytest.fixture
+def screenshots_enabled(request):
+    """Check if screenshots are enabled via --screenshots flag."""
+    return request.config.getoption("--screenshots")
+
+
+@pytest.fixture
+def screenshot_path(request):
+    """Get the path for saving a screenshot based on test name."""
+    test_name = request.node.name
+    # Clean up test name for filename
+    safe_name = test_name.replace("[", "_").replace("]", "_").replace("/", "_")
+    return SCREENSHOTS_DIR / f"{safe_name}.svg"
+
+
+class ScreenshotHelper:
+    """Helper class for taking TUI screenshots in tests."""
+    
+    def __init__(self, enabled: bool, output_dir: Path):
+        self.enabled = enabled
+        self.output_dir = output_dir
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+    
+    async def capture(self, app, name: str, title: str = None) -> Path | None:
+        """Capture a screenshot of the app.
+        
+        Args:
+            app: The Textual App instance
+            name: Name for the screenshot file (without extension)
+            title: Optional title (used in filename if provided)
+            
+        Returns:
+            Path to the saved screenshot, or None if screenshots disabled
+        """
+        if not self.enabled:
+            return None
+        
+        # Clean up name for filename
+        safe_name = name.replace(" ", "_").replace("/", "_").lower()
+        filename = f"{safe_name}.svg"
+        
+        # Use Textual's built-in screenshot functionality
+        # path is the directory, filename is the file name
+        app.save_screenshot(filename=filename, path=str(self.output_dir))
+        return self.output_dir / filename
+    
+    def capture_sync(self, app, name: str, title: str = None) -> Path | None:
+        """Synchronous version of capture for non-async contexts."""
+        if not self.enabled:
+            return None
+        
+        safe_name = name.replace(" ", "_").replace("/", "_").lower()
+        filename = f"{safe_name}.svg"
+        
+        app.save_screenshot(filename=filename, path=str(self.output_dir))
+        return self.output_dir / filename
+
+
+@pytest.fixture
+def screenshot_helper(screenshots_enabled):
+    """Fixture providing screenshot helper for TUI tests."""
+    return ScreenshotHelper(screenshots_enabled, SCREENSHOTS_DIR)
