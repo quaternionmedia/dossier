@@ -4,11 +4,37 @@
 
 ---
 
+## Design Principles
+
+### 1. Cache-Merge, Not Real-Time
+Dossier uses an **offline-first, cache-merge** pattern:
+- Local SQLite is the source of truth for reads
+- Sync operations fetch upstream and merge into local cache
+- No websockets, no polling, no real-time complexity
+
+### 2. Data-Modeled, Not Schema-Free
+Every entity has a **defined SQLModel schema**:
+- 12 tables with typed fields and relationships
+- Foreign keys enforce data integrity
+- Query with SQL, not arbitrary JSON paths
+
+### 3. Fixed Layouts, Muscle Memory
+The TUI uses **consistent layouts across all projects**:
+- Same tabs, same positions, same keybindings
+- Learn once, navigate any project blindfolded
+- No per-project customization that breaks flow
+
+### 4. Headless-First
+All functionality works **without a browser**:
+- CLI for scripting and automation
+- TUI for interactive exploration
+- API for integrations — browser optional
+
 ## System Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         Interfaces                               │
+│                    Headless Interfaces                          │
 ├──────────────┬──────────────┬──────────────┬───────────────────┤
 │  Dashboard   │   Explorer   │     CLI      │      API          │
 │  (Textual)   │   (Trogon)   │   (Click)    │   (FastAPI)       │
@@ -17,10 +43,10 @@
        └──────────────┴──────┬───────┴────────────────┘
                              │
 ┌────────────────────────────┴────────────────────────────────────┐
-│                       Core Layer                                 │
+│                    Cache-Merge Core                             │
 ├──────────────┬──────────────┬───────────────────────────────────┤
-│   Parsers    │    Models    │          Database                 │
-│  (GitHub)    │  (SQLModel)  │          (SQLite)                 │
+│   Parsers    │  Data Models │       Local Cache                 │
+│  (GitHub+)   │  (SQLModel)  │       (SQLite)                    │
 └──────────────┴──────────────┴───────────────────────────────────┘
 ```
 
@@ -137,75 +163,51 @@ Endpoints:
 
 ### Core Layer
 
-#### Models (`src/dossier/models/schemas.py`)
+#### Data Models (`src/dossier/models/schemas.py`)
 
-SQLModel definitions:
+Dossier uses **12 typed SQLModel schemas** — not arbitrary JSON. This enables SQL queries, consistent exports, and reliable API contracts.
 
 ```python
+# Core entity
 class Project(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    name: str = Field(index=True, unique=True)
+    name: str = Field(index=True, unique=True)  # "owner/repo" or custom
     description: str = ""
-    version: str = "0.0.0"
-    github_url: str | None = None
     github_stars: int = 0
     last_synced: datetime | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-class DocumentationSection(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
+# Semver-parsed versions
+class ProjectVersion(SQLModel, table=True):
     project_id: int = Field(foreign_key="project.id")
-    section_type: str
+    version: str           # "1.2.3-beta+build"
+    major: int | None      # 1
+    minor: int | None      # 2  
+    patch: int | None      # 3
+    prerelease: str | None # "beta"
+    is_latest: bool = False
+
+# Documentation at multiple detail levels
+class DocumentSection(SQLModel, table=True):
+    project_id: int = Field(foreign_key="project.id")
     title: str
     content: str
-    summary: str = ""
-    detail_level: str = "overview"
+    detail_level: str  # summary, overview, detailed, technical
 
-class ProjectComponent(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    parent_id: int = Field(foreign_key="project.id")
-    child_id: int = Field(foreign_key="project.id")
-    component_type: str = "component"
-
-class ProjectLanguage(SQLModel, table=True):
-    project_id: int
-    language: str
-    bytes_count: int
-    percentage: float
-
-class ProjectDependency(SQLModel, table=True):
-    project_id: int
-    name: str
-    version_spec: str | None
-    dep_type: str  # runtime, dev, optional, peer
-    source: str    # pyproject.toml, package.json, requirements.txt
-
-class ProjectContributor(SQLModel, table=True):
-    project_id: int
-    username: str
-    contributions: int
-    avatar_url: str | None
-    profile_url: str | None
-
-class ProjectIssue(SQLModel, table=True):
-    project_id: int
-    issue_number: int
-    title: str
-    state: str  # open, closed
-    author: str | None
-    labels: str | None
-
-class ProjectBranch(SQLModel, table=True):
-    project_id: int
-    name: str
-    is_default: bool
-    is_protected: bool
-    commit_sha: str | None
-    commit_message: str | None
-    commit_author: str | None
-    commit_date: datetime | None
+# GitHub-synced metadata
+class ProjectLanguage(SQLModel, table=True):    # Language breakdown
+class ProjectBranch(SQLModel, table=True):      # Branches + commits
+class ProjectDependency(SQLModel, table=True):  # From manifests
+class ProjectContributor(SQLModel, table=True): # By commit count
+class ProjectIssue(SQLModel, table=True):       # Issues + labels
+class ProjectPullRequest(SQLModel, table=True): # PRs + diff stats
+class ProjectRelease(SQLModel, table=True):     # Releases + tags
+class ProjectComponent(SQLModel, table=True):   # Parent-child links
 ```
+
+**Why typed schemas?**
+- Query across your portfolio: `SELECT * FROM project_issue WHERE state = 'open'`
+- Consistent exports: Every `.dossier` file has the same structure
+- API contracts: Clients know exactly what to expect
 
 #### Parsers
 

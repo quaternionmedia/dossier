@@ -4,7 +4,7 @@
 
 ---
 
-Get Dossier up and running in under 5 minutes.
+Get Dossier up and running in under 5 minutes. By the end, you'll have a local cache of your projects with a keyboard-driven TUI for tracking issues, PRs, versions, and dependencies — no browser required.
 
 ## Prerequisites
 
@@ -315,10 +315,12 @@ Access:
 export GITHUB_TOKEN=ghp_xxxxxxxxxxxx
 ```
 
-### 2. Sync an organization
+### 2. Sync your repos or an organization
 
 ```bash
-uv run dossier github sync-org quaternionmedia
+uv run dossier github sync-user YOUR_USERNAME
+# or
+uv run dossier github sync-org YOUR_ORG --limit 20
 ```
 
 ### 3. Browse in the dashboard
@@ -331,8 +333,10 @@ uv run dossier dashboard
 
 ```bash
 uv run dossier projects list -v
-uv run dossier query quaternionmedia/somerepo --level summary
+uv run dossier projects show owner/repo
 ```
+
+**For more detailed workflows, see [Workflows & Examples](workflows.md).**
 
 ## Troubleshooting
 
@@ -367,6 +371,7 @@ If you see `TypeError: can't subtract offset-naive and offset-aware datetimes`, 
 
 ## Next Steps
 
-- [Understand the Architecture](architecture.md)
-- [Learn how to Contribute](contributing.md)
-- [Read the full Overview](overview.md)
+- [Workflows & Examples](workflows.md) — Copy-paste ready examples for common use cases
+- [Understand the Architecture](architecture.md) — How it works under the hood
+- [Extending Dossier](extending.md) — Customize for your needs
+- [Contributing](contributing.md) — Help improve Dossier

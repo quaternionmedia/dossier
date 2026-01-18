@@ -1,26 +1,45 @@
 # Dossier Documentation
 
-> A documentation standardization tool that auto-parses project docs and provides queryable, structured access at multiple detail levels.
+> **Decentralized project tracking for cross-domain teams.** A data-modeled, offline-first alternative to Jira and proprietary trackers.
 
 ## Quick Links
 
 | Document | Description |
 |----------|-------------|
 | [Quickstart](quickstart.md) | Get running in 5 minutes |
-| [Overview](overview.md) | Features and concepts |
-| [Architecture](architecture.md) | System design and internals |
-| [Roadmap](roadmap.md) | Future features and vision |
+| [Workflows](workflows.md) | Copy-paste ready examples |
+| [Overview](overview.md) | Core concepts and use cases |
+| [Architecture](architecture.md) | Cache-merge design and data models |
+| [Extending](extending.md) | Customize for personal/team needs |
 | [Contributing](contributing.md) | Development guide |
+| [Roadmap](roadmap.md) | Future features and vision |
 
 ## What is Dossier?
 
-Dossier aggregates documentation from your projects (especially GitHub repositories) and provides:
+Dossier is a **decentralized project tracking system** designed for teams working across multiple repositories, organizations, and domains. Think of it as:
 
-- **Multi-level queries** - Summary, overview, detailed, or technical views
-- **TUI Dashboard** - Interactive terminal interface for browsing projects
-- **GitHub Integration** - Bulk sync users, orgs, or individual repos
-- **REST API** - Programmatic access for integrations
-- **CLI** - Scriptable command-line interface
+- **Jira replacement** — Issues, PRs, releases, versions in one unified view
+- **Offline-first** — Local SQLite cache, sync when you have connectivity  
+- **Cross-domain** — Track projects across GitHub orgs, teams, even non-Git sources
+- **Data-modeled** — 12 structured schemas, not arbitrary JSON blobs
+- **Headless-native** — CLI, TUI, API — no browser tax
+
+## Key Benefits
+
+### 🎯 Replace Proprietary Trackers
+Stop paying per-seat for Jira, Linear, or Notion. Dossier is free, open-source, and your data stays local.
+
+### 🔄 Cache-Merge Architecture  
+Work offline, sync when connected. No real-time websockets, no polling, no network dependency for reads.
+
+### 📊 Data-Modeled, Not Schema-Free
+12 typed SQLModel schemas with relationships — query with SQL, not arbitrary JSON paths.
+
+### 🌐 Cross-Domain Tracking
+Unified view across multiple GitHub orgs, teams, repos. One dashboard, consistent layouts.
+
+### ⌨️ Fixed-Layout TUI
+Same 11 tabs, same keybindings, every project. Build muscle memory, gain speed.
 
 ## Technology Stack
 
@@ -32,40 +51,9 @@ Dossier aggregates documentation from your projects (especially GitHub repositor
 | Command Explorer | [Trogon](https://github.com/Textualize/trogon) |
 | API Framework | [FastAPI](https://fastapi.tiangolo.com/) |
 | ORM | [SQLModel](https://sqlmodel.tiangolo.com/) |
-| Database | SQLite |
+| Local Cache | SQLite |
 | HTTP Client | [httpx](https://www.python-httpx.org/) |
 | Testing | pytest, respx |
-
-## Key Features
-
-### 🖥️ TUI Dashboard
-Full-featured terminal UI with project browser, 10 detail tabs, documentation viewer, filtering, and sync status.
-
-```bash
-uv run dossier dashboard
-```
-
-### 🔗 GitHub Integration
-Sync repositories with intelligent batching, rate limit handling, and incremental updates.
-
-```bash
-uv run dossier github sync-user username
-uv run dossier github sync-org orgname
-```
-
-### 📊 Documentation Queries
-Query parsed documentation at different detail levels with filtering.
-
-```bash
-uv run dossier query project-name --level summary
-```
-
-### 🏗️ Project Components
-Model parent-child relationships between projects for hierarchical documentation.
-
-```bash
-uv run dossier components add parent child
-```
 
 ## Getting Started
 

@@ -1,10 +1,10 @@
 # Contributing Guide
 
-[← Back to Index](index.md) | [Architecture](architecture.md) | [Overview](overview.md)
+[← Back to Index](index.md) | [Extending](extending.md) | [Architecture](architecture.md)
 
 ---
 
-Thank you for your interest in contributing to Dossier! This guide will help you get started.
+Thank you for your interest in contributing to Dossier! This guide covers the development workflow. For adding custom parsers, data models, or extending Dossier for your needs, see [Extending Dossier](extending.md).
 
 ## Table of Contents
 

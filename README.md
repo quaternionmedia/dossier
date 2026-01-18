@@ -1,6 +1,6 @@
 # Dossier
 
-> Documentation standardization tool that auto-parses project documentation and provides different levels of information through consistent, data-modeled queries.
+> **Decentralized project tracking for cross-domain teams.** Replace proprietary tools like Jira with a data-modeled, cache-merge architecture that works offline-first and syncs across repos, teams, and organizations.
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -12,22 +12,31 @@
 
 ---
 
+## Why Dossier?
+
+**Tired of context-switching between Jira, GitHub, Notion, and spreadsheets?** Dossier unifies project tracking into a single, data-modeled interface that:
+
+- **Works offline** — Local SQLite cache, sync when connected
+- **Scales across domains** — Same fixed layouts whether tracking 1 repo or 100 orgs
+- **No vendor lock-in** — Your data, your format, exportable `.dossier` files
+- **Keyboard-driven speed** — Consistent TUI layouts you can navigate blindfolded
+
 ## ✨ Features
 
 | Feature | Description |
 |---------|-------------|
-| 📊 **Multi-level Documentation** | Query documentation at different detail levels (summary, overview, detailed, technical) |
-| 🔍 **Automatic Parsing** | Parse markdown documentation files into structured sections |
-| 🖥️ **Interactive TUI Dashboard** | Full-featured Textual terminal UI with 11 tabs |
-| 🎛️ **Advanced Filtering** | Filter projects by sync status, sort by stars, full-text search |
-| 🐙 **GitHub Integration** | Sync repositories, users, and organizations with intelligent batching |
-| 📈 **Extended GitHub Data** | Fetches languages, branches, dependencies, contributors, issues, PRs, and releases |
-| 🔗 **Project Components** | Link projects as subprojects, dependencies, or related projects |
-| ⌨️ **CLI Interface** | Comprehensive command-line tools with Trogon command explorer |
-| 🌐 **REST API** | FastAPI-powered API with full CRUD for projects and components |
-| 💾 **SQLModel Backend** | Structured data storage with SQLite (11 tables) |
+| 🎯 **Cross-Domain Tracking** | Unified view across repos, teams, orgs — no more tab sprawl |
+| 📦 **Data-Modeled** | 12 SQLModel schemas: Projects, Issues, PRs, Versions, Branches, Dependencies, Contributors, and more |
+| 🔄 **Cache-Merge Architecture** | Offline-first local cache, merge upstream changes on sync |
+| 🖥️ **Fixed-Layout TUI** | Consistent 11-tab dashboard — build muscle memory, gain speed |
+| 🔗 **Linkable Entities** | Every model element (docs, versions, issues, PRs) is navigable and linkable |
+| ⌨️ **Headless-First** | CLI, TUI, and API — no browser required |
+| 📤 **Portable Exports** | `.dossier` YAML files for sharing and archival |
+| 🐙 **GitHub Native** | Deep integration with repos, users, orgs — but not locked to it |
 
-### TUI Dashboard Tabs
+### Fixed-Layout TUI Tabs
+
+Same 11 tabs, same positions, every project. Build muscle memory:
 
 `Dossier` • `Details` • `Documentation` • `Languages` • `Branches` • `Dependencies` • `Contributors` • `Issues` • `Pull Requests` • `Releases` • `Components`
 
@@ -113,14 +122,16 @@ uv run dossier github sync-user yourname --limit 1
 | Public repos only | Public + private repos |
 | May hit rate limits | Reliable batch syncing |
 
-## 📚 Documentation Levels
+## 📚 Documentation
 
-| Level | Description |
-|-------|-------------|
-| `summary` | Brief overview, 1-2 sentences |
-| `overview` | High-level description with key points |
-| `detailed` | Full documentation with examples |
-| `technical` | Implementation details for developers |
+| Document | Description |
+|----------|-------------|
+| [Quickstart](docs/quickstart.md) | Get running in 5 minutes |
+| [Workflows](docs/workflows.md) | Copy-paste ready examples |
+| [Overview](docs/overview.md) | Core concepts |
+| [Architecture](docs/architecture.md) | System design |
+| [Extending](docs/extending.md) | Customize for your needs |
+| [Contributing](docs/contributing.md) | Development guide |
 
 ## 📄 Dossier File Format
 

@@ -1,134 +1,145 @@
 # Overview
 
-[← Back to Index](index.md) | [Quickstart](quickstart.md) | [Architecture →](architecture.md)
+[← Back to Index](index.md) | [Quickstart](quickstart.md) | [Workflows →](workflows.md)
 
 ---
 
 ## What is Dossier?
 
-Dossier is a documentation standardization tool that:
+Dossier is a **decentralized project tracking system** built for modern, distributed teams:
 
-1. **Aggregates** documentation from multiple sources (GitHub repos, local files)
-2. **Parses** and structures content into queryable data models
-3. **Provides** consistent access at multiple detail levels
-4. **Presents** information through CLI, TUI, and API interfaces
+1. **Replaces proprietary trackers** — Unified view of issues, PRs, releases, dependencies across all your projects
+2. **Cache-merge architecture** — Work offline, sync incrementally, merge changes from multiple sources
+3. **Data-modeled** — 12 structured SQLModel schemas (not arbitrary fields) for consistent querying
+4. **Cross-domain** — Track projects across GitHub orgs, teams, repos — even non-GitHub sources
+5. **Fixed-layout TUI** — Consistent interface across all projects for keyboard-driven speed
+
+## Use Cases
+
+### Replace Jira / Linear / Proprietary Trackers
+
+Stop paying per-seat for bloated web UIs. Dossier gives you:
+- Issues, PRs, releases, versions — all linked and navigable
+- Works offline (airplane mode, VPN-free)
+- Export everything to portable `.dossier` YAML files
+- No vendor lock-in, no subscription
+
+### Cross-Team / Cross-Org Visibility
+
+Working across multiple GitHub orgs or teams? Dossier unifies:
+- `org-a/frontend`, `org-b/backend`, `org-c/infra` — one dashboard
+- Shared dependencies tracked automatically
+- Consistent layouts so context-switching costs nothing
+
+### Offline-First for Remote/Distributed Teams
+
+Cache-merge architecture means:
+- Full local SQLite database — query without network
+- Sync on your schedule, not real-time polling
+- Merge upstream changes without losing local state
 
 ## Core Concepts
 
-### Projects
+### Data-Modeled Entities
 
-A **Project** is the primary unit of organization. Projects can represent:
+Every piece of information in Dossier has a **typed schema** — not arbitrary JSON. This enables:
+- SQL queries across your entire project portfolio
+- Consistent exports and migrations
+- Reliable integrations via API
 
-- GitHub repositories
-- Local codebases
-- Documentation collections
-- Organizational units (containing other projects)
+### The 12 Data Models
 
-```python
-class Project:
-    name: str              # Unique identifier (e.g., "owner/repo")
-    description: str       # Brief description
-    version: str           # Current version
-    github_url: str        # Source repository URL
-    github_stars: int      # Star count (if GitHub)
-    last_synced: datetime  # Last GitHub sync timestamp
+| Model | Purpose | Linkable |
+|-------|---------|----------|
+| `Project` | Core entity — repos, orgs, collections | ✔️ |
+| `ProjectVersion` | Semver-parsed releases with metadata | ✔️ |
+| `DocumentSection` | Parsed docs at multiple detail levels | ✔️ |
+| `ProjectLanguage` | Language breakdown with extensions | ✔️ |
+| `ProjectBranch` | Branches with commit info | ✔️ |
+| `ProjectDependency` | Deps from manifests (pyproject, package.json) | ✔️ |
+| `ProjectContributor` | Top contributors by commit count | ✔️ |
+| `ProjectIssue` | Issues with state, labels, authors | ✔️ |
+| `ProjectPullRequest` | PRs with merge status, diff stats | ✔️ |
+| `ProjectRelease` | Releases with tags, prerelease flags | ✔️ |
+| `ProjectComponent` | Parent-child project relationships | ✔️ |
+
+### Fixed-Layout TUI
+
+The TUI uses **consistent layouts** regardless of which project you're viewing:
+
+```
+┌───────────────────────────────────────────────────┐
+│ Tab 1: Dossier    │ Overview with component tree      │
+│ Tab 2: Details    │ Metadata, links, timestamps       │
+│ Tab 3: Docs       │ Parsed documentation sections     │
+│ Tab 4: Languages  │ Language breakdown + extensions   │
+│ Tab 5: Branches   │ Branches with commit info         │
+│ Tab 6: Deps       │ Dependencies from manifests       │
+│ Tab 7: People     │ Contributors by commit count      │
+│ Tab 8: Issues     │ Open/closed issues with labels    │
+│ Tab 9: PRs        │ Pull requests with merge status   │
+│ Tab 10: Releases  │ Version releases with tags        │
+│ Tab 11: Links     │ Component relationships           │
+└───────────────────────────────────────────────────┘
 ```
 
-### Documentation Sections
+**Why fixed layouts?** You learn the positions once. After a week, you navigate by muscle memory — Tab-Tab-Tab to Dependencies, every project, every time.
 
-**DocumentationSection** represents parsed content from a project:
+### Cache-Merge Sync
 
-```python
-class DocumentationSection:
-    project_id: int
-    section_type: str      # readme, contributing, api, changelog, etc.
-    title: str
-    content: str           # Full content
-    summary: str           # Brief summary
-    detail_level: DetailLevel  # summary, overview, detailed, technical
-```
+Dossier doesn't poll or stream. It uses a **cache-merge** pattern:
 
-### Detail Levels
+1. **Cache** — All data stored locally in SQLite
+2. **Sync** — On-demand fetch from upstream (GitHub, etc.)
+3. **Merge** — New data merged into local cache
 
-Query documentation at the appropriate depth:
+This means:
+- ✔️ Works offline (airplane mode, VPN-free environments)
+- ✔️ Fast reads (no network round-trips)
+- ✔️ You control when to sync
 
-| Level | Use Case | Content |
-|-------|----------|---------|
-| `summary` | Quick scan | 1-2 sentence description |
-| `overview` | Understanding | Key features and concepts |
-| `detailed` | Learning | Full documentation with examples |
-| `technical` | Implementation | API signatures, internals |
+## Interfaces (All Headless)
 
-### Project Components
-
-**ProjectComponent** models parent-child relationships:
-
-```python
-class ProjectComponent:
-    parent_id: int         # Parent project
-    child_id: int          # Child project
-    component_type: str    # submodule, dependency, component
-```
-
-Use cases:
-- Organizations containing repositories
-- Monorepos with multiple packages
-- Dependencies and relationships
-
-## Interfaces
+Dossier is **headless-first** — every feature works without a browser.
 
 ### TUI Dashboard
 
-The **Textual**-based dashboard provides:
-
-- **Project List** - Searchable, filterable list of all projects
-- **Filter Bar** - Filter by sync status (All/Synced/Unsynced), sort by stars
-- **Detail Panel** - Tabbed view with 10 information tabs:
-  - Details, Documentation, Languages, Branches, Dependencies, Contributors, Issues, Pull Requests, Releases, Components
-- **Languages Tab** - Language breakdown with file extensions and encoding info
-- **Branches Tab** - Repository branches with default/protected status and latest commit info
-- **Dependencies Tab** - Parsed from pyproject.toml, package.json, requirements.txt
-- **Contributors Tab** - Top contributors ranked by commit count
-- **Issues Tab** - Open/closed issues with labels and authors
-- **Pull Requests Tab** - PRs with merge status, branch info, and diff stats (+/-)
-- **Releases Tab** - Version releases with tags, prerelease/draft status
-- **Clickable Links** - URLs throughout open in browser
-- **Sync Status** - Visual indicators for GitHub sync state
-- **Quick Actions** - Keyboard shortcuts (s=sync, r=refresh, f=filter, o=open GitHub, q=quit)
+The **Textual**-based dashboard is the primary interface:
 
 ```bash
 uv run dossier dashboard
 ```
 
-### Command Explorer
-
-The **Trogon**-based explorer provides:
-
-- Interactive command discovery
-- Parameter input forms
-- Command preview and execution
-
-```bash
-uv run dossier tui
-```
+- **Fixed tab layout** — Same positions, every project
+- **Keyboard-driven** — `Tab`, `j/k`, `/search`, `s`ync, `q`uit
+- **Component tree** — Navigate linked entities (docs, versions, issues, etc.)
+- **Multi-select** — Batch sync/delete with `Space` or `Ctrl+A`
 
 ### CLI
 
-Traditional command-line for scripting:
+Scriptable command-line for automation:
 
 ```bash
-uv run dossier projects list
-uv run dossier github sync owner/repo
-uv run dossier query project --level overview
+uv run dossier github sync-org myorg --limit 50
+uv run dossier projects list --synced --format json
+uv run dossier export all -d ./backups
 ```
 
 ### REST API
 
-FastAPI server for programmatic access:
+FastAPI server for integrations:
 
 ```bash
 uv run dossier serve --reload
-# Access at http://localhost:8000/docs
+# Swagger UI at http://localhost:8000/docs
+```
+
+### Command Explorer
+
+**Trogon**-based interactive discovery (if you forget CLI flags):
+
+```bash
+uv run dossier tui
 ```
 
 ## GitHub Integration
@@ -171,32 +182,39 @@ When limits are hit:
 - Clear messaging about when to retry
 - Resume capability for partial syncs
 
-## Data Storage
+## Data Storage (Local Cache)
 
-### SQLite Database
+### SQLite as Local Cache
 
-Projects are stored in `~/.dossier/dossier.db`:
+All data stored locally in `~/.dossier/dossier.db`:
 
 ```
 ~/.dossier/
-├── dossier.db          # SQLite database
-└── logs/               # Optional log files
+├── dossier.db          # SQLite cache (your data, your machine)
+└── exports/            # Generated .dossier files
 ```
 
-### Tables
+**Why SQLite?**
+- Works offline — no network needed for reads
+- Fast — indexed queries across thousands of projects
+- Portable — copy the file to another machine
+- No server — no Docker, no PostgreSQL, no setup
+
+### 12 Data Tables
 
 | Table | Purpose |
 |-------|---------|
 | `project` | Core project records |
+| `project_version` | Semver-parsed versions |
 | `documentsection` | Parsed documentation |
 | `project_component` | Parent-child relationships |
-| `project_language` | Language breakdown with extensions/encoding |
-| `project_branch` | Repository branches with commit info |
-| `project_dependency` | Project dependencies |
+| `project_language` | Language breakdown |
+| `project_branch` | Branches with commits |
+| `project_dependency` | Dependencies from manifests |
 | `project_contributor` | Top contributors |
-| `project_issue` | GitHub issues |
-| `project_pull_request` | Pull requests with merge/diff stats |
-| `project_release` | Version releases with tags |
+| `project_issue` | Issues with labels |
+| `project_pull_request` | PRs with diff stats |
+| `project_release` | Releases with tags |
 
 ### Management Commands
 
@@ -243,57 +261,47 @@ class CustomParser:
         pass
 ```
 
-## Workflow Examples
+## Quick Examples
 
-### Personal Portfolio
+### Sync and Browse
 
 ```bash
-# Sync all your repos
-export GITHUB_TOKEN=ghp_xxx
-uv run dossier github sync-user yourusername
+# Sync your GitHub repos
+uv run dossier github sync-user YOUR_USERNAME
 
-# Browse in dashboard
+# Launch dashboard
 uv run dossier dashboard
-
-# Query specific project
-uv run dossier query yourusername/project --level overview
 ```
 
-### Organization Audit
+### Cross-Org Tracking
 
 ```bash
-# Sync organization
-uv run dossier github sync-org myorg --limit 100
+# Sync multiple orgs into one cache
+uv run dossier github sync-org org-frontend
+uv run dossier github sync-org org-backend
+uv run dossier github sync-org org-infra
 
-# List by stars
-uv run dossier projects list -v --sort stars
-
-# Export for reporting
-uv run dossier dev dump -o org-audit.json
+# One unified view
+uv run dossier dashboard
 ```
 
-### Documentation Aggregation
+### Offline Workflow
 
 ```bash
-# Sync multiple sources
-uv run dossier github sync pallets/flask
-uv run dossier github sync pallets/click
-uv run dossier github sync pallets/jinja
+# Sync while online
+uv run dossier github sync-user myusername
 
-# Create parent project
-uv run dossier projects add pallets -d "Pallets Projects"
-
-# Add relationships
-uv run dossier components add pallets pallets/flask
-uv run dossier components add pallets pallets/click
-uv run dossier components add pallets pallets/jinja
-
-# View hierarchy
-uv run dossier components list pallets --recursive
+# Works offline (all reads from local cache)
+uv run dossier dashboard
+uv run dossier projects list
 ```
+
+**For complete workflows with copy-paste commands, see [Workflows & Examples](workflows.md).**
 
 ## Next Steps
 
-- [Quickstart Guide](quickstart.md) - Installation and first steps
-- [Architecture](architecture.md) - System design details
-- [Contributing](contributing.md) - Development workflow
+- [Workflows & Examples](workflows.md) — Copy-paste ready examples
+- [Quickstart Guide](quickstart.md) — Installation and first steps
+- [Architecture](architecture.md) — System design details
+- [Extending Dossier](extending.md) — Customize for your needs
+- [Contributing](contributing.md) — Development workflow
