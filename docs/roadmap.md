@@ -173,9 +173,10 @@ We welcome contributions! See [contributing.md](contributing.md) for guidelines.
 
 ### Current Priorities
 
-1. � **Multi-Org Workspaces** - Track projects across GitHub orgs
+1. 🟡 **Multi-Org Workspaces** - Track projects across GitHub orgs
 2. ✅ **Dependency Graph** - Auto-link from manifests (implemented)
-3. 🟡 **Kanban Board Tab** - Card-based issue view in TUI
-4. 🟡 **GitLab Support** - Second forge integration
-5. 🟢 **Sprint Planning** - Time-boxed iteration support
+3. ✅ **Entity Graphs** - Full entity linking with disambiguation (implemented)
+4. 🟡 **Kanban Board Tab** - Card-based issue view in TUI
+5. 🟡 **GitLab Support** - Second forge integration
+6. 🟢 **Sprint Planning** - Time-boxed iteration support
 

@@ -81,12 +81,29 @@ Components:
 - `SyncStatusWidget` - Sync status indicator
 - `StatsWidget` - Project statistics
 - `ContentViewerScreen` - Modal for viewing docs/issues/PRs with prev/next navigation
+- `DraggableSplitter` - Resizable panel divider
 
 Project Tree Features:
 - **Hierarchical grouping** - Projects organized by org (`🏢 owner`)
 - **Inline documentation** - Docs tree under each repo (`📚 Docs`)
 - **Entity categories** - Users (`👤`), Languages (`💻`), Packages (`📦`)
 - **Click to navigate** - Select docs to open viewer, entities to link
+
+**Internal Dossier Links:**
+
+The Dossier tab supports clickable `dossier://` links for in-app navigation:
+
+| Link Format | Action |
+|-------------|--------|
+| `dossier://tab/languages` | Switch to Languages tab |
+| `dossier://lang/python` | Link to `lang/python` entity |
+| `dossier://pkg/fastapi` | Link to `pkg/fastapi` entity |
+| `dossier://user/username` | Show contributor info |
+| `dossier://issue/123` | Open issue viewer |
+| `dossier://pr/456` | Open PR viewer |
+| `dossier://release/v1.0.0` | Show release info |
+| `dossier://branch/main` | Show branch info |
+| `dossier://doc/readme` | Open doc in viewer |
 
 Tabs (11 total):
 - **Dossier** - Formatted project overview with component tree
@@ -201,6 +218,8 @@ class ProjectVersion(SQLModel, table=True):
     minor: int | None      # 2  
     patch: int | None      # 3
     prerelease: str | None # "beta"
+    build_metadata: str | None  # "build"
+    source: str = "release"    # release, pyproject, package_json, manual
     is_latest: bool = False
 
 # Documentation at multiple detail levels

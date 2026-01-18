@@ -143,7 +143,7 @@ Click on documentation, issues, or PRs in the tree to open the **content viewer*
 - **Keyboard shortcuts** - `n`/`p` or `j`/`k` to navigate, `q` to close
 - **Open in browser** - Jump to GitHub for full context
 
-### ### The dashboard shows:
+### The dashboard shows:
 - **Project Tree** - Hierarchical browser with org grouping and inline docs
 - **Dossier Tab** - Formatted project overview with component tree (languages, dependencies, contributors)
 - **Details Tab** - Project metadata, clickable GitHub links, timestamps

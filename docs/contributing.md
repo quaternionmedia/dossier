@@ -263,12 +263,17 @@ The TUI tests include parameterized screenshot generation for documentation:
 ```bash
 # Generate all screenshots to docs/screenshots/
 uv run pytest tests/test_tui.py::TestTUIScreenshotsParameterized --screenshots -v
+
+# Or via the CLI test command
+uv run dossier test --screenshots
 ```
 
 Screenshots are generated at multiple resolutions:
 - **Desktop** (120x40) - Standard terminal size
 - **Wide** (160x50) - Wide terminal 
 - **Compact** (80x30) - Minimal terminal
+
+**Note:** Screenshots require test projects to be seeded first. The test suite handles this automatically.
 
 ### Writing Tests
 
@@ -332,7 +337,7 @@ Brief description of changes.
 ## Testing
 Describe how you tested the changes.
 
-## Checklist
+## Checklistgit add -A && git commit -m "feat(tui): add entity tree expansion, clickable dossier links, and dashboard docs"
 - [ ] Tests added/updated
 - [ ] Documentation updated
 - [ ] Changelog updated

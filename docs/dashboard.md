@@ -295,7 +295,8 @@ Click on documentation in the tree or docs tab to open the **Content Viewer**:
 | `a` | Add new project |
 | `d` | Delete selected project(s) |
 | `o` | Open GitHub in browser |
-| `l` | Link selected item as project |
+| `l` | Link selected tree item as project |
+| `c` | Add component relationship |
 | `/` | Focus search/command bar |
 | `f` | Cycle filter (All → Synced → Unsynced → Starred) |
 | `?` | Show help |
