@@ -7,8 +7,18 @@
 [![Tests](https://github.com/quaternionmedia/dossier/actions/workflows/test.yml/badge.svg)](https://github.com/quaternionmedia/dossier/actions)
 
 <p align="center">
-  <img src="docs/dashboard.svg" alt="Dossier TUI Dashboard" width="800">
+  <img src="docs/screenshots/tab_dossier_wide.svg" alt="Dossier Tab" width="800">
 </p>
+<p align="center">
+  <img src="docs/screenshots/tab_prs_desktop.svg" alt="Dossier Pull Requests" width="800">
+</p>
+<p align="center">
+  <img src="docs/screenshots/dashboard_help.svg" alt="Dossier Help" width="800">
+</p>
+<p align="center">
+  <img src="docs/screenshots/content_viewer_readme.svg" alt="Dossier Content Viewer" width="800">
+</p>
+
 
 ## ⚡ TL;DR - Get Running in 60 Seconds
 
@@ -29,7 +39,7 @@ uv run dossier github sync-user YOUR_USERNAME && uv run dossier dashboard
 
 ## Why Dossier?
 
-**Tired of context-switching between Jira, GitHub, Notion, and spreadsheets?** Dossier unifies project tracking into a single, data-modeled interface that:
+**Feeling tired of context-switching between Jira, GitHub, Notion, and spreadsheets?** Dossier unifies project tracking into a single, data-modeled interface that:
 
 - **Works offline** — Local SQLite cache, sync when connected
 - **Scales across domains** — Same fixed layouts whether tracking 1 repo or 100 orgs
@@ -41,7 +51,7 @@ uv run dossier github sync-user YOUR_USERNAME && uv run dossier dashboard
 | Feature | Description |
 |---------|-------------|
 | 🎯 **Cross-Domain Tracking** | Unified view across repos, teams, orgs — no more tab sprawl |
-| 📦 **Data-Modeled** | 13 SQLModel schemas: Projects, Issues, PRs, Versions, Branches, Dependencies, Contributors, and more |
+| 📦 **Data-Modeled** | SQLModel schemas: Projects, Issues, PRs, Versions, Branches, Dependencies, Contributors, and more |
 | 🔄 **Cache-Merge Architecture** | Offline-first local cache, merge upstream changes on sync |
 | 🖥️ **Hierarchical Project Tree** | Auto-organized by org with inline documentation tree |
 | 📄 **Content Viewer** | Click docs/issues/PRs to preview inline with prev/next navigation |
@@ -50,9 +60,9 @@ uv run dossier github sync-user YOUR_USERNAME && uv run dossier dashboard
 | 📤 **Portable Exports** | `.dossier` YAML files for sharing and archival |
 | 🐙 **GitHub Native** | Deep integration with repos, users, orgs — but not locked to it |
 
-### Hierarchical Project Browser + 11 Tabs
+### Hierarchical Project Browser
 
-Projects auto-organized by org, with docs tree inline. Same 11 tabs, same positions, every project:
+Projects auto-organized by org, with docs tree inline. Same tabs, same positions, every project:
 
 `Dossier` • `Details` • `Documentation` • `Languages` • `Branches` • `Dependencies` • `Contributors` • `Issues` • `Pull Requests` • `Releases` • `Components`
 

@@ -194,6 +194,231 @@ class TestTUIScreenshots:
 
 
 @pytest.mark.screenshot
+class TestTUIContentViewer:
+    """Screenshot tests for the ContentViewerScreen (markdown viewer).
+    
+    Run with: uv run pytest tests/test_tui.py -k ContentViewer --screenshots -v
+    """
+    
+    @pytest.mark.asyncio
+    async def test_screenshot_content_viewer_doc(self, screenshot_helper) -> None:
+        """Capture screenshot of content viewer showing documentation."""
+        from dossier.tui.app import ContentViewerScreen
+        from dossier.tui import DossierApp
+        
+        sample_content = """# Quick Start Guide
+
+Get running with Dossier in 5 minutes.
+
+## Installation
+
+```bash
+uv sync
+uv run dossier dashboard
+```
+
+## First Steps
+
+1. **Sync your GitHub repos**: `uv run dossier github sync-user YOUR_USERNAME`
+2. **Launch the dashboard**: `uv run dossier dashboard`
+3. **Browse projects**: Use arrow keys to navigate, Enter to select
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `q` | Quit |
+| `s` | Sync |
+| `a` | Add project |
+| `/` | Search |
+"""
+        
+        app = DossierApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            
+            # Push the content viewer screen
+            viewer = ContentViewerScreen(
+                title="Quick Start Guide",
+                content=sample_content,
+                file_path="docs/quickstart.md",
+                url="https://github.com/example/repo/blob/main/docs/quickstart.md",
+                doc_index=0,
+                doc_list=["quickstart.md", "overview.md", "workflows.md"],
+            )
+            app.push_screen(viewer)
+            await pilot.pause()
+            await pilot.pause()
+            
+            path = await screenshot_helper.capture(
+                app,
+                "content_viewer_doc",
+                title="Content Viewer - Documentation"
+            )
+            if path:
+                assert path.exists()
+    
+    @pytest.mark.asyncio
+    async def test_screenshot_content_viewer_readme(self, screenshot_helper) -> None:
+        """Capture screenshot of content viewer showing a README."""
+        from dossier.tui.app import ContentViewerScreen
+        from dossier.tui import DossierApp
+        
+        sample_readme = """# Dossier
+
+[![PyPI version](https://badge.fury.io/py/dossier.svg)](https://pypi.org/project/dossier/)
+
+**Decentralized project tracking system** — a modern replacement for Jira.
+
+## Features
+
+- 🔄 **Sync GitHub repos** — Issues, PRs, releases, languages, contributors
+- 📊 **TUI Dashboard** — Keyboard-driven terminal interface
+- 🗃️ **Local SQLite cache** — Works offline, queries fast
+- 📁 **Portable exports** — `.dossier` YAML files for sharing
+
+## Quick Start
+
+```bash
+pip install dossier
+dossier github sync-user YOUR_USERNAME
+dossier dashboard
+```
+
+## Documentation
+
+- [Overview](docs/overview.md)
+- [Quickstart](docs/quickstart.md)
+- [Dashboard Guide](docs/dashboard.md)
+"""
+        
+        app = DossierApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            
+            viewer = ContentViewerScreen(
+                title="README",
+                content=sample_readme,
+                file_path="README.md",
+                url="https://github.com/example/repo/blob/main/README.md",
+            )
+            app.push_screen(viewer)
+            await pilot.pause()
+            await pilot.pause()
+            
+            path = await screenshot_helper.capture(
+                app,
+                "content_viewer_readme",
+                title="Content Viewer - README"
+            )
+            if path:
+                assert path.exists()
+    
+    @pytest.mark.asyncio
+    async def test_screenshot_content_viewer_with_navigation(self, screenshot_helper) -> None:
+        """Capture screenshot of content viewer with prev/next navigation."""
+        from dossier.tui.app import ContentViewerScreen
+        from dossier.tui import DossierApp
+        
+        sample_content = """# Architecture Overview
+
+Dossier uses a layered architecture:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Interface Layer                       │
+│  TUI Dashboard │ CLI │ REST API │ Command Explorer      │
+├─────────────────────────────────────────────────────────┤
+│                    Business Layer                        │
+│  GitHub Parser │ Autolinker │ Dossier Exporter          │
+├─────────────────────────────────────────────────────────┤
+│                    Data Layer                            │
+│  SQLModel Schemas │ SQLite Cache                        │
+└─────────────────────────────────────────────────────────┘
+```
+
+## Data Models
+
+13 typed SQLModel schemas for consistent querying.
+"""
+        
+        app = DossierApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            
+            # Show viewer with navigation (middle of list)
+            viewer = ContentViewerScreen(
+                title="Architecture",
+                content=sample_content,
+                file_path="docs/architecture.md",
+                doc_index=2,
+                doc_list=["overview.md", "quickstart.md", "architecture.md", "extending.md", "contributing.md"],
+            )
+            app.push_screen(viewer)
+            await pilot.pause()
+            await pilot.pause()
+            
+            path = await screenshot_helper.capture(
+                app,
+                "content_viewer_navigation",
+                title="Content Viewer - With Navigation"
+            )
+            if path:
+                assert path.exists()
+
+
+@pytest.mark.screenshot
+class TestTUIFilterStates:
+    """Screenshot tests for filter states.
+    
+    Run with: uv run pytest tests/test_tui.py -k FilterStates --screenshots -v
+    """
+    
+    @pytest.mark.asyncio
+    async def test_screenshot_filter_synced(self, screenshot_helper) -> None:
+        """Capture screenshot with synced filter active."""
+        from dossier.tui import DossierApp
+        
+        app = DossierApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            
+            # Press 'f' to cycle filter to "Synced"
+            await pilot.press("f")
+            await pilot.pause()
+            
+            path = await screenshot_helper.capture(
+                app,
+                "dashboard_filter_synced",
+                title="Dashboard - Synced Filter"
+            )
+            if path:
+                assert path.exists()
+    
+    @pytest.mark.asyncio
+    async def test_screenshot_filter_unsynced(self, screenshot_helper) -> None:
+        """Capture screenshot with unsynced filter active."""
+        from dossier.tui import DossierApp
+        
+        app = DossierApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            
+            # Press 'f' twice to cycle filter to "Unsynced"
+            await pilot.press("f")
+            await pilot.press("f")
+            await pilot.pause()
+            
+            path = await screenshot_helper.capture(
+                app,
+                "dashboard_filter_unsynced",
+                title="Dashboard - Unsynced Filter"
+            )
+            if path:
+                assert path.exists()
+
+
+@pytest.mark.screenshot
 class TestTUIScreenshotsParameterized:
     """Parameterized screenshot tests for all tabs and resolutions.
     

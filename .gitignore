@@ -78,7 +78,11 @@ temp/
 *.tmp
 *.temp
 
-docs/screenshots/
+docs/screenshots/*
+!docs/screenshots/dashboard_help.svg
+!docs/screenshots/tab_dossier_wide.svg
+!docs/screenshots/tab_prs_desktop.svg
+!docs/screenshots/content_viewer_readme.svg
 
 # Jupyter Notebook
 .ipynb_checkpoints/
