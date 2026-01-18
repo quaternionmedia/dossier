@@ -40,6 +40,7 @@ from dossier.models import (
     ProjectLanguage,
     ProjectPullRequest,
     ProjectRelease,
+    ProjectVersion,
 )
 from dossier.dossier_file import generate_dossier
 
@@ -1119,12 +1120,18 @@ class DossierApp(App):
         
         Each tree node stores navigation data as a dict:
         - {"type": "project", "name": "owner/repo"} - Navigate to project
-        - {"type": "tab", "tab_id": "tab-languages"} - Switch to tab
+        - {"type": "section", "section": "languages"} - Switch to tab
         - {"type": "url", "url": "https://..."} - Open URL
+        - {"type": "language|dependency|contributor|doc|version|branch|issue|pr", ...} - Linkable entities
         """
         tree = self.query_one("#component-tree", Tree)
         tree.clear()
         tree.root.expand()
+        
+        # Build base URLs for linking
+        base_url = ""
+        if project.github_owner and project.github_repo:
+            base_url = f"https://github.com/{project.github_owner}/{project.github_repo}"
         
         with self.session_factory() as session:
             # Get parent projects (this project is a child of)
@@ -1140,25 +1147,65 @@ class DossierApp(App):
                 .order_by(ProjectComponent.order)
             ).all()
             
-            # Get languages
+            # Get all data entities
             languages = session.exec(
                 select(ProjectLanguage)
                 .where(ProjectLanguage.project_id == project.id)
                 .order_by(ProjectLanguage.percentage.desc())
             ).all()
             
-            # Get dependencies
             dependencies = session.exec(
                 select(ProjectDependency)
                 .where(ProjectDependency.project_id == project.id)
                 .order_by(ProjectDependency.dep_type, ProjectDependency.name)
             ).all()
             
-            # Get contributors
             contributors = session.exec(
                 select(ProjectContributor)
                 .where(ProjectContributor.project_id == project.id)
                 .order_by(ProjectContributor.contributions.desc())
+            ).all()
+            
+            # Get documentation sections
+            doc_sections = session.exec(
+                select(DocumentSection)
+                .where(DocumentSection.project_id == project.id)
+                .order_by(DocumentSection.order)
+            ).all()
+            
+            # Get releases/versions
+            releases = session.exec(
+                select(ProjectRelease)
+                .where(ProjectRelease.project_id == project.id)
+                .order_by(ProjectRelease.release_published_at.desc())
+            ).all()
+            
+            # Get versions (if available)
+            versions = session.exec(
+                select(ProjectVersion)
+                .where(ProjectVersion.project_id == project.id)
+                .order_by(ProjectVersion.major.desc(), ProjectVersion.minor.desc(), ProjectVersion.patch.desc())
+            ).all()
+            
+            # Get branches
+            branches = session.exec(
+                select(ProjectBranch)
+                .where(ProjectBranch.project_id == project.id)
+                .order_by(ProjectBranch.is_default.desc(), ProjectBranch.name)
+            ).all()
+            
+            # Get issues
+            issues = session.exec(
+                select(ProjectIssue)
+                .where(ProjectIssue.project_id == project.id)
+                .order_by(ProjectIssue.issue_number.desc())
+            ).all()
+            
+            # Get pull requests
+            prs = session.exec(
+                select(ProjectPullRequest)
+                .where(ProjectPullRequest.project_id == project.id)
+                .order_by(ProjectPullRequest.pr_number.desc())
             ).all()
             
             # Add parent section if there are parents
@@ -1167,7 +1214,7 @@ class DossierApp(App):
                 for link in parent_links:
                     parent = session.get(Project, link.parent_id)
                     if parent:
-                        type_icon = {"component": "🧩", "dependency": "📦", "related": "🔗", "language": "🌐", "contributor": "👤"}.get(link.relationship_type, "•")
+                        type_icon = {"component": "🧩", "dependency": "📦", "related": "🔗", "language": "🌐", "contributor": "👤", "doc": "📄", "version": "🏷️", "branch": "🌿", "issue": "🐛", "pr": "🔀"}.get(link.relationship_type, "•")
                         node = parents_node.add_leaf(f"{type_icon} {parent.name}")
                         node.data = {"type": "project", "name": parent.name}
             
@@ -1180,7 +1227,7 @@ class DossierApp(App):
                 for link in child_links:
                     child = session.get(Project, link.child_id)
                     if child:
-                        type_icon = {"component": "🧩", "dependency": "📦", "related": "🔗", "language": "🌐", "contributor": "👤"}.get(link.relationship_type, "•")
+                        type_icon = {"component": "🧩", "dependency": "📦", "related": "🔗", "language": "🌐", "contributor": "👤", "doc": "📄", "version": "🏷️", "branch": "🌿", "issue": "🐛", "pr": "🔀"}.get(link.relationship_type, "•")
                         child_node = current_node.add(f"{type_icon} {child.name}", expand=True)
                         child_node.data = {"type": "project", "name": child.name}
                         
@@ -1194,18 +1241,101 @@ class DossierApp(App):
                         for gc_link in grandchild_links:
                             grandchild = session.get(Project, gc_link.child_id)
                             if grandchild:
-                                gc_icon = {"component": "🧩", "dependency": "📦", "related": "🔗", "language": "🌐", "contributor": "👤"}.get(gc_link.relationship_type, "•")
+                                gc_icon = {"component": "🧩", "dependency": "📦", "related": "🔗", "language": "🌐", "contributor": "👤", "doc": "📄", "version": "🏷️", "branch": "🌿", "issue": "🐛", "pr": "🔀"}.get(gc_link.relationship_type, "•")
                                 gc_node = child_node.add_leaf(f"{gc_icon} {grandchild.name}")
                                 gc_node.data = {"type": "project", "name": grandchild.name}
             
             if not child_links:
                 current_node.add_leaf("(No linked subprojects)")
             
-            # Add languages section - each language is a linkable entity
+            # === DOCUMENTATION SECTIONS - Linkable entities ===
+            if doc_sections:
+                docs_node = tree.root.add(f"📄 Documentation ({len(doc_sections)})", expand=False)
+                docs_node.data = {"type": "section", "section": "docs"}
+                for doc in doc_sections[:10]:
+                    type_icon = {"readme": "📖", "api": "📡", "setup": "🔧", "guide": "📚", "example": "💡"}.get(doc.section_type, "📄")
+                    leaf = docs_node.add_leaf(f"{type_icon} {doc.title[:40]}")
+                    leaf.data = {
+                        "type": "doc",
+                        "title": doc.title,
+                        "section_type": doc.section_type,
+                        "source_file": doc.source_file,
+                        "project_id": project.id,
+                        "url": f"{base_url}/blob/main/{doc.source_file}" if base_url and doc.source_file else None,
+                    }
+                if len(doc_sections) > 10:
+                    more_leaf = docs_node.add_leaf(f"... and {len(doc_sections) - 10} more")
+                    more_leaf.data = {"type": "section", "section": "docs"}
+            
+            # === VERSIONS/RELEASES - Linkable entities ===
+            # Use versions if available, fall back to releases
+            if versions:
+                ver_node = tree.root.add(f"🏷️ Versions ({len(versions)})", expand=False)
+                ver_node.data = {"type": "section", "section": "releases"}
+                for ver in versions[:10]:
+                    prerelease = f" ({ver.prerelease})" if ver.prerelease else ""
+                    latest = " ⭐" if ver.is_latest else ""
+                    leaf = ver_node.add_leaf(f"• v{ver.version}{prerelease}{latest}")
+                    leaf.data = {
+                        "type": "version",
+                        "version": ver.version,
+                        "major": ver.major,
+                        "minor": ver.minor,
+                        "patch": ver.patch,
+                        "prerelease": ver.prerelease,
+                        "project_id": project.id,
+                        "url": ver.release_url or (f"{base_url}/releases/tag/v{ver.version}" if base_url else None),
+                    }
+                if len(versions) > 10:
+                    more_leaf = ver_node.add_leaf(f"... and {len(versions) - 10} more")
+                    more_leaf.data = {"type": "section", "section": "releases"}
+            elif releases:
+                rel_node = tree.root.add(f"🏷️ Releases ({len(releases)})", expand=False)
+                rel_node.data = {"type": "section", "section": "releases"}
+                for rel in releases[:10]:
+                    type_indicator = ""
+                    if rel.is_prerelease:
+                        type_indicator = " ⚠️"
+                    elif rel.is_draft:
+                        type_indicator = " 📝"
+                    leaf = rel_node.add_leaf(f"• {rel.tag_name}{type_indicator}")
+                    leaf.data = {
+                        "type": "version",
+                        "version": rel.tag_name,
+                        "tag_name": rel.tag_name,
+                        "is_prerelease": rel.is_prerelease,
+                        "project_id": project.id,
+                        "url": f"{base_url}/releases/tag/{rel.tag_name}" if base_url else None,
+                    }
+                if len(releases) > 10:
+                    more_leaf = rel_node.add_leaf(f"... and {len(releases) - 10} more")
+                    more_leaf.data = {"type": "section", "section": "releases"}
+            
+            # === BRANCHES - Linkable entities ===
+            if branches:
+                branch_node = tree.root.add(f"🌿 Branches ({len(branches)})", expand=False)
+                branch_node.data = {"type": "section", "section": "branches"}
+                for branch in branches[:10]:
+                    default = " ⭐" if branch.is_default else ""
+                    protected = " 🔒" if branch.is_protected else ""
+                    leaf = branch_node.add_leaf(f"• {branch.name}{default}{protected}")
+                    leaf.data = {
+                        "type": "branch",
+                        "name": branch.name,
+                        "is_default": branch.is_default,
+                        "is_protected": branch.is_protected,
+                        "project_id": project.id,
+                        "url": f"{base_url}/tree/{branch.name}" if base_url else None,
+                    }
+                if len(branches) > 10:
+                    more_leaf = branch_node.add_leaf(f"... and {len(branches) - 10} more")
+                    more_leaf.data = {"type": "section", "section": "branches"}
+            
+            # === LANGUAGES - Linkable entities ===
             if languages:
                 lang_node = tree.root.add(f"🌐 Languages ({len(languages)})", expand=False)
                 lang_node.data = {"type": "section", "section": "languages"}
-                for lang in languages[:10]:  # Show top 10
+                for lang in languages[:10]:
                     pct = f"{lang.percentage:.1f}%" if lang.percentage else ""
                     leaf = lang_node.add_leaf(f"• {lang.language} {pct}")
                     leaf.data = {
@@ -1217,7 +1347,7 @@ class DossierApp(App):
                     more_leaf = lang_node.add_leaf(f"... and {len(languages) - 10} more")
                     more_leaf.data = {"type": "section", "section": "languages"}
             
-            # Add dependencies section - each dependency is a linkable entity
+            # === DEPENDENCIES - Linkable entities ===
             if dependencies:
                 dep_node = tree.root.add(f"📦 Dependencies ({len(dependencies)})", expand=False)
                 dep_node.data = {"type": "section", "section": "dependencies"}
@@ -1236,6 +1366,7 @@ class DossierApp(App):
                             "type": "dependency",
                             "name": dep.name,
                             "version": dep.version_spec,
+                            "source": dep.source,
                             "project_id": project.id,
                         }
                     if len(runtime_deps) > 8:
@@ -1252,6 +1383,7 @@ class DossierApp(App):
                             "type": "dependency",
                             "name": dep.name,
                             "version": dep.version_spec,
+                            "source": dep.source,
                             "project_id": project.id,
                         }
                     if len(dev_deps) > 8:
@@ -1268,17 +1400,18 @@ class DossierApp(App):
                             "type": "dependency",
                             "name": dep.name,
                             "version": dep.version_spec,
+                            "source": dep.source,
                             "project_id": project.id,
                         }
                     if len(other_deps) > 5:
                         more_leaf = other_node.add_leaf(f"... and {len(other_deps) - 5} more")
                         more_leaf.data = {"type": "section", "section": "dependencies"}
             
-            # Add contributors section - each contributor is a linkable entity
+            # === CONTRIBUTORS - Linkable entities ===
             if contributors:
                 contrib_node = tree.root.add(f"👥 Contributors ({len(contributors)})", expand=False)
                 contrib_node.data = {"type": "section", "section": "contributors"}
-                for contrib in contributors[:10]:  # Show top 10
+                for contrib in contributors[:10]:
                     count = f" ({contrib.contributions})" if contrib.contributions else ""
                     leaf = contrib_node.add_leaf(f"• {contrib.username}{count}")
                     leaf.data = {
@@ -1290,6 +1423,117 @@ class DossierApp(App):
                 if len(contributors) > 10:
                     more_leaf = contrib_node.add_leaf(f"... and {len(contributors) - 10} more")
                     more_leaf.data = {"type": "section", "section": "contributors"}
+            
+            # === ISSUES - Linkable entities ===
+            if issues:
+                open_issues = [i for i in issues if i.state == "open"]
+                closed_issues = [i for i in issues if i.state == "closed"]
+                
+                issues_node = tree.root.add(f"🐛 Issues ({len(issues)})", expand=False)
+                issues_node.data = {"type": "section", "section": "issues"}
+                
+                if open_issues:
+                    open_node = issues_node.add(f"🟢 Open ({len(open_issues)})", expand=False)
+                    open_node.data = {"type": "section", "section": "issues"}
+                    for issue in open_issues[:5]:
+                        leaf = open_node.add_leaf(f"#{issue.issue_number} {issue.title[:30]}")
+                        leaf.data = {
+                            "type": "issue",
+                            "number": issue.issue_number,
+                            "title": issue.title,
+                            "state": issue.state,
+                            "author": issue.author,
+                            "project_id": project.id,
+                            "url": f"{base_url}/issues/{issue.issue_number}" if base_url else None,
+                        }
+                    if len(open_issues) > 5:
+                        more_leaf = open_node.add_leaf(f"... and {len(open_issues) - 5} more")
+                        more_leaf.data = {"type": "section", "section": "issues"}
+                
+                if closed_issues:
+                    closed_node = issues_node.add(f"⚫ Closed ({len(closed_issues)})", expand=False)
+                    closed_node.data = {"type": "section", "section": "issues"}
+                    for issue in closed_issues[:5]:
+                        leaf = closed_node.add_leaf(f"#{issue.issue_number} {issue.title[:30]}")
+                        leaf.data = {
+                            "type": "issue",
+                            "number": issue.issue_number,
+                            "title": issue.title,
+                            "state": issue.state,
+                            "author": issue.author,
+                            "project_id": project.id,
+                            "url": f"{base_url}/issues/{issue.issue_number}" if base_url else None,
+                        }
+                    if len(closed_issues) > 5:
+                        more_leaf = closed_node.add_leaf(f"... and {len(closed_issues) - 5} more")
+                        more_leaf.data = {"type": "section", "section": "issues"}
+            
+            # === PULL REQUESTS - Linkable entities ===
+            if prs:
+                open_prs = [p for p in prs if p.state == "open"]
+                merged_prs = [p for p in prs if p.is_merged]
+                closed_prs = [p for p in prs if p.state == "closed" and not p.is_merged]
+                
+                prs_node = tree.root.add(f"🔀 Pull Requests ({len(prs)})", expand=False)
+                prs_node.data = {"type": "section", "section": "prs"}
+                
+                if open_prs:
+                    open_node = prs_node.add(f"🟢 Open ({len(open_prs)})", expand=False)
+                    open_node.data = {"type": "section", "section": "prs"}
+                    for pr in open_prs[:5]:
+                        draft = " 📝" if pr.is_draft else ""
+                        leaf = open_node.add_leaf(f"#{pr.pr_number} {pr.title[:25]}{draft}")
+                        leaf.data = {
+                            "type": "pr",
+                            "number": pr.pr_number,
+                            "title": pr.title,
+                            "state": pr.state,
+                            "author": pr.author,
+                            "is_merged": pr.is_merged,
+                            "project_id": project.id,
+                            "url": f"{base_url}/pull/{pr.pr_number}" if base_url else None,
+                        }
+                    if len(open_prs) > 5:
+                        more_leaf = open_node.add_leaf(f"... and {len(open_prs) - 5} more")
+                        more_leaf.data = {"type": "section", "section": "prs"}
+                
+                if merged_prs:
+                    merged_node = prs_node.add(f"🟣 Merged ({len(merged_prs)})", expand=False)
+                    merged_node.data = {"type": "section", "section": "prs"}
+                    for pr in merged_prs[:5]:
+                        leaf = merged_node.add_leaf(f"#{pr.pr_number} {pr.title[:28]}")
+                        leaf.data = {
+                            "type": "pr",
+                            "number": pr.pr_number,
+                            "title": pr.title,
+                            "state": pr.state,
+                            "author": pr.author,
+                            "is_merged": pr.is_merged,
+                            "project_id": project.id,
+                            "url": f"{base_url}/pull/{pr.pr_number}" if base_url else None,
+                        }
+                    if len(merged_prs) > 5:
+                        more_leaf = merged_node.add_leaf(f"... and {len(merged_prs) - 5} more")
+                        more_leaf.data = {"type": "section", "section": "prs"}
+                
+                if closed_prs:
+                    closed_node = prs_node.add(f"🔴 Closed ({len(closed_prs)})", expand=False)
+                    closed_node.data = {"type": "section", "section": "prs"}
+                    for pr in closed_prs[:5]:
+                        leaf = closed_node.add_leaf(f"#{pr.pr_number} {pr.title[:28]}")
+                        leaf.data = {
+                            "type": "pr",
+                            "number": pr.pr_number,
+                            "title": pr.title,
+                            "state": pr.state,
+                            "author": pr.author,
+                            "is_merged": pr.is_merged,
+                            "project_id": project.id,
+                            "url": f"{base_url}/pull/{pr.pr_number}" if base_url else None,
+                        }
+                    if len(closed_prs) > 5:
+                        more_leaf = closed_node.add_leaf(f"... and {len(closed_prs) - 5} more")
+                        more_leaf.data = {"type": "section", "section": "prs"}
             
             # Update tree label
             tree.root.label = f"🌳 {project.name}"
@@ -1320,6 +1564,11 @@ class DossierApp(App):
                 "languages": "tab-languages",
                 "dependencies": "tab-dependencies", 
                 "contributors": "tab-contributors",
+                "docs": "tab-docs",
+                "releases": "tab-releases",
+                "branches": "tab-branches",
+                "issues": "tab-issues",
+                "prs": "tab-prs",
             }
             tab_id = tab_map.get(section)
             if tab_id:
@@ -1338,6 +1587,26 @@ class DossierApp(App):
         elif nav_type == "contributor":
             # Create/find contributor project and link it
             self._link_contributor_project(nav_data)
+        
+        elif nav_type == "doc":
+            # Create/find documentation project and link it
+            self._link_doc_project(nav_data)
+        
+        elif nav_type == "version":
+            # Create/find version project and link it
+            self._link_version_project(nav_data)
+        
+        elif nav_type == "branch":
+            # Create/find branch project and link it
+            self._link_branch_project(nav_data)
+        
+        elif nav_type == "issue":
+            # Create/find issue project and link it
+            self._link_issue_project(nav_data)
+        
+        elif nav_type == "pr":
+            # Create/find PR project and link it
+            self._link_pr_project(nav_data)
         
         elif nav_type == "url":
             # Open URL in browser
@@ -1513,6 +1782,281 @@ class DossierApp(App):
                 self.notify(f"{username} already linked", severity="warning")
         
         # Refresh the tree and navigate to the contributor project
+        self.load_projects()
+        self._select_project_by_name(project_name)
+    
+    def _link_doc_project(self, nav_data: dict) -> None:
+        """Create or find a documentation project and link it to the current project."""
+        title = nav_data.get("title")
+        section_type = nav_data.get("section_type", "doc")
+        source_file = nav_data.get("source_file")
+        parent_project_id = nav_data.get("project_id")
+        url = nav_data.get("url")
+        
+        if not title or not parent_project_id:
+            return
+        
+        # Create a project name for the doc (e.g., "doc/readme-getting-started")
+        slug = title.lower().replace(" ", "-")[:30]
+        project_name = f"doc/{section_type}-{slug}"
+        
+        with self.session_factory() as session:
+            doc_project = session.exec(
+                select(Project).where(Project.name == project_name)
+            ).first()
+            
+            if not doc_project:
+                doc_project = Project(
+                    name=project_name,
+                    description=f"Documentation: {title}",
+                    repository_url=url,
+                    documentation_path=source_file,
+                )
+                session.add(doc_project)
+                session.commit()
+                session.refresh(doc_project)
+                self.notify(f"Created doc project: {project_name}")
+            
+            existing_link = session.exec(
+                select(ProjectComponent).where(
+                    ProjectComponent.parent_id == parent_project_id,
+                    ProjectComponent.child_id == doc_project.id,
+                )
+            ).first()
+            
+            if not existing_link:
+                link = ProjectComponent(
+                    parent_id=parent_project_id,
+                    child_id=doc_project.id,
+                    relationship_type="doc",
+                    order=0,
+                )
+                session.add(link)
+                session.commit()
+                self.notify(f"Linked '{title}' as documentation")
+            else:
+                self.notify(f"'{title}' already linked", severity="warning")
+        
+        self.load_projects()
+        self._select_project_by_name(project_name)
+    
+    def _link_version_project(self, nav_data: dict) -> None:
+        """Create or find a version project and link it to the current project."""
+        version = nav_data.get("version")
+        tag_name = nav_data.get("tag_name", version)
+        parent_project_id = nav_data.get("project_id")
+        url = nav_data.get("url")
+        
+        if not version or not parent_project_id:
+            return
+        
+        # Create a project name for the version (e.g., "ver/v1.2.3")
+        # Normalize version string
+        ver_slug = version.lstrip("v").replace("/", "-")
+        project_name = f"ver/v{ver_slug}"
+        
+        with self.session_factory() as session:
+            ver_project = session.exec(
+                select(Project).where(Project.name == project_name)
+            ).first()
+            
+            if not ver_project:
+                ver_project = Project(
+                    name=project_name,
+                    description=f"Version {version}",
+                    repository_url=url,
+                )
+                session.add(ver_project)
+                session.commit()
+                session.refresh(ver_project)
+                self.notify(f"Created version project: {project_name}")
+            
+            existing_link = session.exec(
+                select(ProjectComponent).where(
+                    ProjectComponent.parent_id == parent_project_id,
+                    ProjectComponent.child_id == ver_project.id,
+                )
+            ).first()
+            
+            if not existing_link:
+                link = ProjectComponent(
+                    parent_id=parent_project_id,
+                    child_id=ver_project.id,
+                    relationship_type="version",
+                    order=0,
+                )
+                session.add(link)
+                session.commit()
+                self.notify(f"Linked version {version}")
+            else:
+                self.notify(f"Version {version} already linked", severity="warning")
+        
+        self.load_projects()
+        self._select_project_by_name(project_name)
+    
+    def _link_branch_project(self, nav_data: dict) -> None:
+        """Create or find a branch project and link it to the current project."""
+        name = nav_data.get("name")
+        is_default = nav_data.get("is_default", False)
+        parent_project_id = nav_data.get("project_id")
+        url = nav_data.get("url")
+        
+        if not name or not parent_project_id:
+            return
+        
+        # Create a project name for the branch (e.g., "branch/main")
+        branch_slug = name.replace("/", "-")
+        project_name = f"branch/{branch_slug}"
+        
+        with self.session_factory() as session:
+            branch_project = session.exec(
+                select(Project).where(Project.name == project_name)
+            ).first()
+            
+            if not branch_project:
+                desc = f"Branch: {name}"
+                if is_default:
+                    desc += " (default)"
+                branch_project = Project(
+                    name=project_name,
+                    description=desc,
+                    repository_url=url,
+                )
+                session.add(branch_project)
+                session.commit()
+                session.refresh(branch_project)
+                self.notify(f"Created branch project: {project_name}")
+            
+            existing_link = session.exec(
+                select(ProjectComponent).where(
+                    ProjectComponent.parent_id == parent_project_id,
+                    ProjectComponent.child_id == branch_project.id,
+                )
+            ).first()
+            
+            if not existing_link:
+                link = ProjectComponent(
+                    parent_id=parent_project_id,
+                    child_id=branch_project.id,
+                    relationship_type="branch",
+                    order=0,
+                )
+                session.add(link)
+                session.commit()
+                self.notify(f"Linked branch {name}")
+            else:
+                self.notify(f"Branch {name} already linked", severity="warning")
+        
+        self.load_projects()
+        self._select_project_by_name(project_name)
+    
+    def _link_issue_project(self, nav_data: dict) -> None:
+        """Create or find an issue project and link it to the current project."""
+        number = nav_data.get("number")
+        title = nav_data.get("title", "")
+        state = nav_data.get("state", "open")
+        parent_project_id = nav_data.get("project_id")
+        url = nav_data.get("url")
+        
+        if not number or not parent_project_id:
+            return
+        
+        # Create a project name for the issue (e.g., "issue/123")
+        project_name = f"issue/{number}"
+        
+        with self.session_factory() as session:
+            issue_project = session.exec(
+                select(Project).where(Project.name == project_name)
+            ).first()
+            
+            if not issue_project:
+                desc = f"Issue #{number}: {title[:80]}"
+                issue_project = Project(
+                    name=project_name,
+                    description=desc,
+                    repository_url=url,
+                )
+                session.add(issue_project)
+                session.commit()
+                session.refresh(issue_project)
+                self.notify(f"Created issue project: {project_name}")
+            
+            existing_link = session.exec(
+                select(ProjectComponent).where(
+                    ProjectComponent.parent_id == parent_project_id,
+                    ProjectComponent.child_id == issue_project.id,
+                )
+            ).first()
+            
+            if not existing_link:
+                link = ProjectComponent(
+                    parent_id=parent_project_id,
+                    child_id=issue_project.id,
+                    relationship_type="issue",
+                    order=0,
+                )
+                session.add(link)
+                session.commit()
+                self.notify(f"Linked issue #{number}")
+            else:
+                self.notify(f"Issue #{number} already linked", severity="warning")
+        
+        self.load_projects()
+        self._select_project_by_name(project_name)
+    
+    def _link_pr_project(self, nav_data: dict) -> None:
+        """Create or find a pull request project and link it to the current project."""
+        number = nav_data.get("number")
+        title = nav_data.get("title", "")
+        is_merged = nav_data.get("is_merged", False)
+        parent_project_id = nav_data.get("project_id")
+        url = nav_data.get("url")
+        
+        if not number or not parent_project_id:
+            return
+        
+        # Create a project name for the PR (e.g., "pr/456")
+        project_name = f"pr/{number}"
+        
+        with self.session_factory() as session:
+            pr_project = session.exec(
+                select(Project).where(Project.name == project_name)
+            ).first()
+            
+            if not pr_project:
+                desc = f"PR #{number}: {title[:80]}"
+                if is_merged:
+                    desc += " (merged)"
+                pr_project = Project(
+                    name=project_name,
+                    description=desc,
+                    repository_url=url,
+                )
+                session.add(pr_project)
+                session.commit()
+                session.refresh(pr_project)
+                self.notify(f"Created PR project: {project_name}")
+            
+            existing_link = session.exec(
+                select(ProjectComponent).where(
+                    ProjectComponent.parent_id == parent_project_id,
+                    ProjectComponent.child_id == pr_project.id,
+                )
+            ).first()
+            
+            if not existing_link:
+                link = ProjectComponent(
+                    parent_id=parent_project_id,
+                    child_id=pr_project.id,
+                    relationship_type="pr",
+                    order=0,
+                )
+                session.add(link)
+                session.commit()
+                self.notify(f"Linked PR #{number}")
+            else:
+                self.notify(f"PR #{number} already linked", severity="warning")
+        
         self.load_projects()
         self._select_project_by_name(project_name)
     
@@ -2587,6 +3131,13 @@ class DossierApp(App):
             ).all()
             for pr in prs:
                 session.delete(pr)
+            
+            # Delete versions (must be before releases due to FK constraint)
+            versions = session.exec(
+                select(ProjectVersion).where(ProjectVersion.project_id == project_id)
+            ).all()
+            for version in versions:
+                session.delete(version)
             
             # Delete releases
             releases = session.exec(
