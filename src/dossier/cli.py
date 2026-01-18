@@ -2325,6 +2325,72 @@ def export_show(project_name: str) -> None:
         click.echo(yaml_content)
 
 
+# =============================================================================
+# Test Command - Quick test runner
+# =============================================================================
+
+
+@cli.command("test")
+@click.option("--verbose", "-v", is_flag=True, help="Verbose output")
+@click.option("--coverage", "-c", is_flag=True, help="Run with coverage")
+@click.option("--file", "-f", "test_file", help="Run specific test file")
+@click.option("--keyword", "-k", help="Run tests matching keyword")
+@click.option("--failed", "-x", is_flag=True, help="Stop on first failure")
+@click.option("--screenshots", is_flag=True, help="Generate TUI screenshots")
+def test_cmd(
+    verbose: bool,
+    coverage: bool,
+    test_file: Optional[str],
+    keyword: Optional[str],
+    failed: bool,
+    screenshots: bool,
+) -> None:
+    """Run the test suite (quick by default).
+    
+    Runs pytest with sensible defaults for fast iteration.
+    
+    Examples:
+        dossier test                    # Quick run, all tests
+        dossier test -v                 # Verbose output
+        dossier test -c                 # With coverage report
+        dossier test -f test_cli.py    # Run specific file
+        dossier test -k "github"       # Match keyword
+        dossier test -x                 # Stop on first failure
+        dossier test --screenshots      # Generate TUI screenshots
+    """
+    import subprocess
+    import sys
+    
+    cmd = [sys.executable, "-m", "pytest"]
+    
+    if verbose:
+        cmd.append("-v")
+    
+    if failed:
+        cmd.append("-x")
+    
+    if coverage:
+        cmd.extend(["--cov=dossier", "--cov-report=term-missing"])
+    
+    if keyword:
+        cmd.extend(["-k", keyword])
+    
+    if screenshots:
+        cmd.append("--screenshots")
+    
+    if test_file:
+        # Allow both "test_cli.py" and "tests/test_cli.py"
+        if not test_file.startswith("tests/"):
+            test_file = f"tests/{test_file}"
+        cmd.append(test_file)
+    
+    click.echo(f"Running: {' '.join(cmd)}")
+    click.echo("-" * 60)
+    
+    result = subprocess.run(cmd)
+    raise SystemExit(result.returncode)
+
+
 @cli.command("init")
 @click.argument("project_name", required=False)
 @click.option("--output", "-o", type=click.Path(), help="Output file path")
