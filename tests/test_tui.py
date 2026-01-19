@@ -73,6 +73,28 @@ class TestTUIWidgets:
         """Test StatsWidget can be imported."""
         from dossier.tui.app import StatsWidget
         assert StatsWidget is not None
+    
+    def test_content_viewer_screen_import(self) -> None:
+        """Test ContentViewerScreen can be imported."""
+        from dossier.tui.app import ContentViewerScreen
+        assert ContentViewerScreen is not None
+    
+    def test_content_viewer_has_frogmouth_binding(self) -> None:
+        """Test ContentViewerScreen has frogmouth keybinding."""
+        from dossier.tui.app import ContentViewerScreen
+        binding_keys = [b.key for b in ContentViewerScreen.BINDINGS]
+        assert "f" in binding_keys, "Missing 'f' keybinding for frogmouth"
+        
+        # Find the binding and check action
+        frogmouth_binding = next(b for b in ContentViewerScreen.BINDINGS if b.key == "f")
+        assert frogmouth_binding.action == "open_frogmouth"
+        assert "frogmouth" in frogmouth_binding.description.lower()
+    
+    def test_content_viewer_has_frogmouth_action(self) -> None:
+        """Test ContentViewerScreen has action_open_frogmouth method."""
+        from dossier.tui.app import ContentViewerScreen
+        assert hasattr(ContentViewerScreen, "action_open_frogmouth")
+        assert callable(getattr(ContentViewerScreen, "action_open_frogmouth"))
 
 
 # Define tabs and resolutions for parameterized screenshot tests
@@ -362,6 +384,105 @@ Dossier uses a layered architecture:
                 app,
                 "content_viewer_navigation",
                 title="Content Viewer - With Navigation"
+            )
+            if path:
+                assert path.exists()
+
+
+@pytest.mark.screenshot
+class TestTUIContentViewerFrogmouth:
+    """Screenshot tests for frogmouth integration in ContentViewerScreen.
+    
+    Run with: uv run pytest tests/test_tui.py -k Frogmouth --screenshots -v
+    """
+    
+    @pytest.mark.asyncio
+    async def test_screenshot_content_viewer_frogmouth_button(self, screenshot_helper) -> None:
+        """Capture screenshot of content viewer showing frogmouth button."""
+        from dossier.tui.app import ContentViewerScreen
+        from dossier.tui import DossierApp
+        
+        sample_content = """# Sample Documentation
+
+This is a sample markdown document to demonstrate the frogmouth viewer integration.
+
+## Features
+
+- **Keyboard shortcut**: Press `f` to open in frogmouth
+- **Button**: Click the 🐸 Frogmouth button in the footer
+- **External viewer**: Full-featured markdown rendering
+
+## Installation
+
+```bash
+uv tool install frogmouth
+```
+
+The frogmouth viewer provides enhanced markdown rendering with:
+- Syntax highlighting
+- Table of contents navigation
+- Link following
+"""
+        
+        app = DossierApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            
+            viewer = ContentViewerScreen(
+                title="Sample Documentation",
+                content=sample_content,
+                file_path="docs/sample.md",
+                url="https://github.com/example/repo/blob/main/docs/sample.md",
+            )
+            app.push_screen(viewer)
+            await pilot.pause()
+            await pilot.pause()
+            
+            path = await screenshot_helper.capture(
+                app,
+                "content_viewer_frogmouth_button",
+                title="Content Viewer - Frogmouth Button"
+            )
+            if path:
+                assert path.exists()
+    
+    @pytest.mark.asyncio
+    async def test_screenshot_content_viewer_footer_buttons(self, screenshot_helper) -> None:
+        """Capture screenshot showing all footer buttons including frogmouth."""
+        from dossier.tui.app import ContentViewerScreen
+        from dossier.tui import DossierApp
+        
+        sample_content = """# Footer Buttons Demo
+
+This screenshot demonstrates all available footer buttons:
+
+1. **Close** - Close the viewer (Escape or q)
+2. **🌐 Browser** - Open in external browser (o)
+3. **🐸 Frogmouth** - Open in frogmouth viewer (f)
+4. **◀ Prev / Next ▶** - Navigate between docs (p/n)
+"""
+        
+        app = DossierApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            
+            # Show viewer with all buttons visible (navigation enabled)
+            viewer = ContentViewerScreen(
+                title="Footer Buttons",
+                content=sample_content,
+                file_path="docs/buttons.md",
+                url="https://github.com/example/repo/blob/main/docs/buttons.md",
+                doc_index=1,
+                doc_list=["overview.md", "buttons.md", "advanced.md"],
+            )
+            app.push_screen(viewer)
+            await pilot.pause()
+            await pilot.pause()
+            
+            path = await screenshot_helper.capture(
+                app,
+                "content_viewer_footer_buttons",
+                title="Content Viewer - All Footer Buttons"
             )
             if path:
                 assert path.exists()
