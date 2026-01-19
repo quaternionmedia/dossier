@@ -19,7 +19,7 @@ Press `` ` `` (backtick) anywhere in the dashboard to open the settings overlay.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ �️  App Info                                                    │
+│ ⚙️  App Info                                                    │
 ├─────────────────────────────────────────────────────────────────┤
 │ Version:      0.1.0                                             │
 │ Python:       3.13.3                                            │
@@ -27,20 +27,21 @@ Press `` ` `` (backtick) anywhere in the dashboard to open the settings overlay.
 │ Database:     C:\Users\you\.dossier\dossier.db                  │
 │ DB Size:      2.4 MB                                            │
 │ Projects:     42                                                │
+│ Config:       C:\Users\you\.dossier\config.json                 │
 ├─────────────────────────────────────────────────────────────────┤
 │ 🎨 Theme                                                        │
+│ ○ Textual Dark  ○ Textual Light  ○ Nord  ...                    │
 ├─────────────────────────────────────────────────────────────────┤
-│ ○ Textual Dark                                                  │
-│ ○ Textual Light                                                 │
-│ ○ Nord                                                          │
-│ ○ Gruvbox                                                       │
-│ ● Catppuccin Mocha                                              │
-│ ○ Dracula                                                       │
-│ ○ Tokyo Night                                                   │
-│ ○ Monokai                                                       │
-│ ○ Solarized Light                                               │
+│ 📋 Default Tab                                                  │
+│ ● Dossier  ○ Details  ○ Documentation  ...                      │
 ├─────────────────────────────────────────────────────────────────┤
-│                         [Close]                                 │
+│ 🔄 Sync Preferences                                             │
+│ Batch size: [10]     Delay (seconds): [1.0]                     │
+├─────────────────────────────────────────────────────────────────┤
+│ 📁 Export Format                                                │
+│ ● YAML (.dossier)  ○ JSON (.json)                               │
+├─────────────────────────────────────────────────────────────────┤
+│           [Save]  [Reset]  [Close]                              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -58,12 +59,13 @@ The settings overlay displays useful debugging and system information:
 | **Database** | Full path to SQLite database file |
 | **DB Size** | Size of database on disk (B, KB, or MB) |
 | **Projects** | Total number of projects in database |
+| **Config** | Path to configuration file |
 
 This information is useful for:
 - Debugging issues
 - Reporting bugs
 - Verifying installation
-- Checking database location
+- Checking database and config locations
 
 ---
 
@@ -94,10 +96,87 @@ Dossier supports 9 built-in themes. Select a theme by clicking or using arrow ke
 
 1. Press `` ` `` to open settings
 2. Use `↑`/`↓` or click to select a theme
-3. Theme applies immediately
-4. Press `Escape` or click **Close** to dismiss
+3. Theme applies immediately (preview)
+4. Click **Save** to persist the theme
+5. Press **Close** or `Escape` to dismiss
 
-**Note:** Theme selection is not persisted between sessions. The dashboard always starts with the default theme (Textual Dark).
+---
+
+## Default Tab
+
+Choose which tab opens when you select a project:
+
+| Tab | Description |
+|-----|-------------|
+| **Dossier** | Formatted overview with component tree (default) |
+| **Details** | Raw project metadata |
+| **Documentation** | Parsed doc sections |
+| **Languages** | Language breakdown |
+| **Branches** | Repository branches |
+| **Dependencies** | Package dependencies |
+| **Contributors** | Top contributors |
+| **Issues** | GitHub issues |
+| **Pull Requests** | PRs with diff stats |
+| **Releases** | Version releases |
+| **Components** | Project relationships |
+
+---
+
+## Sync Preferences
+
+Configure batch operations for GitHub sync:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| **Batch size** | 10 | Number of repos to sync per batch |
+| **Delay** | 1.0 | Seconds between batches (rate limiting) |
+
+Adjust these if you're hitting rate limits or want faster syncing.
+
+---
+
+## Export Format
+
+Choose the default format for project exports:
+
+| Format | Extension | Description |
+|--------|-----------|-------------|
+| **YAML** | `.dossier` | Human-readable, standard Dossier format |
+| **JSON** | `.json` | Machine-readable, compact |
+
+---
+
+## Saving Settings
+
+Settings are saved to `~/.dossier/config.json`.
+
+| Button | Action |
+|--------|--------|
+| **Save** | Persist all settings to config file |
+| **Reset** | Reset all settings to defaults |
+| **Close** | Close without saving (changes are lost) |
+
+**Note:** Theme changes preview immediately but are only saved when you click **Save**.
+
+---
+
+## Configuration File
+
+Settings are stored in JSON format at `~/.dossier/config.json`:
+
+```json
+{
+  "theme": "catppuccin-mocha",
+  "default_tab": "tab-dossier",
+  "tree_density": "comfortable",
+  "sync_batch_size": 10,
+  "sync_delay": 1.0,
+  "export_format": "yaml",
+  "sidebar_width": null
+}
+```
+
+You can edit this file directly, but changes only take effect when you restart the dashboard.
 
 ---
 
@@ -106,23 +185,11 @@ Dossier supports 9 built-in themes. Select a theme by clicking or using arrow ke
 | Key | Action |
 |-----|--------|
 | `` ` `` | Open settings overlay |
-| `↑` / `↓` | Navigate theme options |
-| `Enter` / `Space` | Select theme |
+| `↑` / `↓` | Navigate options |
+| `Enter` / `Space` | Select option |
+| `Tab` | Move between sections |
 | `Escape` | Close settings |
 | `q` | Close settings |
-
----
-
-## Future Settings
-
-Planned settings for future releases:
-
-- [ ] **Persist theme** — Save theme preference to config file
-- [ ] **Default tab** — Choose which tab opens on project select
-- [ ] **Tree density** — Compact vs comfortable spacing
-- [ ] **Sync preferences** — Default batch size, rate limit behavior
-- [ ] **Keyboard shortcuts** — Customize key bindings
-- [ ] **Export format** — Default export format preferences
 
 ---
 

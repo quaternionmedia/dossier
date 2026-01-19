@@ -725,6 +725,11 @@ class DossierApp(App):
             init_db()
             session_factory = get_session
         self.session_factory = session_factory
+        
+        # Load config and apply saved settings
+        from dossier.config import DossierConfig
+        self._config = DossierConfig.load()
+        self.theme = self._config.theme
     
     def compose(self) -> ComposeResult:
         yield Header()
@@ -1944,10 +1949,10 @@ class DossierApp(App):
             if project:
                 self.selected_project = project
                 self.show_project_details(project)
-                # Switch to Dossier tab by default, unless navigating from tree
+                # Switch to configured default tab, unless navigating from tree
                 if not self._navigating_from_tree:
                     tabbed_content = self.query_one("#project-tabs", TabbedContent)
-                    tabbed_content.active = "tab-dossier"
+                    tabbed_content.active = self._config.default_tab
                 elif self._tree_target_tab:
                     tabbed_content = self.query_one("#project-tabs", TabbedContent)
                     tabbed_content.active = self._tree_target_tab
@@ -6137,10 +6142,17 @@ Set `GITHUB_TOKEN` environment variable for:
         from pathlib import Path
         
         from textual.screen import ModalScreen
-        from textual.widgets import Button, RadioButton, RadioSet
+        from textual.widgets import Button, RadioButton, RadioSet, Switch, Input
         from textual.containers import Vertical, Horizontal, VerticalScroll
         
         from dossier import __version__
+        from dossier.config import (
+            DossierConfig, 
+            AVAILABLE_THEMES, 
+            AVAILABLE_TABS,
+            TREE_DENSITY_OPTIONS,
+            EXPORT_FORMAT_OPTIONS,
+        )
         
         # Get database path and stats
         db_path = Path.home() / ".dossier" / "dossier.db"
@@ -6164,24 +6176,12 @@ Set `GITHUB_TOKEN` environment variable for:
         except Exception:
             pass
         
-        # Available themes (Textual built-in themes)
-        available_themes = [
-            ("textual-dark", "Textual Dark"),
-            ("textual-light", "Textual Light"),
-            ("nord", "Nord"),
-            ("gruvbox", "Gruvbox"),
-            ("catppuccin-mocha", "Catppuccin Mocha"),
-            ("dracula", "Dracula"),
-            ("tokyo-night", "Tokyo Night"),
-            ("monokai", "Monokai"),
-            ("solarized-light", "Solarized Light"),
-        ]
-        
-        current_theme = self.theme or "textual-dark"
-        app_ref = self  # Reference to app for theme changes
+        # Load current config
+        config = self._config
+        app_ref = self  # Reference to app for settings changes
         
         class SettingsScreen(ModalScreen):
-            """Settings screen with theme selection and app info."""
+            """Settings screen with theme selection, preferences, and app info."""
             
             CSS = """
             SettingsScreen {
@@ -6189,9 +6189,9 @@ Set `GITHUB_TOKEN` environment variable for:
             }
             
             #settings-dialog {
-                width: 70;
+                width: 80;
                 height: auto;
-                max-height: 85%;
+                max-height: 90%;
                 padding: 1 2;
                 background: $surface;
                 border: solid $primary;
@@ -6199,7 +6199,7 @@ Set `GITHUB_TOKEN` environment variable for:
             
             #settings-scroll {
                 height: auto;
-                max-height: 60;
+                max-height: 70;
             }
             
             .settings-section {
@@ -6210,6 +6210,12 @@ Set `GITHUB_TOKEN` environment variable for:
                 text-style: bold;
                 margin-bottom: 1;
                 color: $primary;
+            }
+            
+            .settings-sublabel {
+                margin-top: 1;
+                margin-bottom: 0;
+                color: $text-muted;
             }
             
             .info-row {
@@ -6226,7 +6232,26 @@ Set `GITHUB_TOKEN` environment variable for:
                 width: 1fr;
             }
             
+            .setting-row {
+                height: 3;
+                margin-bottom: 1;
+                align: left middle;
+            }
+            
+            .setting-row-label {
+                width: 25;
+            }
+            
+            .setting-row-control {
+                width: 1fr;
+            }
+            
             #theme-select {
+                margin: 1 0;
+                height: auto;
+            }
+            
+            #default-tab-select {
                 margin: 1 0;
                 height: auto;
             }
@@ -6239,6 +6264,10 @@ Set `GITHUB_TOKEN` environment variable for:
             
             #settings-buttons Button {
                 margin: 0 1;
+            }
+            
+            .sync-input {
+                width: 10;
             }
             """
             
@@ -6271,32 +6300,139 @@ Set `GITHUB_TOKEN` environment variable for:
                             with Horizontal(classes="info-row"):
                                 yield Static("Projects:", classes="info-label")
                                 yield Static(f"{project_count}", classes="info-value")
+                            with Horizontal(classes="info-row"):
+                                yield Static("Config:", classes="info-label")
+                                yield Static(f"{DossierConfig.get_config_path()}", classes="info-value")
                         
                         yield Rule()
                         
                         # Theme Section
                         yield Static("🎨 Theme", classes="settings-label")
                         with RadioSet(id="theme-select"):
-                            for theme_id, theme_name in available_themes:
+                            for theme_id, theme_name in AVAILABLE_THEMES:
                                 yield RadioButton(
                                     theme_name, 
-                                    value=(theme_id == current_theme),
+                                    value=(theme_id == config.theme),
                                     id=f"theme-{theme_id}",
+                                )
+                        
+                        yield Rule()
+                        
+                        # Default Tab Section
+                        yield Static("📋 Default Tab", classes="settings-label")
+                        yield Static("Tab to open when selecting a project", classes="settings-sublabel")
+                        with RadioSet(id="default-tab-select"):
+                            for tab_id, tab_name in AVAILABLE_TABS:
+                                yield RadioButton(
+                                    tab_name,
+                                    value=(tab_id == config.default_tab),
+                                    id=f"deftab-{tab_id}",
+                                )
+                        
+                        yield Rule()
+                        
+                        # Sync Preferences
+                        yield Static("🔄 Sync Preferences", classes="settings-label")
+                        with Horizontal(classes="setting-row"):
+                            yield Static("Batch size:", classes="setting-row-label")
+                            yield Input(
+                                str(config.sync_batch_size),
+                                id="sync-batch-size",
+                                type="integer",
+                                classes="sync-input",
+                            )
+                        with Horizontal(classes="setting-row"):
+                            yield Static("Delay (seconds):", classes="setting-row-label")
+                            yield Input(
+                                str(config.sync_delay),
+                                id="sync-delay",
+                                type="number",
+                                classes="sync-input",
+                            )
+                        
+                        yield Rule()
+                        
+                        # Export Preferences
+                        yield Static("📁 Export Format", classes="settings-label")
+                        with RadioSet(id="export-format-select"):
+                            for fmt_id, fmt_name in EXPORT_FORMAT_OPTIONS:
+                                yield RadioButton(
+                                    fmt_name,
+                                    value=(fmt_id == config.export_format),
+                                    id=f"export-{fmt_id}",
                                 )
                     
                     with Horizontal(id="settings-buttons"):
+                        yield Button("Save", id="save-btn", variant="primary")
+                        yield Button("Reset", id="reset-btn", variant="warning")
                         yield Button("Close", id="close-btn", variant="default")
             
             @on(RadioSet.Changed, "#theme-select")
             def on_theme_changed(self, event: RadioSet.Changed) -> None:
                 """Handle theme selection change."""
                 if event.pressed:
-                    # Extract theme ID from the radio button's ID
                     radio_id = event.pressed.id
                     if radio_id and radio_id.startswith("theme-"):
                         theme_id = radio_id[6:]  # Remove "theme-" prefix
+                        config.theme = theme_id
                         app_ref.theme = theme_id
-                        self.notify(f"Theme changed to {theme_id}")
+            
+            @on(RadioSet.Changed, "#default-tab-select")
+            def on_default_tab_changed(self, event: RadioSet.Changed) -> None:
+                """Handle default tab selection change."""
+                if event.pressed:
+                    radio_id = event.pressed.id
+                    if radio_id and radio_id.startswith("deftab-"):
+                        tab_id = radio_id[7:]  # Remove "deftab-" prefix
+                        config.default_tab = tab_id
+            
+            @on(RadioSet.Changed, "#export-format-select")
+            def on_export_format_changed(self, event: RadioSet.Changed) -> None:
+                """Handle export format selection change."""
+                if event.pressed:
+                    radio_id = event.pressed.id
+                    if radio_id and radio_id.startswith("export-"):
+                        fmt_id = radio_id[7:]  # Remove "export-" prefix
+                        config.export_format = fmt_id
+            
+            @on(Input.Changed, "#sync-batch-size")
+            def on_batch_size_changed(self, event: Input.Changed) -> None:
+                """Handle batch size input change."""
+                try:
+                    value = int(event.value)
+                    if value > 0:
+                        config.sync_batch_size = value
+                except ValueError:
+                    pass
+            
+            @on(Input.Changed, "#sync-delay")
+            def on_delay_changed(self, event: Input.Changed) -> None:
+                """Handle delay input change."""
+                try:
+                    value = float(event.value)
+                    if value >= 0:
+                        config.sync_delay = value
+                except ValueError:
+                    pass
+            
+            @on(Button.Pressed, "#save-btn")
+            def on_save(self) -> None:
+                """Save settings to config file."""
+                config.save()
+                app_ref._config = config
+                self.notify("✅ Settings saved!", severity="information")
+            
+            @on(Button.Pressed, "#reset-btn")
+            def on_reset(self) -> None:
+                """Reset settings to defaults."""
+                config.reset()
+                config.save()
+                app_ref._config = config
+                app_ref.theme = config.theme
+                self.notify("🔄 Settings reset to defaults", severity="warning")
+                # Refresh the screen to show reset values
+                self.dismiss()
+                app_ref.push_screen(SettingsScreen())
             
             @on(Button.Pressed, "#close-btn")
             def on_close(self) -> None:
