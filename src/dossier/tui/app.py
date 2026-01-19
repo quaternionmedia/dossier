@@ -4527,7 +4527,22 @@ class DossierApp(App):
     def on_remove_component_pressed(self) -> None:
         """Handle remove component button press."""
         self.action_remove_component()
-    
+
+    @on(Button.Pressed, "#btn-new-delta")
+    def on_new_delta_pressed(self) -> None:
+        """Handle new delta button press."""
+        self.action_new_delta()
+
+    @on(Button.Pressed, "#btn-advance-phase")
+    def on_advance_phase_pressed(self) -> None:
+        """Handle advance phase button press."""
+        self.action_advance_delta_phase()
+
+    @on(Button.Pressed, "#btn-add-note")
+    def on_add_note_pressed(self) -> None:
+        """Handle add note button press."""
+        self.action_add_delta_note()
+
     @on(Button.Pressed, "#btn-filter-all")
     def on_filter_all_pressed(self) -> None:
         """Show all projects (clear sync filter)."""
@@ -6173,7 +6188,287 @@ class DossierApp(App):
         self.notify(f"Removed relationship with '{other_project_name}'")
         if self.selected_project:
             self.show_project_details(self.selected_project)
-    
+
+    def action_new_delta(self) -> None:
+        """Create a new delta for the selected project."""
+        if not self.selected_project:
+            self.notify("Select a project first", severity="warning")
+            return
+
+        project_id = self.selected_project.id
+        project_name = self.selected_project.name
+
+        class NewDeltaModal(ModalScreen[Optional[dict]]):
+            """Modal for creating a new delta."""
+
+            CSS = """
+            NewDeltaModal {
+                align: center middle;
+            }
+
+            #new-delta-dialog {
+                width: 70;
+                height: auto;
+                padding: 1 2;
+                background: $surface;
+                border: solid $primary;
+            }
+
+            #new-delta-dialog Input {
+                margin: 1 0;
+            }
+
+            #new-delta-dialog Select {
+                margin: 1 0;
+                width: 100%;
+            }
+
+            #new-delta-dialog Horizontal {
+                margin-top: 1;
+                align: right middle;
+            }
+
+            #new-delta-dialog Button {
+                margin-left: 1;
+            }
+            """
+
+            def compose(self) -> ComposeResult:
+                with Vertical(id="new-delta-dialog"):
+                    yield Label(f"New Delta for {project_name}", classes="title")
+                    yield Label("Name (slug):")
+                    yield Input(placeholder="e.g., add-dark-mode", id="delta-name")
+                    yield Label("Title:")
+                    yield Input(placeholder="Human-readable title", id="delta-title")
+                    yield Label("Type:")
+                    yield Select(
+                        [("✨ Feature", "feature"), ("🐛 Bugfix", "bugfix"),
+                         ("♻️ Refactor", "refactor"), ("📚 Docs", "docs"), ("🔧 Chore", "chore")],
+                        value="feature",
+                        id="delta-type",
+                        allow_blank=False,
+                    )
+                    yield Label("Priority:")
+                    yield Select(
+                        [("🟢 Low", "low"), ("🟡 Medium", "medium"),
+                         ("🟠 High", "high"), ("🔴 Critical", "critical")],
+                        value="medium",
+                        id="delta-priority",
+                        allow_blank=False,
+                    )
+                    with Horizontal():
+                        yield Button("Cancel", id="cancel-btn")
+                        yield Button("Create", id="create-btn", variant="primary")
+
+            @on(Button.Pressed, "#create-btn")
+            def on_create(self) -> None:
+                name = self.query_one("#delta-name", Input).value.strip()
+                title = self.query_one("#delta-title", Input).value.strip()
+                delta_type = self.query_one("#delta-type", Select).value
+                priority = self.query_one("#delta-priority", Select).value
+
+                if not name:
+                    self.notify("Name is required", severity="error")
+                    return
+                if not title:
+                    self.notify("Title is required", severity="error")
+                    return
+
+                self.dismiss({
+                    "name": name,
+                    "title": title,
+                    "delta_type": delta_type,
+                    "priority": priority,
+                })
+
+            @on(Button.Pressed, "#cancel-btn")
+            def on_cancel(self) -> None:
+                self.dismiss(None)
+
+        def handle_result(result: Optional[dict]) -> None:
+            if result:
+                self._create_delta(project_id, result)
+
+        self.push_screen(NewDeltaModal(), handle_result)
+
+    def _create_delta(self, project_id: int, data: dict) -> None:
+        """Create a new delta in the database."""
+        with self.session_factory() as session:
+            delta = ProjectDelta(
+                project_id=project_id,
+                name=data["name"],
+                title=data["title"],
+                delta_type=data["delta_type"],
+                priority=data["priority"],
+                phase=DeltaPhase.BRAINSTORM,
+            )
+            session.add(delta)
+            session.commit()
+
+        self.notify(f"Created delta: {data['name']}")
+        # Reload deltas tab
+        if hasattr(self, "_tabs_loaded"):
+            self._tabs_loaded.discard("tab-deltas")
+        if self.selected_project:
+            self._load_deltas_tab(self.selected_project)
+
+    def action_advance_delta_phase(self) -> None:
+        """Advance the selected delta to the next phase."""
+        if not self.selected_project:
+            self.notify("Select a project first", severity="warning")
+            return
+
+        deltas_table = self.query_one("#deltas-table", DataTable)
+
+        if deltas_table.cursor_row is None:
+            self.notify("Select a delta to advance", severity="warning")
+            return
+
+        try:
+            row_key = deltas_table.coordinate_to_cell_key((deltas_table.cursor_row, 0)).row_key
+        except Exception:
+            self.notify("Select a delta to advance", severity="warning")
+            return
+
+        row_key_str = str(row_key.value) if row_key else ""
+        if not row_key_str.startswith("delta-"):
+            self.notify("Select a delta to advance", severity="warning")
+            return
+
+        delta_id = int(row_key_str.split("-")[1])
+
+        with self.session_factory() as session:
+            delta = session.get(ProjectDelta, delta_id)
+            if not delta:
+                self.notify("Delta not found", severity="error")
+                return
+
+            if not delta.can_advance():
+                if delta.phase == DeltaPhase.COMPLETE:
+                    self.notify("Delta is already complete", severity="warning")
+                elif delta.phase == DeltaPhase.ABANDONED:
+                    self.notify("Cannot advance abandoned delta", severity="warning")
+                else:
+                    self.notify("Cannot advance delta", severity="warning")
+                return
+
+            old_phase = delta.phase.value
+            delta.advance_phase()
+            new_phase = delta.phase.value
+            session.commit()
+
+        self.notify(f"Advanced delta: {old_phase} → {new_phase}")
+        # Reload deltas tab
+        if hasattr(self, "_tabs_loaded"):
+            self._tabs_loaded.discard("tab-deltas")
+        if self.selected_project:
+            self._load_deltas_tab(self.selected_project)
+
+    def action_add_delta_note(self) -> None:
+        """Add a note to the selected delta."""
+        if not self.selected_project:
+            self.notify("Select a project first", severity="warning")
+            return
+
+        deltas_table = self.query_one("#deltas-table", DataTable)
+
+        if deltas_table.cursor_row is None:
+            self.notify("Select a delta first", severity="warning")
+            return
+
+        try:
+            row_key = deltas_table.coordinate_to_cell_key((deltas_table.cursor_row, 0)).row_key
+        except Exception:
+            self.notify("Select a delta first", severity="warning")
+            return
+
+        row_key_str = str(row_key.value) if row_key else ""
+        if not row_key_str.startswith("delta-"):
+            self.notify("Select a delta first", severity="warning")
+            return
+
+        delta_id = int(row_key_str.split("-")[1])
+
+        # Get delta info for the modal
+        with self.session_factory() as session:
+            delta = session.get(ProjectDelta, delta_id)
+            if not delta:
+                self.notify("Delta not found", severity="error")
+                return
+            delta_name = delta.name
+            delta_phase = delta.phase
+
+        class AddNoteModal(ModalScreen[Optional[str]]):
+            """Modal for adding a note to a delta."""
+
+            CSS = """
+            AddNoteModal {
+                align: center middle;
+            }
+
+            #add-note-dialog {
+                width: 70;
+                height: auto;
+                padding: 1 2;
+                background: $surface;
+                border: solid $primary;
+            }
+
+            #add-note-dialog Input {
+                margin: 1 0;
+            }
+
+            #add-note-dialog Horizontal {
+                margin-top: 1;
+                align: right middle;
+            }
+
+            #add-note-dialog Button {
+                margin-left: 1;
+            }
+            """
+
+            def compose(self) -> ComposeResult:
+                with Vertical(id="add-note-dialog"):
+                    yield Label(f"Add Note to '{delta_name}'", classes="title")
+                    yield Label(f"Current phase: {delta_phase.value}")
+                    yield Label("Note content:")
+                    yield Input(placeholder="Enter your note...", id="note-content")
+                    with Horizontal():
+                        yield Button("Cancel", id="cancel-btn")
+                        yield Button("Add Note", id="add-btn", variant="primary")
+
+            @on(Button.Pressed, "#add-btn")
+            def on_add(self) -> None:
+                content = self.query_one("#note-content", Input).value.strip()
+                if not content:
+                    self.notify("Note content is required", severity="error")
+                    return
+                self.dismiss(content)
+
+            @on(Button.Pressed, "#cancel-btn")
+            def on_cancel(self) -> None:
+                self.dismiss(None)
+
+        def handle_result(content: Optional[str]) -> None:
+            if content:
+                self._add_delta_note(delta_id, delta_phase, content)
+
+        self.push_screen(AddNoteModal(), handle_result)
+
+    def _add_delta_note(self, delta_id: int, phase: DeltaPhase, content: str) -> None:
+        """Add a note to a delta."""
+        with self.session_factory() as session:
+            note = DeltaNote(
+                delta_id=delta_id,
+                phase=phase,
+                content=content,
+            )
+            session.add(note)
+            session.commit()
+
+        self.notify("Note added successfully")
+
     def action_search(self) -> None:
         """Focus the search input."""
         self.query_one("#search-input", Input).focus()
