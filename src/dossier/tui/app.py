@@ -6363,9 +6363,13 @@ Set `GITHUB_TOKEN` environment variable for:
                                 )
                     
                     with Horizontal(id="settings-buttons"):
-                        yield Button("Save", id="save-btn", variant="primary")
-                        yield Button("Reset", id="reset-btn", variant="warning")
-                        yield Button("Close", id="close-btn", variant="default")
+                        yield Button("Reset Defaults", id="reset-btn", variant="warning")
+                        yield Button("Close", id="close-btn", variant="primary")
+            
+            def _auto_save(self) -> None:
+                """Auto-save settings to config file."""
+                config.save()
+                app_ref._config = config
             
             @on(RadioSet.Changed, "#theme-select")
             def on_theme_changed(self, event: RadioSet.Changed) -> None:
@@ -6376,6 +6380,7 @@ Set `GITHUB_TOKEN` environment variable for:
                         theme_id = radio_id[6:]  # Remove "theme-" prefix
                         config.theme = theme_id
                         app_ref.theme = theme_id
+                        self._auto_save()
             
             @on(RadioSet.Changed, "#default-tab-select")
             def on_default_tab_changed(self, event: RadioSet.Changed) -> None:
@@ -6385,6 +6390,7 @@ Set `GITHUB_TOKEN` environment variable for:
                     if radio_id and radio_id.startswith("deftab-"):
                         tab_id = radio_id[7:]  # Remove "deftab-" prefix
                         config.default_tab = tab_id
+                        self._auto_save()
             
             @on(RadioSet.Changed, "#export-format-select")
             def on_export_format_changed(self, event: RadioSet.Changed) -> None:
@@ -6394,6 +6400,7 @@ Set `GITHUB_TOKEN` environment variable for:
                     if radio_id and radio_id.startswith("export-"):
                         fmt_id = radio_id[7:]  # Remove "export-" prefix
                         config.export_format = fmt_id
+                        self._auto_save()
             
             @on(Input.Changed, "#sync-batch-size")
             def on_batch_size_changed(self, event: Input.Changed) -> None:
@@ -6402,6 +6409,7 @@ Set `GITHUB_TOKEN` environment variable for:
                     value = int(event.value)
                     if value > 0:
                         config.sync_batch_size = value
+                        self._auto_save()
                 except ValueError:
                     pass
             
@@ -6412,15 +6420,9 @@ Set `GITHUB_TOKEN` environment variable for:
                     value = float(event.value)
                     if value >= 0:
                         config.sync_delay = value
+                        self._auto_save()
                 except ValueError:
                     pass
-            
-            @on(Button.Pressed, "#save-btn")
-            def on_save(self) -> None:
-                """Save settings to config file."""
-                config.save()
-                app_ref._config = config
-                self.notify("✅ Settings saved!", severity="information")
             
             @on(Button.Pressed, "#reset-btn")
             def on_reset(self) -> None:

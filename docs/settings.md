@@ -41,7 +41,7 @@ Press `` ` `` (backtick) anywhere in the dashboard to open the settings overlay.
 │ 📁 Export Format                                                │
 │ ● YAML (.dossier)  ○ JSON (.json)                               │
 ├─────────────────────────────────────────────────────────────────┤
-│           [Save]  [Reset]  [Close]                              │
+│              [Reset Defaults]  [Close]                          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -96,9 +96,10 @@ Dossier supports 9 built-in themes. Select a theme by clicking or using arrow ke
 
 1. Press `` ` `` to open settings
 2. Use `↑`/`↓` or click to select a theme
-3. Theme applies immediately (preview)
-4. Click **Save** to persist the theme
-5. Press **Close** or `Escape` to dismiss
+3. Theme applies immediately and **auto-saves**
+4. Press **Close** or `Escape` to dismiss
+
+**All settings auto-save** — changes are persisted to `~/.dossier/config.json` immediately when you make them.
 
 ---
 
@@ -146,17 +147,18 @@ Choose the default format for project exports:
 
 ---
 
-## Saving Settings
+## Auto-Save Behavior
 
-Settings are saved to `~/.dossier/config.json`.
+All settings **auto-save immediately** when changed. There's no need to manually save.
+
+Settings are persisted to `~/.dossier/config.json`.
 
 | Button | Action |
 |--------|--------|
-| **Save** | Persist all settings to config file |
-| **Reset** | Reset all settings to defaults |
-| **Close** | Close without saving (changes are lost) |
+| **Reset Defaults** | Reset all settings to factory defaults |
+| **Close** | Close the settings overlay |
 
-**Note:** Theme changes preview immediately but are only saved when you click **Save**.
+**Note:** Clicking **Reset Defaults** will immediately revert all settings and save the defaults.
 
 ---
 

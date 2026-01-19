@@ -525,22 +525,52 @@ def mock_github():
 | `GITHUB_TOKEN` | GitHub API authentication | None |
 | `DOSSIER_DB_PATH` | Custom database location | `~/.dossier/dossier.db` |
 
-### Planned: Config File
+### Configuration File
 
-Future support for `~/.dossier/config.toml`:
+User preferences are stored in `~/.dossier/config.json`:
 
-```toml
-[github]
-token = "ghp_xxx"
-default_batch_size = 5
-default_batch_delay = 2
-
-[database]
-path = "~/.dossier/dossier.db"
-
-[tui]
-theme = "dark"
+```json
+{
+  "theme": "textual-dark",
+  "default_tab": "tab-dossier",
+  "tree_density": "comfortable",
+  "sync_batch_size": 10,
+  "sync_delay": 1.0,
+  "export_format": "yaml",
+  "sidebar_width": null
+}
 ```
+
+Configuration is managed by `src/dossier/config.py`:
+
+```python
+from dossier.config import DossierConfig
+
+# Load config (creates defaults if missing)
+config = DossierConfig.load()
+
+# Access settings
+print(config.theme)  # "textual-dark"
+print(config.sync_batch_size)  # 10
+
+# Modify and save
+config.theme = "nord"
+config.save()
+
+# Reset to defaults
+config.reset()
+config.save()
+```
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `theme` | str | `textual-dark` | TUI color theme |
+| `default_tab` | str | `tab-dossier` | Tab to open on project select |
+| `tree_density` | str | `comfortable` | Tree spacing (future) |
+| `sync_batch_size` | int | `10` | Repos per sync batch |
+| `sync_delay` | float | `1.0` | Seconds between batches |
+| `export_format` | str | `yaml` | Default export format |
+| `sidebar_width` | int | `null` | Sidebar width (future) |
 
 ## Extension Points
 

@@ -19,6 +19,8 @@ dossier/
 │   └── dossier/
 │       ├── __init__.py
 │       ├── cli.py          # Click CLI commands
+│       ├── config.py       # Configuration management
+│       ├── dossier_file.py # .dossier file format
 │       ├── api/
 │       │   ├── __init__.py
 │       │   └── main.py     # FastAPI application
@@ -46,6 +48,7 @@ dossier/
 │   ├── index.md
 │   ├── overview.md
 │   ├── quickstart.md
+│   ├── settings.md     # Settings overlay guide
 │   ├── dashboard.md    # TUI dashboard guide
 │   ├── workflows.md
 │   ├── architecture.md
@@ -55,6 +58,26 @@ dossier/
 ├── pyproject.toml
 └── README.md
 ```
+
+## Configuration
+
+User settings are stored in `~/.dossier/config.json`:
+
+```python
+from dossier.config import DossierConfig
+
+config = DossierConfig.load()  # Load or create defaults
+config.theme = "nord"
+config.save()  # Persist changes
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `theme` | `textual-dark` | TUI color theme |
+| `default_tab` | `tab-dossier` | Tab on project select |
+| `sync_batch_size` | `10` | Repos per sync batch |
+| `sync_delay` | `1.0` | Seconds between batches |
+| `export_format` | `yaml` | Export format (yaml/json) |
 
 ## Data Models
 

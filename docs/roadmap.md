@@ -22,6 +22,8 @@ Dossier currently provides:
 - ✅ **Headless interfaces** — CLI, TUI dashboard, REST API
 - ✅ **Portable exports** — `.dossier` YAML files for sharing
 - ✅ **Database migrations** — Alembic-managed schema evolution
+- ✅ **Settings overlay** — Press `` ` `` to configure theme, default tab, sync preferences
+- ✅ **Persistent config** — Auto-save settings to `~/.dossier/config.json`
 
 ---
 

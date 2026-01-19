@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Settings Overlay** - Press `` ` `` to open settings with:
+  - App info (version, Python, platform, database path/size, project count)
+  - Theme selection (9 built-in themes with live preview)
+  - Default tab selection (choose which tab opens on project select)
+  - Sync preferences (batch size, delay between batches)
+  - Export format preference (YAML or JSON)
+  - Auto-save on every change (persisted to `~/.dossier/config.json`)
+  - Reset to defaults button
+- **Configuration Persistence** - Settings saved to `~/.dossier/config.json`:
+  - Theme preference persists across sessions
+  - Default tab preference
+  - Sync batch size and delay
+  - Export format preference
 - **Pull Requests Tab** - View PRs with merge status, branch info, and diff statistics (+/-)
 - **Releases Tab** - View version releases with tags, prerelease/draft indicators
 - **Filter Bar** - Filter projects by sync status (All/Synced/Unsynced), sort by stars
