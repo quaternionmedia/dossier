@@ -808,9 +808,10 @@ class DossierApp(App):
                     yield Button("⭐", id="btn-filter-starred", variant="default")
                 with Horizontal(id="filter-bar-2"):
                     yield Select(
-                        [("All Types", "all"), ("📁 Repos", "repo"), ("🌿 Branches", "branch"), 
+                        [("All Types", "all"), ("📁 Repos", "repo"), ("🌿 Branches", "branch"),
                          ("📋 Issues", "issue"), ("🔀 PRs", "pr"), ("📦 Versions", "ver"),
-                         ("📄 Docs", "doc"), ("👤 Users", "user"), ("💻 Languages", "lang"), ("📚 Packages", "pkg")],
+                         ("📄 Docs", "doc"), ("🔺 Deltas", "delta"), ("👤 Users", "user"),
+                         ("💻 Languages", "lang"), ("📚 Packages", "pkg")],
                         value="all",
                         id="select-entity-type",
                         allow_blank=False,
@@ -993,6 +994,8 @@ class DossierApp(App):
             return "ver"
         if "/doc/" in name:
             return "doc"
+        if "/delta/" in name:
+            return "delta"
         # If it has owner/repo format without other patterns, it's a repo
         if "/" in name and name.count("/") == 1:
             return "repo"
@@ -1034,6 +1037,8 @@ class DossierApp(App):
                     return f"{repo}!{entity_id}"
                 if entity_type == "ver":
                     return f"{repo}@{entity_id}"
+                if entity_type == "delta":
+                    return f"{repo}△{entity_id}"
                 # For branch/doc, keep slash format
                 return f"{repo}/{entity_type}/{entity_id}"
         
