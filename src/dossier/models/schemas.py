@@ -14,11 +14,23 @@ def utcnow() -> datetime:
 
 class DocumentationLevel(str, Enum):
     """Levels of documentation detail."""
-    
+
     SUMMARY = "summary"  # Brief overview, 1-2 sentences
     OVERVIEW = "overview"  # High-level description with key points
     DETAILED = "detailed"  # Full documentation with examples
     TECHNICAL = "technical"  # Implementation details for developers
+
+
+class DeltaPhase(str, Enum):
+    """Phases of a delta's lifecycle."""
+
+    BRAINSTORM = "brainstorm"  # Initial ideation phase
+    PLANNING = "planning"  # Design and planning phase
+    IMPLEMENTATION = "implementation"  # Active development
+    REVIEW = "review"  # Code review / QA phase
+    DOCUMENTATION = "documentation"  # Documentation phase
+    COMPLETE = "complete"  # Delta is finished
+    ABANDONED = "abandoned"  # Delta was abandoned
 
 
 class ProjectComponent(SQLModel, table=True):
@@ -406,9 +418,125 @@ class DocumentationQuery(SQLModel):
 
 class DocumentationResponse(SQLModel):
     """Response model for documentation queries."""
-    
+
     project_name: str
     level: DocumentationLevel
     sections: list[dict] = Field(default_factory=list)
     total_sections: int = 0
     query_time_ms: float = 0.0
+
+
+class ProjectDelta(SQLModel, table=True):
+    """A delta (change) tracked for a project.
+
+    Deltas represent discrete units of work (features, bugfixes, refactors)
+    that progress through phases: brainstorm -> planning -> implementation ->
+    review -> documentation -> complete.
+    """
+
+    __tablename__ = "project_delta"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    project_id: int = Field(foreign_key="project.id", index=True)
+
+    # Core fields
+    name: str  # Short identifier (e.g., "add-dark-mode", "fix-auth-bug")
+    title: str  # Human-readable title
+    description: Optional[str] = None
+
+    # Phase tracking
+    phase: DeltaPhase = Field(default=DeltaPhase.BRAINSTORM)
+    phase_changed_at: datetime = Field(default_factory=utcnow)
+
+    # Priority and categorization
+    priority: str = Field(default="medium")  # low, medium, high, critical
+    delta_type: str = Field(default="feature")  # feature, bugfix, refactor, docs, chore
+
+    # Timestamps
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+    # Optional linking to GitHub entities
+    issue_number: Optional[int] = None  # Link to related GitHub issue
+    pr_number: Optional[int] = None  # Link to related PR
+    branch_name: Optional[str] = None  # Associated branch
+
+    # Phase sequence for advancing
+    PHASE_ORDER = [
+        DeltaPhase.BRAINSTORM,
+        DeltaPhase.PLANNING,
+        DeltaPhase.IMPLEMENTATION,
+        DeltaPhase.REVIEW,
+        DeltaPhase.DOCUMENTATION,
+        DeltaPhase.COMPLETE,
+    ]
+
+    def advance_phase(self) -> bool:
+        """Advance to the next phase in the sequence.
+
+        Returns True if phase was advanced, False if already at final phase.
+        """
+        if self.phase == DeltaPhase.ABANDONED:
+            return False
+
+        try:
+            current_idx = self.PHASE_ORDER.index(self.phase)
+            if current_idx < len(self.PHASE_ORDER) - 1:
+                self.phase = self.PHASE_ORDER[current_idx + 1]
+                self.phase_changed_at = utcnow()
+                self.updated_at = utcnow()
+
+                # Set started_at when entering implementation
+                if self.phase == DeltaPhase.IMPLEMENTATION and not self.started_at:
+                    self.started_at = utcnow()
+
+                # Set completed_at when entering complete
+                if self.phase == DeltaPhase.COMPLETE:
+                    self.completed_at = utcnow()
+
+                return True
+        except ValueError:
+            pass
+        return False
+
+    def can_advance(self) -> bool:
+        """Check if the delta can advance to the next phase."""
+        if self.phase == DeltaPhase.ABANDONED:
+            return False
+        try:
+            current_idx = self.PHASE_ORDER.index(self.phase)
+            return current_idx < len(self.PHASE_ORDER) - 1
+        except ValueError:
+            return False
+
+
+class DeltaNote(SQLModel, table=True):
+    """A note or update for a delta during a specific phase."""
+
+    __tablename__ = "delta_note"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    delta_id: int = Field(foreign_key="project_delta.id", index=True)
+
+    phase: DeltaPhase  # Phase this note was created during
+    content: str  # Markdown content
+
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class DeltaLink(SQLModel, table=True):
+    """Links a delta to related entities (issues, PRs, branches, other deltas)."""
+
+    __tablename__ = "delta_link"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    delta_id: int = Field(foreign_key="project_delta.id", index=True)
+
+    # What this delta links to
+    link_type: str  # "issue", "pr", "branch", "delta", "doc"
+    target_id: Optional[int] = None  # ID for issues, PRs, deltas
+    target_name: Optional[str] = None  # Name for branches, etc.
+
+    created_at: datetime = Field(default_factory=utcnow)
