@@ -273,6 +273,30 @@ Click on documentation in the tree or docs tab to open the **Content Viewer**:
 | `n` or `j` | Next document |
 | `p` or `k` | Previous document |
 | `o` | Open in browser |
+| `f` | Open in frogmouth |
+
+### Frogmouth Integration
+
+The Content Viewer includes an "Open in Frogmouth" button (🐸) that opens the current document in the [frogmouth](https://github.com/Textualize/frogmouth) terminal markdown viewer.
+
+**Requirements:**
+```bash
+# Install frogmouth separately (has older textual/httpx constraints)
+pip install frogmouth
+```
+
+**Benefits of frogmouth:**
+- Full-featured markdown rendering with scrolling
+- Syntax highlighting for code blocks
+- Table of contents navigation
+- Link following
+- Better handling of large documents
+
+**How it works:**
+1. Press `f` or click "🐸 Frogmouth" in the viewer
+2. Dossier temporarily suspends to hand over the terminal
+3. Frogmouth opens with the document content
+4. Press `q` in frogmouth to exit and return to Dossier
 
 ### Viewer Features
 

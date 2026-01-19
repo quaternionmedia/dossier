@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Frogmouth Integration** - Optional markdown viewer for enhanced document viewing:
+  - `pip install frogmouth` to install separately (has older textual/httpx constraints)
+  - `dossier view <project>` - CLI command to view docs in frogmouth
+  - 🐸 Frogmouth button in Content Viewer to open current doc
+  - `f` keybinding in Content Viewer to open in frogmouth
+  - Automatically suspends TUI and resumes after frogmouth exits
 - **Settings Overlay** - Press `` ` `` to open settings with:
   - App info (version, Python, platform, database path/size, project count)
   - Theme selection (9 built-in themes with live preview)

@@ -197,6 +197,23 @@ You can edit this file directly, but changes only take effect when you restart t
 
 ## Related Documentation
 
-- [Dashboard Guide](dashboard.md) — Full TUI documentation
+- [Dashboard Guide](dashboard.md) — Full TUI documentation including frogmouth integration
 - [Quickstart](quickstart.md) — Installation and first steps
 - [Architecture](architecture.md) — System design details
+
+---
+
+## Optional Dependencies
+
+### Frogmouth Viewer
+
+Install frogmouth for enhanced markdown viewing:
+
+```bash
+# Install separately (has older textual/httpx constraints)
+pip install frogmouth
+```
+
+Once installed, the Content Viewer gains a "🐸 Frogmouth" button that opens documents in the frogmouth terminal markdown viewer.
+
+See the [Dashboard Guide](dashboard.md) for more details.

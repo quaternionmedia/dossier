@@ -2715,6 +2715,156 @@ def init_dossier(project_name: Optional[str], output: Optional[str]) -> None:
     click.echo(f"  {output_path}")
 
 
+# =============================================================================
+# View Command - Open docs in frogmouth viewer
+# =============================================================================
+
+
+def _check_frogmouth_installed() -> tuple[bool, str | None]:
+    """Check if frogmouth is installed and return the path if found.
+    
+    Returns:
+        Tuple of (is_installed, executable_path)
+    """
+    import shutil
+    
+    # First check if it's on PATH
+    frogmouth_path = shutil.which("frogmouth")
+    if frogmouth_path:
+        return True, frogmouth_path
+    
+    # Try importing to see if it's installed as a Python package
+    try:
+        import frogmouth
+        # It's installed but not on PATH - try to find the module location
+        import importlib.util
+        spec = importlib.util.find_spec("frogmouth")
+        if spec and spec.origin:
+            return True, f"python -m frogmouth"
+        return True, None
+    except ImportError:
+        pass
+    
+    return False, None
+
+
+@cli.command("view")
+@click.argument("project_name")
+@click.option("--section", "-s", help="Specific documentation section to view")
+@click.option("--readme", "-r", is_flag=True, help="View README only")
+@click.option("--export", "-e", is_flag=True, help="View exported .dossier file")
+def view_cmd(
+    project_name: str,
+    section: Optional[str],
+    readme: bool,
+    export: bool,
+) -> None:
+    """Open project documentation in frogmouth viewer.
+    
+    Opens documentation in the frogmouth terminal markdown viewer.
+    Requires frogmouth to be installed separately (due to dependency constraints).
+    
+    PROJECT_NAME: Name of the project (e.g., owner/repo)
+    
+    Examples:
+        dossier view astral-sh/ruff              # View all docs
+        dossier view astral-sh/ruff --readme     # View README only
+        dossier view astral-sh/ruff -s "API"     # View specific section
+        dossier view astral-sh/ruff --export     # View .dossier export
+    """
+    import tempfile
+    import subprocess
+    
+    is_installed, frogmouth_cmd = _check_frogmouth_installed()
+    if not is_installed:
+        click.echo(click.style("frogmouth is not installed.", fg="yellow"))
+        click.echo()
+        click.echo("Install frogmouth using one of these methods:")
+        click.echo(click.style("  pipx install frogmouth", fg="cyan") + "  (recommended - isolated install)")
+        click.echo(click.style("  pip install frogmouth", fg="cyan") + "   (global install)")
+        click.echo(click.style("  uv tool install frogmouth", fg="cyan") + "  (uv tool install)")
+        click.echo()
+        click.echo("Note: frogmouth is installed separately due to dependency version constraints.")
+        raise SystemExit(1)
+    
+    with get_session() as session:
+        project = session.exec(
+            select(Project).where(Project.name == project_name)
+        ).first()
+        
+        if not project:
+            click.echo(click.style(f"Project '{project_name}' not found", fg="red"))
+            raise SystemExit(1)
+        
+        if export:
+            # Generate and view .dossier file
+            from dossier.dossier_file import generate_dossier
+            import yaml
+            
+            dossier = generate_dossier(session, project)
+            content = yaml.dump(
+                dossier,
+                default_flow_style=False,
+                allow_unicode=True,
+                sort_keys=False,
+            )
+            suffix = ".yaml"
+        else:
+            # Build markdown from documentation sections
+            stmt = select(DocumentSection).where(
+                DocumentSection.project_id == project.id
+            ).order_by(DocumentSection.order)
+            
+            docs = session.exec(stmt).all()
+            
+            if section:
+                docs = [d for d in docs if section.lower() in d.title.lower()]
+            elif readme:
+                docs = [d for d in docs if "readme" in (d.source_file or "").lower()]
+            
+            if not docs:
+                click.echo(click.style(
+                    f"No documentation found for '{project_name}'", fg="yellow"
+                ))
+                if section:
+                    click.echo(f"  (searched for section matching '{section}')")
+                raise SystemExit(1)
+            
+            # Build combined markdown
+            content = f"# {project.name}\n\n"
+            if project.description:
+                content += f"> {project.description}\n\n"
+            content += "---\n\n"
+            
+            for doc in docs:
+                content += f"## {doc.title}\n\n"
+                content += f"{doc.content}\n\n"
+                content += "---\n\n"
+            
+            suffix = ".md"
+        
+        # Write to temp file and open in frogmouth
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=suffix,
+            delete=False,
+            encoding="utf-8",
+        ) as f:
+            f.write(content)
+            temp_path = f.name
+        
+        try:
+            click.echo(f"Opening in frogmouth: {project_name}")
+            subprocess.run(["frogmouth", temp_path], check=True)
+        finally:
+            # Clean up temp file
+            import os
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+
 def main() -> None:
     """Entry point for the CLI."""
     cli()

@@ -85,6 +85,7 @@ class ContentViewerScreen(ModalScreen):
         Binding("escape", "close", "Close"),
         Binding("q", "close", "Close"),
         Binding("o", "open_browser", "Open in Browser"),
+        Binding("f", "open_frogmouth", "Open in Frogmouth"),
         Binding("n", "next_doc", "Next"),
         Binding("p", "prev_doc", "Previous"),
         Binding("j", "next_doc", "Next", show=False),
@@ -169,6 +170,7 @@ class ContentViewerScreen(ModalScreen):
                 yield Button("Close", id="btn-close", variant="default")
                 if self.url:
                     yield Button("🌐 Browser", id="btn-open-browser", variant="primary")
+                yield Button("🐸 Frogmouth", id="btn-open-frogmouth", variant="default")
                 if self.doc_list and len(self.doc_list) > 1:
                     yield Static(f"{self.doc_index + 1}/{len(self.doc_list)}", id="nav-info")
                     yield Button("◀ Prev", id="btn-prev-doc", variant="default", disabled=self.doc_index <= 0)
@@ -184,6 +186,10 @@ class ContentViewerScreen(ModalScreen):
             import webbrowser
             webbrowser.open(self.url)
             self.notify(f"Opening {self.url[:50]}...")
+    
+    @on(Button.Pressed, "#btn-open-frogmouth")
+    def on_open_frogmouth_pressed(self) -> None:
+        self.action_open_frogmouth()
     
     @on(Button.Pressed, "#btn-prev-doc")
     def on_prev_doc_pressed(self) -> None:
@@ -203,6 +209,49 @@ class ContentViewerScreen(ModalScreen):
             self.notify(f"Opening {self.url[:50]}...")
         else:
             self.notify("No URL available", severity="warning")
+    
+    def action_open_frogmouth(self) -> None:
+        """Open content in frogmouth viewer."""
+        import shutil
+        import subprocess
+        import tempfile
+        import os
+        
+        if not shutil.which("frogmouth"):
+            self.notify(
+                "frogmouth not installed. Install with: uv add dossier[viewer]",
+                severity="warning",
+                timeout=5,
+            )
+            return
+        
+        # Write content to temp file
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".md",
+                delete=False,
+                encoding="utf-8",
+            ) as f:
+                f.write(self.content)
+                temp_path = f.name
+            
+            # Use Textual's suspend to hand over terminal to frogmouth
+            self.notify("Opening in frogmouth...")
+            
+            async def run_frogmouth() -> None:
+                with self.app.suspend():
+                    subprocess.run(["frogmouth", temp_path])
+                # Clean up temp file after frogmouth exits
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+            
+            self.app.call_later(run_frogmouth)
+            
+        except Exception as e:
+            self.notify(f"Error: {e}", severity="error")
     
     def action_next_doc(self) -> None:
         """Navigate to next document."""

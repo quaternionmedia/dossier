@@ -101,10 +101,17 @@ config.save()  # Persist changes
 - `uv run dossier dashboard` - Launch Textual TUI dashboard
 - `uv run dossier tui` - Launch Trogon command explorer
 - `uv run dossier serve --reload` - Run API server
+- `uv run dossier view owner/repo` - View docs in frogmouth (requires frogmouth installed separately)
 - `uv run dossier dev status` - Show database stats
 - `uv run dossier dev reset -y` - Reset database (recreates schema)
 - `uv run dossier dev purge -p "test" -y` - Purge test projects from database
 - `uv run pytest` - Run tests
+
+## Optional Dependencies
+- **frogmouth**: Enhanced markdown viewing for `dossier view` command. Install separately due to dependency constraints:
+  - `uv tool install frogmouth` (recommended - adds to PATH)
+  - `pipx install frogmouth` (isolated install)
+  - `pip install frogmouth` (global install)
 
 ## Testing Guidelines
 - Tests use in-memory SQLite databases to avoid file creep
