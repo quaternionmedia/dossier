@@ -32,6 +32,9 @@ from textual.widgets import (
 )
 
 from dossier.models import (
+    DeltaLink,
+    DeltaNote,
+    DeltaPhase,
     DocumentSection,
     DocumentationLevel,
     Project,
@@ -39,6 +42,7 @@ from dossier.models import (
     ProjectComponent,
     ProjectContributor,
     ProjectDependency,
+    ProjectDelta,
     ProjectIssue,
     ProjectLanguage,
     ProjectPullRequest,
@@ -856,7 +860,14 @@ class DossierApp(App):
                                 yield Button("➕ Add Component", id="btn-add-component", variant="primary")
                                 yield Button("🔗 Link as Parent", id="btn-link-parent", variant="default")
                                 yield Button("❌ Remove", id="btn-remove-component", variant="error")
-        
+                    with TabPane("Deltas", id="tab-deltas"):
+                        with Vertical():
+                            yield DataTable(id="deltas-table")
+                            with Horizontal(id="delta-buttons"):
+                                yield Button("➕ New Delta", id="btn-new-delta", variant="primary")
+                                yield Button("▶ Advance", id="btn-advance-phase", variant="default")
+                                yield Button("📝 Note", id="btn-add-note", variant="default")
+
         # Bottom command bar
         with Horizontal(id="command-bar"):
             yield Input(placeholder="🔍 Search... or :cmd (try :help)", id="search-input")
@@ -927,7 +938,17 @@ class DossierApp(App):
         components_table.add_column("Type", width=15)
         components_table.add_column("Order", width=8)
         components_table.cursor_type = "row"
-        
+
+        # Setup deltas table columns
+        deltas_table = self.query_one("#deltas-table", DataTable)
+        deltas_table.add_column("Name", width=20)
+        deltas_table.add_column("Title", width=30)
+        deltas_table.add_column("Phase", width=18)
+        deltas_table.add_column("Type", width=12)
+        deltas_table.add_column("Priority", width=10)
+        deltas_table.add_column("Links", width=8)
+        deltas_table.cursor_type = "row"
+
         # Populate language filter dropdown
         self._populate_language_filter()
         
@@ -2164,6 +2185,7 @@ class DossierApp(App):
             "tab-prs": self._load_prs_tab,
             "tab-releases": self._load_releases_tab,
             "tab-components": self._load_components_tab,
+            "tab-deltas": self._load_deltas_tab,
         }
         
         loader = loaders.get(tab_id)
@@ -2526,7 +2548,74 @@ class DossierApp(App):
             
             if not has_components:
                 components_table.add_row("", "(No component relationships)", "", "", key="empty")
-    
+
+    def _load_deltas_tab(self, project: Project) -> None:
+        """Load deltas tab."""
+        deltas_table = self.query_one("#deltas-table", DataTable)
+        deltas_table.clear()
+
+        # Phase display icons
+        phase_icons = {
+            DeltaPhase.BRAINSTORM: "💡",
+            DeltaPhase.PLANNING: "📋",
+            DeltaPhase.IMPLEMENTATION: "⚙️",
+            DeltaPhase.REVIEW: "🔍",
+            DeltaPhase.DOCUMENTATION: "📝",
+            DeltaPhase.COMPLETE: "✅",
+            DeltaPhase.ABANDONED: "❌",
+        }
+        priority_icons = {
+            "critical": "🔴",
+            "high": "🟠",
+            "medium": "🟡",
+            "low": "🟢",
+        }
+        type_icons = {
+            "feature": "✨",
+            "bugfix": "🐛",
+            "refactor": "♻️",
+            "docs": "📚",
+            "chore": "🔧",
+        }
+
+        with self.session_factory() as session:
+            # Query deltas ordered by phase (active first) then by update time
+            deltas = session.exec(
+                select(ProjectDelta)
+                .where(ProjectDelta.project_id == project.id)
+                .order_by(ProjectDelta.updated_at.desc())
+            ).all()
+
+            if not deltas:
+                deltas_table.add_row(
+                    "(No deltas)", "-", "-", "-", "-", "-", key="empty"
+                )
+            else:
+                for delta in deltas:
+                    # Count links for this delta
+                    link_count = session.exec(
+                        select(DeltaLink).where(DeltaLink.delta_id == delta.id)
+                    ).all()
+
+                    phase_icon = phase_icons.get(delta.phase, "❓")
+                    priority_icon = priority_icons.get(delta.priority, "⚪")
+                    type_icon = type_icons.get(delta.delta_type, "❓")
+
+                    # Truncate title if needed
+                    title_display = delta.title
+                    if len(title_display) > 28:
+                        title_display = title_display[:25] + "..."
+
+                    deltas_table.add_row(
+                        delta.name,
+                        title_display,
+                        f"{phase_icon} {delta.phase.value}",
+                        f"{type_icon} {delta.delta_type}",
+                        f"{priority_icon} {delta.priority}",
+                        f"🔗{len(link_count)}" if link_count else "-",
+                        key=f"delta-{delta.id}",
+                    )
+
     def load_dossier_view(self, project: Project) -> None:
         """Load the dossier view for a project."""
         dossier_md = self.query_one("#dossier-view", Markdown)
