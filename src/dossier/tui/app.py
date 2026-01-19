@@ -779,6 +779,15 @@ class DossierApp(App):
         from dossier.config import DossierConfig
         self._config = DossierConfig.load()
         self.theme = self._config.theme
+        
+        # Restore view state from config
+        if self._config.view_state:
+            vs = self._config.view_state
+            self.filter_synced = vs.filter_synced
+            self.filter_language = vs.filter_language
+            self.filter_entity = vs.filter_entity
+            self.filter_starred = vs.filter_starred
+            self.sort_by = vs.sort_by
     
     def compose(self) -> ComposeResult:
         yield Header()
@@ -922,8 +931,12 @@ class DossierApp(App):
         # Populate language filter dropdown
         self._populate_language_filter()
         
-        # Load projects and auto-select the first one (by stars)
-        self.load_projects(auto_select=True)
+        # Update filter UI to match restored state
+        self._update_filter_ui()
+        self._update_sort_ui()
+        
+        # Restore view state - load projects and select last viewed project
+        self._restore_view_state()
     
     def _populate_language_filter(self) -> None:
         """Populate the language filter dropdown with available languages."""
@@ -1845,6 +1858,7 @@ class DossierApp(App):
     
     def _cmd_quit(self, args: str) -> None:
         """Quit the application."""
+        self._save_view_state()
         self.exit()
     
     def _cmd_refresh(self, args: str) -> None:
@@ -4528,6 +4542,97 @@ class DossierApp(App):
         btn_sort_stars.variant = "primary" if self.sort_by == "stars" else "default"
         btn_sort_name.variant = "primary" if self.sort_by == "name" else "default"
         btn_sort_synced.variant = "primary" if self.sort_by == "synced" else "default"
+    
+    def _update_filter_ui(self) -> None:
+        """Update all filter UI elements to match current filter state."""
+        self._update_filter_buttons()
+        
+        # Update entity type select
+        try:
+            select_entity = self.query_one("#select-entity-type", Select)
+            select_entity.value = self.filter_entity if self.filter_entity else "all"
+        except Exception:
+            pass
+        
+        # Update language select  
+        try:
+            select_lang = self.query_one("#select-language", Select)
+            select_lang.value = self.filter_language if self.filter_language else ""
+        except Exception:
+            pass
+    
+    def _update_sort_ui(self) -> None:
+        """Update sort button UI to match current sort state."""
+        try:
+            btn_sort_stars = self.query_one("#btn-sort-stars", Button)
+            btn_sort_name = self.query_one("#btn-sort-name", Button)
+            btn_sort_synced = self.query_one("#btn-sort-synced", Button)
+            
+            btn_sort_stars.variant = "primary" if self.sort_by == "stars" else "default"
+            btn_sort_name.variant = "primary" if self.sort_by == "name" else "default"
+            btn_sort_synced.variant = "primary" if self.sort_by == "synced" else "default"
+        except Exception:
+            pass
+    
+    def _restore_view_state(self) -> None:
+        """Restore view state from config on app mount."""
+        vs = self._config.view_state
+        
+        # Load projects first
+        self.load_projects(auto_select=False)
+        
+        # Try to restore the last selected project
+        if vs and vs.last_project:
+            with self.session_factory() as session:
+                project = session.exec(
+                    select(Project).where(Project.full_name == vs.last_project)
+                ).first()
+                if project:
+                    self.selected_project = project
+                    self.show_project_details(project)
+                    
+                    # Restore active tab
+                    if vs.active_tab:
+                        try:
+                            tabbed_content = self.query_one("#project-tabs", TabbedContent)
+                            tabbed_content.active = vs.active_tab
+                        except Exception:
+                            pass
+                    return
+        
+        # Fall back to auto-selecting first project
+        self.load_projects(auto_select=True)
+    
+    def _save_view_state(self) -> None:
+        """Save current view state to config."""
+        # Get current active tab
+        active_tab = None
+        try:
+            tabbed_content = self.query_one("#project-tabs", TabbedContent)
+            active_tab = tabbed_content.active
+        except Exception:
+            pass
+        
+        # Get selected project's full_name
+        last_project = None
+        if self.selected_project:
+            last_project = self.selected_project.full_name
+        
+        # Save to config
+        self._config.save_view_state(
+            last_project=last_project,
+            active_tab=active_tab,
+            filter_synced=self.filter_synced,
+            filter_language=self.filter_language,
+            filter_entity=self.filter_entity,
+            filter_starred=self.filter_starred,
+            sort_by=self.sort_by,
+        )
+    
+    def action_quit(self) -> None:
+        """Quit the application, saving view state."""
+        self._save_view_state()
+        self.exit()
     
     def action_refresh(self) -> None:
         """Refresh the project list."""

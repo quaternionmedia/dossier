@@ -19,6 +19,26 @@ DEFAULT_EXPORT_FORMAT = "yaml"  # yaml, json
 
 
 @dataclass
+class ViewState:
+    """Persistent view state for the TUI dashboard."""
+    
+    # Last selected project (by full_name e.g., "owner/repo")
+    last_project: Optional[str] = None
+    
+    # Active tab when closed
+    active_tab: Optional[str] = None
+    
+    # Filter states
+    filter_synced: Optional[bool] = None  # None=all, True=synced, False=unsynced
+    filter_language: Optional[str] = None
+    filter_entity: Optional[str] = None  # None=all, or "repo", "branch", etc.
+    filter_starred: Optional[bool] = None
+    
+    # Sort mode
+    sort_by: str = "stars"  # name, stars, synced
+
+
+@dataclass
 class DossierConfig:
     """Dossier application configuration."""
     
@@ -37,6 +57,9 @@ class DossierConfig:
     # Window state (optional persistence)
     sidebar_width: Optional[int] = None
     
+    # View state - stores last dashboard state for restoration
+    view_state: Optional[ViewState] = None
+    
     @classmethod
     def get_config_path(cls) -> Path:
         """Get the path to the config file."""
@@ -54,6 +77,15 @@ class DossierConfig:
                 # Only use known fields to avoid issues with old config versions
                 known_fields = {f.name for f in cls.__dataclass_fields__.values()}
                 filtered_data = {k: v for k, v in data.items() if k in known_fields}
+                
+                # Handle nested ViewState
+                if "view_state" in filtered_data and filtered_data["view_state"] is not None:
+                    view_state_data = filtered_data["view_state"]
+                    if isinstance(view_state_data, dict):
+                        view_state_fields = {f.name for f in ViewState.__dataclass_fields__.values()}
+                        filtered_view_state = {k: v for k, v in view_state_data.items() if k in view_state_fields}
+                        filtered_data["view_state"] = ViewState(**filtered_view_state)
+                
                 return cls(**filtered_data)
             except (json.JSONDecodeError, TypeError, ValueError):
                 # Invalid config, return defaults
@@ -80,6 +112,29 @@ class DossierConfig:
         self.sync_delay = DEFAULT_SYNC_DELAY
         self.export_format = DEFAULT_EXPORT_FORMAT
         self.sidebar_width = None
+        self.view_state = None
+    
+    def save_view_state(
+        self,
+        last_project: Optional[str] = None,
+        active_tab: Optional[str] = None,
+        filter_synced: Optional[bool] = None,
+        filter_language: Optional[str] = None,
+        filter_entity: Optional[str] = None,
+        filter_starred: Optional[bool] = None,
+        sort_by: str = "stars",
+    ) -> None:
+        """Save the current view state for restoration on next launch."""
+        self.view_state = ViewState(
+            last_project=last_project,
+            active_tab=active_tab,
+            filter_synced=filter_synced,
+            filter_language=filter_language,
+            filter_entity=filter_entity,
+            filter_starred=filter_starred,
+            sort_by=sort_by,
+        )
+        self.save()
 
 
 # Available options for settings
