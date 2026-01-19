@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import ClassVar, Optional
 
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -464,7 +464,7 @@ class ProjectDelta(SQLModel, table=True):
     branch_name: Optional[str] = None  # Associated branch
 
     # Phase sequence for advancing
-    PHASE_ORDER = [
+    PHASE_ORDER: ClassVar[list[DeltaPhase]] = [
         DeltaPhase.BRAINSTORM,
         DeltaPhase.PLANNING,
         DeltaPhase.IMPLEMENTATION,
