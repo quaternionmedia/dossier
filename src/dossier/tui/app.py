@@ -377,6 +377,7 @@ class ProjectListItem(ListItem):
                     "pr": "🔀",
                     "ver": "🏷️",
                     "doc": "📄",
+                    "delta": "🔺",
                 }
                 icon = type_icons.get(entity_type, "•")
                 return f"{icon} {parts[1]}/{entity_type}/{entity_id}"
@@ -1076,7 +1077,25 @@ class DossierApp(App):
         project_tree = self.query_one("#project-tree", Tree)
         project_tree.clear()
         project_tree.root.expand()
-        
+
+        # Pre-fetch deltas in a separate session to avoid corrupting main session
+        # if delta tables don't exist
+        deltas_by_project: dict[int, list] = {}
+        if self._delta_tables_exist:
+            try:
+                with self.session_factory() as delta_session:
+                    all_deltas = delta_session.exec(
+                        select(ProjectDelta).order_by(ProjectDelta.updated_at.desc())
+                    ).all()
+                    for delta in all_deltas:
+                        delta_session.expunge(delta)
+                        if delta.project_id not in deltas_by_project:
+                            deltas_by_project[delta.project_id] = []
+                        deltas_by_project[delta.project_id].append(delta)
+            except Exception:
+                # Silently fail if delta tables don't exist
+                pass
+
         with self.session_factory() as session:
             # Build base query with SQL-level filtering
             stmt = select(Project)
@@ -1121,6 +1140,7 @@ class DossierApp(App):
                     "pr": "%/pr/%",
                     "ver": "%/ver/%",
                     "doc": "%/doc/%",
+                    "delta": "%/delta/%",
                     "repo": None,  # Special case: owner/repo without entity type
                 }
                 pattern = entity_patterns.get(self.filter_entity)
@@ -1137,6 +1157,7 @@ class DossierApp(App):
                             Project.name.notlike("%/pr/%"),
                             Project.name.notlike("%/ver/%"),
                             Project.name.notlike("%/doc/%"),
+                            Project.name.notlike("%/delta/%"),
                         )
                     )
             
@@ -1311,6 +1332,7 @@ class DossierApp(App):
                             "pr": "🔀",
                             "ver": "🏷️",
                             "doc": "📄",
+                            "delta": "🔺",
                         }
                         icon = type_icons.get(entity_type, "•")
                         display = f"{icon} {entity_type}/{entity_id}"
@@ -1591,7 +1613,40 @@ class DossierApp(App):
                 if len(project_branches) > 10:
                     more = branches_folder.add_leaf(f"... {len(project_branches) - 10} more")
                     more.data = {"type": "section", "section": "tab-branches"}
-            
+
+            def add_deltas_to_node(parent_node, project):
+                """Add deltas as children of a project node."""
+                project_deltas = deltas_by_project.get(project.id, [])
+                if not project_deltas:
+                    return
+                # Count by phase
+                active_count = sum(1 for d in project_deltas if d.phase not in [DeltaPhase.COMPLETE, DeltaPhase.ABANDONED])
+                deltas_folder = parent_node.add(f"🔺 Deltas ({len(project_deltas)}, {active_count} active)", expand=False)
+                deltas_folder.data = {"type": "section", "section": "tab-deltas"}
+                phase_icons = {
+                    DeltaPhase.BRAINSTORM: "💡",
+                    DeltaPhase.PLANNING: "📋",
+                    DeltaPhase.IMPLEMENTATION: "⚙️",
+                    DeltaPhase.REVIEW: "🔍",
+                    DeltaPhase.DOCUMENTATION: "📝",
+                    DeltaPhase.COMPLETE: "✅",
+                    DeltaPhase.ABANDONED: "❌",
+                }
+                for delta in project_deltas[:15]:
+                    phase_icon = phase_icons.get(delta.phase, "•")
+                    leaf = deltas_folder.add_leaf(f"{phase_icon} {delta.name}: {delta.title[:30]}")
+                    leaf.data = {
+                        "type": "delta",
+                        "delta_id": delta.id,
+                        "name": delta.name,
+                        "title": delta.title,
+                        "phase": delta.phase.value,
+                        "project_id": project.id,
+                    }
+                if len(project_deltas) > 15:
+                    more = deltas_folder.add_leaf(f"... {len(project_deltas) - 15} more")
+                    more.data = {"type": "section", "section": "tab-deltas"}
+
             def add_all_data_to_node(parent_node, project):
                 """Add all entity data folders to a project node."""
                 add_docs_to_node(parent_node, project)
@@ -1602,6 +1657,7 @@ class DossierApp(App):
                 add_releases_to_node(parent_node, project)
                 add_issues_to_node(parent_node, project)
                 add_prs_to_node(parent_node, project)
+                add_deltas_to_node(parent_node, project)
             
             first_project = None
             for group in sorted_groups:
@@ -1628,6 +1684,7 @@ class DossierApp(App):
                         project.id in prs_by_project,
                         project.id in releases_by_project,
                         project.id in branches_by_project,
+                        project.id in deltas_by_project,
                     ])
                     
                     if has_data:
@@ -2909,7 +2966,7 @@ class DossierApp(App):
             
             # Helper function for relationship icons
             def rel_icon(rel_type: str) -> str:
-                return {"component": "🧩", "dependency": "📦", "related": "🔗", "language": "🌐", "contributor": "👤", "doc": "📄", "version": "🏷️", "branch": "🌿", "issue": "🐛", "pr": "🔀"}.get(rel_type, "•")
+                return {"component": "🧩", "dependency": "📦", "related": "🔗", "language": "🌐", "contributor": "👤", "doc": "📄", "version": "🏷️", "branch": "🌿", "issue": "🐛", "pr": "🔀", "delta": "🔺"}.get(rel_type, "•")
             
             # Add parent section if there are parents
             if parent_links:
@@ -4427,10 +4484,77 @@ class DossierApp(App):
         
         self.load_projects()
         self._select_project_by_name(project_name)
-    
+
+    def _link_delta_project(self, nav_data: dict) -> None:
+        """Create or find a delta project and link it to the current project."""
+        delta_id = nav_data.get("delta_id")
+        name = nav_data.get("name")
+        title = nav_data.get("title", "")
+        phase = nav_data.get("phase", "brainstorm")
+        parent_project_id = nav_data.get("project_id")
+
+        if not delta_id or not name or not parent_project_id:
+            return
+
+        # Get parent project info for naming
+        with self.session_factory() as session:
+            parent_project = session.get(Project, parent_project_id)
+            if not parent_project:
+                return
+
+            owner = parent_project.github_owner
+            repo = parent_project.github_repo
+
+            # Create a project name for the delta with owner/repo for disambiguation
+            if owner and repo:
+                project_name = f"{owner}/{repo}/delta/{name}"
+            else:
+                project_name = f"delta/{name}"
+
+            delta_project = session.exec(
+                select(Project).where(Project.name == project_name)
+            ).first()
+
+            if not delta_project:
+                desc = f"Delta: {title[:80]} [{phase}]"
+                delta_project = Project(
+                    name=project_name,
+                    full_name=project_name,
+                    description=desc,
+                    github_owner=owner,
+                    github_repo=repo,
+                )
+                session.add(delta_project)
+                session.commit()
+                session.refresh(delta_project)
+                self.notify(f"Created delta project: {project_name}")
+
+            existing_link = session.exec(
+                select(ProjectComponent).where(
+                    ProjectComponent.parent_id == parent_project_id,
+                    ProjectComponent.child_id == delta_project.id,
+                )
+            ).first()
+
+            if not existing_link:
+                link = ProjectComponent(
+                    parent_id=parent_project_id,
+                    child_id=delta_project.id,
+                    relationship_type="delta",
+                    order=0,
+                )
+                session.add(link)
+                session.commit()
+                self.notify(f"Linked delta: {name}")
+            else:
+                self.notify(f"Delta {name} already linked", severity="warning")
+
+        self.load_projects()
+        self._select_project_by_name(project_name)
+
     def _select_project_by_name(self, name: str, target_tab: Optional[str] = None) -> None:
         """Select a project by name in the project tree.
-        
+
         Args:
             name: The project name to select
             target_tab: Optional tab to switch to after selection (e.g., 'tab-languages')
@@ -4839,6 +4963,8 @@ class DossierApp(App):
                 self._link_issue_project(nav_data)
             elif nav_type == "pr":
                 self._link_pr_project(nav_data)
+            elif nav_type == "delta":
+                self._link_delta_project(nav_data)
             elif nav_type == "project":
                 self.notify("Already a project", severity="warning")
             elif nav_type == "section":
