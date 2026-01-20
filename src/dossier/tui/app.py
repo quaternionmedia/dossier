@@ -1081,6 +1081,9 @@ class DossierApp(App):
         # Pre-fetch deltas in a separate session to avoid corrupting main session
         # if delta tables don't exist
         deltas_by_project: dict[int, list] = {}
+        delta_links_by_delta: dict[int, list[DeltaLink]] = {}
+        deltas_by_id: dict[int, ProjectDelta] = {}
+        deltas_by_project_name: dict[tuple[int, str], ProjectDelta] = {}
         if self._delta_tables_exist:
             try:
                 with self.session_factory() as delta_session:
@@ -1092,6 +1095,17 @@ class DossierApp(App):
                         if delta.project_id not in deltas_by_project:
                             deltas_by_project[delta.project_id] = []
                         deltas_by_project[delta.project_id].append(delta)
+                        if delta.id is not None:
+                            deltas_by_id[delta.id] = delta
+                            deltas_by_project_name[(delta.project_id, delta.name)] = delta
+                    delta_ids = [delta.id for delta in all_deltas if delta.id is not None]
+                    if delta_ids:
+                        links = delta_session.exec(
+                            select(DeltaLink).where(DeltaLink.delta_id.in_(delta_ids))
+                        ).all()
+                        for link in links:
+                            delta_session.expunge(link)
+                            delta_links_by_delta.setdefault(link.delta_id, []).append(link)
             except Exception:
                 # Silently fail if delta tables don't exist
                 pass
@@ -1634,8 +1648,14 @@ class DossierApp(App):
                 }
                 for delta in project_deltas[:15]:
                     phase_icon = phase_icons.get(delta.phase, "•")
-                    leaf = deltas_folder.add_leaf(f"{phase_icon} {delta.name}: {delta.title[:30]}")
-                    leaf.data = {
+                    link_items = delta_links_by_delta.get(delta.id, [])
+                    delta_node = deltas_folder.add(
+                        f"{phase_icon} {delta.name}: {delta.title[:30]}",
+                        expand=False,
+                    ) if link_items else deltas_folder.add_leaf(
+                        f"{phase_icon} {delta.name}: {delta.title[:30]}"
+                    )
+                    delta_node.data = {
                         "type": "delta",
                         "delta_id": delta.id,
                         "name": delta.name,
@@ -1643,6 +1663,120 @@ class DossierApp(App):
                         "phase": delta.phase.value,
                         "project_id": project.id,
                     }
+                    if link_items:
+                        links_node = delta_node.add(f"Links ({len(link_items)})", expand=False)
+                        links_node.data = {"type": "section", "section": "tab-deltas"}
+                        for link in link_items[:TREE_ENTITY_LIMIT]:
+                            link_type = link.link_type
+                            target_id = link.target_id
+                            target_name = link.target_name or ""
+                            label = None
+                            nav_data = None
+                            if link_type == "issue":
+                                number = target_id
+                                if number is None and target_name:
+                                    try:
+                                        number = int(target_name)
+                                    except ValueError:
+                                        number = None
+                                if number is not None:
+                                    issue_title = next(
+                                        (issue.title for issue in issues_by_project.get(project.id, []) if issue.issue_number == number),
+                                        None,
+                                    )
+                                    label = f"Issue #{number}"
+                                    if issue_title:
+                                        label = f"Issue #{number}: {issue_title[:30]}"
+                                    nav_data = {
+                                        "type": "issue",
+                                        "number": number,
+                                        "title": issue_title,
+                                        "project_id": project.id,
+                                        "owner": project.github_owner,
+                                        "repo": project.github_repo,
+                                        "url": project.github_issues_url(number) if project.github_owner else None,
+                                    }
+                                else:
+                                    label = f"Issue {target_name or '?'}"
+                            elif link_type == "pr":
+                                number = target_id
+                                if number is None and target_name:
+                                    try:
+                                        number = int(target_name)
+                                    except ValueError:
+                                        number = None
+                                if number is not None:
+                                    pr_title = next(
+                                        (pr.title for pr in prs_by_project.get(project.id, []) if pr.pr_number == number),
+                                        None,
+                                    )
+                                    label = f"PR #{number}"
+                                    if pr_title:
+                                        label = f"PR #{number}: {pr_title[:30]}"
+                                    nav_data = {
+                                        "type": "pr",
+                                        "number": number,
+                                        "title": pr_title,
+                                        "project_id": project.id,
+                                        "owner": project.github_owner,
+                                        "repo": project.github_repo,
+                                        "url": project.github_pulls_url(number) if project.github_owner else None,
+                                    }
+                                else:
+                                    label = f"PR {target_name or '?'}"
+                            elif link_type == "branch":
+                                branch_name = target_name or (str(target_id) if target_id is not None else "")
+                                label = f"Branch {branch_name or '?'}"
+                                if branch_name:
+                                    branch_info = next(
+                                        (branch for branch in branches_by_project.get(project.id, []) if branch.name == branch_name),
+                                        None,
+                                    )
+                                    nav_data = {
+                                        "type": "branch",
+                                        "name": branch_name,
+                                        "is_default": branch_info.is_default if branch_info else False,
+                                        "is_protected": branch_info.is_protected if branch_info else False,
+                                        "project_id": project.id,
+                                        "owner": project.github_owner,
+                                        "repo": project.github_repo,
+                                        "url": project.github_branch_url(branch_name) if project.github_owner else None,
+                                    }
+                            elif link_type == "doc":
+                                doc_title = target_name or (str(target_id) if target_id is not None else "")
+                                label = f"Doc {doc_title or '?'}"
+                                if doc_title:
+                                    nav_data = {
+                                        "type": "doc",
+                                        "title": doc_title,
+                                        "project_id": project.id,
+                                    }
+                            elif link_type == "delta":
+                                target_delta = None
+                                if target_id is not None:
+                                    target_delta = deltas_by_id.get(target_id)
+                                if target_delta is None and target_name:
+                                    target_delta = deltas_by_project_name.get((project.id, target_name))
+                                if target_delta:
+                                    label = f"Delta {target_delta.name}: {target_delta.title[:30]}"
+                                    nav_data = {
+                                        "type": "delta",
+                                        "delta_id": target_delta.id,
+                                        "name": target_delta.name,
+                                        "title": target_delta.title,
+                                        "phase": target_delta.phase.value,
+                                        "project_id": target_delta.project_id,
+                                    }
+                                else:
+                                    label = f"Delta {target_name or (str(target_id) if target_id is not None else '?')}"
+                            else:
+                                label = f"{link_type}: {target_name or target_id or '?'}"
+                            link_leaf = links_node.add_leaf(label)
+                            if nav_data:
+                                link_leaf.data = nav_data
+                        if len(link_items) > TREE_ENTITY_LIMIT:
+                            more = links_node.add_leaf(f"... {len(link_items) - TREE_ENTITY_LIMIT} more")
+                            more.data = {"type": "section", "section": "tab-deltas"}
                 if len(project_deltas) > 15:
                     more = deltas_folder.add_leaf(f"... {len(project_deltas) - 15} more")
                     more.data = {"type": "section", "section": "tab-deltas"}
@@ -2132,6 +2266,10 @@ class DossierApp(App):
             project_id = nav_data.get("project_id")
             if source and project_id:
                 self._show_file_viewer(project_id, source)
+
+        elif nav_type == "doc":
+            # Show documentation content in viewer
+            self._show_doc_viewer(nav_data)
         
         elif nav_type == "section":
             # Switch to the corresponding tab
@@ -2206,7 +2344,11 @@ class DossierApp(App):
                 content=content,
                 url=url
             ))
-    
+
+        elif nav_type == "delta":
+            # Link delta as project and navigate to it
+            self._link_delta_project(nav_data)
+
     def show_project_details(self, project: Project) -> None:
         """Show details for the selected project.
         
@@ -2699,6 +2841,35 @@ class DossierApp(App):
                         f"🔗{len(link_count)}" if link_count else "-",
                         key=f"delta-{delta.id}",
                     )
+                    if link_count:
+                        for link in link_count:
+                            link_type = link.link_type or "link"
+                            target = None
+                            if link_type in ("issue", "pr"):
+                                number = link.target_id
+                                if number is None and link.target_name:
+                                    try:
+                                        number = int(link.target_name)
+                                    except ValueError:
+                                        number = None
+                                target = f"#{number}" if number is not None else (link.target_name or "?")
+                            elif link_type == "delta":
+                                if link.target_id is not None:
+                                    target = f"#{link.target_id}"
+                                else:
+                                    target = link.target_name or "?"
+                            else:
+                                target = link.target_name or (str(link.target_id) if link.target_id is not None else "?")
+                            link_label = f"{link_type} {target}".strip()
+                            deltas_table.add_row(
+                                f"  -> {link_label}",
+                                "-",
+                                "-",
+                                "-",
+                                "-",
+                                "-",
+                                key=f"delta-link-{link.id}",
+                            )
 
     def load_dossier_view(self, project: Project) -> None:
         """Load the dossier view for a project."""
@@ -3974,6 +4145,154 @@ class DossierApp(App):
             if linked_project:
                 self._select_project_by_name(linked_project.name)
                 self.notify(f"Navigated to {linked_project.name}")
+
+    @on(DataTable.RowSelected, "#deltas-table")
+    def on_deltas_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle deltas table row selection."""
+        if not self.selected_project or event.row_key.value == "empty":
+            return
+
+        row_key = str(event.row_key.value)
+        if row_key.startswith("delta-link-"):
+            try:
+                link_id = int(row_key.replace("delta-link-", ""))
+            except ValueError:
+                return
+            self._handle_delta_link_row(link_id)
+            return
+
+        if not row_key.startswith("delta-"):
+            return
+
+        try:
+            delta_id = int(row_key.replace("delta-", ""))
+        except ValueError:
+            return
+
+        with self.session_factory() as session:
+            delta = session.get(ProjectDelta, delta_id)
+            if delta:
+                self._link_delta_project({
+                    "delta_id": delta.id,
+                    "name": delta.name,
+                    "title": delta.title,
+                    "phase": delta.phase.value,
+                    "project_id": delta.project_id,
+                })
+
+    def _handle_delta_link_row(self, link_id: int) -> None:
+        """Handle delta link subrows from the deltas table."""
+        with self.session_factory() as session:
+            link = session.get(DeltaLink, link_id)
+            if not link:
+                return
+            delta = session.get(ProjectDelta, link.delta_id)
+            if not delta:
+                return
+            project = session.get(Project, delta.project_id)
+            if not project:
+                return
+
+            link_type = link.link_type
+            if link_type == "issue":
+                number = link.target_id
+                if number is None and link.target_name:
+                    try:
+                        number = int(link.target_name)
+                    except ValueError:
+                        number = None
+                if number is None:
+                    return
+                issue = session.exec(
+                    select(ProjectIssue)
+                    .where(ProjectIssue.project_id == project.id)
+                    .where(ProjectIssue.issue_number == number)
+                ).first()
+                self._link_issue_project({
+                    "number": number,
+                    "title": issue.title if issue else "",
+                    "state": issue.state if issue else "open",
+                    "project_id": project.id,
+                    "owner": project.github_owner,
+                    "repo": project.github_repo,
+                    "url": project.github_issues_url(number) if project.github_owner else None,
+                })
+            elif link_type == "pr":
+                number = link.target_id
+                if number is None and link.target_name:
+                    try:
+                        number = int(link.target_name)
+                    except ValueError:
+                        number = None
+                if number is None:
+                    return
+                pr = session.exec(
+                    select(ProjectPullRequest)
+                    .where(ProjectPullRequest.project_id == project.id)
+                    .where(ProjectPullRequest.pr_number == number)
+                ).first()
+                self._link_pr_project({
+                    "number": number,
+                    "title": pr.title if pr else "",
+                    "is_merged": pr.is_merged if pr else False,
+                    "project_id": project.id,
+                    "owner": project.github_owner,
+                    "repo": project.github_repo,
+                    "url": project.github_pulls_url(number) if project.github_owner else None,
+                })
+            elif link_type == "branch":
+                branch_name = link.target_name or (str(link.target_id) if link.target_id is not None else None)
+                if not branch_name:
+                    return
+                branch = session.exec(
+                    select(ProjectBranch)
+                    .where(ProjectBranch.project_id == project.id)
+                    .where(ProjectBranch.name == branch_name)
+                ).first()
+                self._link_branch_project({
+                    "name": branch_name,
+                    "is_default": branch.is_default if branch else False,
+                    "project_id": project.id,
+                    "owner": project.github_owner,
+                    "repo": project.github_repo,
+                    "url": project.github_branch_url(branch_name) if project.github_owner else None,
+                })
+            elif link_type == "doc":
+                doc_title = link.target_name or (str(link.target_id) if link.target_id is not None else None)
+                if not doc_title:
+                    return
+                doc = session.exec(
+                    select(DocumentSection)
+                    .where(DocumentSection.project_id == project.id)
+                    .where(DocumentSection.title == doc_title)
+                ).first()
+                self._link_doc_project({
+                    "title": doc.title if doc else doc_title,
+                    "section_type": doc.section_type if doc else "doc",
+                    "source_file": doc.source_file if doc else None,
+                    "project_id": project.id,
+                    "owner": project.github_owner,
+                    "repo": project.github_repo,
+                })
+            elif link_type == "delta":
+                target_delta = None
+                if link.target_id is not None:
+                    target_delta = session.get(ProjectDelta, link.target_id)
+                if target_delta is None and link.target_name:
+                    target_delta = session.exec(
+                        select(ProjectDelta)
+                        .where(ProjectDelta.project_id == project.id)
+                        .where(ProjectDelta.name == link.target_name)
+                    ).first()
+                if not target_delta:
+                    return
+                self._link_delta_project({
+                    "delta_id": target_delta.id,
+                    "name": target_delta.name,
+                    "title": target_delta.title,
+                    "phase": target_delta.phase.value,
+                    "project_id": target_delta.project_id,
+                })
     
     def action_open_tree_url(self) -> None:
         """Open the URL of the last selected tree item in browser."""
@@ -6484,11 +6803,15 @@ class DossierApp(App):
             return
 
         row_key_str = str(row_key.value) if row_key else ""
-        if not row_key_str.startswith("delta-"):
+        if not row_key_str.startswith("delta-") or row_key_str.startswith("delta-link-"):
             self.notify("Select a delta to advance", severity="warning")
             return
 
-        delta_id = int(row_key_str.split("-")[1])
+        try:
+            delta_id = int(row_key_str.split("-")[1])
+        except ValueError:
+            self.notify("Select a delta to advance", severity="warning")
+            return
 
         with self.session_factory() as session:
             delta = session.get(ProjectDelta, delta_id)
@@ -6536,11 +6859,15 @@ class DossierApp(App):
             return
 
         row_key_str = str(row_key.value) if row_key else ""
-        if not row_key_str.startswith("delta-"):
+        if not row_key_str.startswith("delta-") or row_key_str.startswith("delta-link-"):
             self.notify("Select a delta first", severity="warning")
             return
 
-        delta_id = int(row_key_str.split("-")[1])
+        try:
+            delta_id = int(row_key_str.split("-")[1])
+        except ValueError:
+            self.notify("Select a delta first", severity="warning")
+            return
 
         # Get delta info for the modal
         with self.session_factory() as session:
@@ -6645,11 +6972,15 @@ class DossierApp(App):
             return
 
         row_key_str = str(row_key.value) if row_key else ""
-        if not row_key_str.startswith("delta-"):
+        if not row_key_str.startswith("delta-") or row_key_str.startswith("delta-link-"):
             self.notify("Select a delta first", severity="warning")
             return
 
-        delta_id = int(row_key_str.split("-")[1])
+        try:
+            delta_id = int(row_key_str.split("-")[1])
+        except ValueError:
+            self.notify("Select a delta first", severity="warning")
+            return
 
         # Get delta info for the modal
         with self.session_factory() as session:
