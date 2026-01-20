@@ -778,12 +778,15 @@ class DossierApp(App):
             init_db()
             session_factory = get_session
         self.session_factory = session_factory
-        
+
+        # Check if delta tables exist (migration may not have been applied)
+        self._delta_tables_exist = self._check_delta_tables_exist()
+
         # Load config and apply saved settings
         from dossier.config import DossierConfig
         self._config = DossierConfig.load()
         self.theme = self._config.theme
-        
+
         # Restore view state from config
         if self._config.view_state:
             vs = self._config.view_state
@@ -792,6 +795,17 @@ class DossierApp(App):
             self.filter_entity = vs.filter_entity
             self.filter_starred = vs.filter_starred
             self.sort_by = vs.sort_by
+
+    def _check_delta_tables_exist(self) -> bool:
+        """Check if delta tables exist in the database."""
+        try:
+            from sqlalchemy import inspect as sa_inspect
+            with self.session_factory() as session:
+                inspector = sa_inspect(session.get_bind())
+                tables = inspector.get_table_names()
+                return "project_delta" in tables
+        except Exception:
+            return False
     
     def compose(self) -> ComposeResult:
         yield Header()
@@ -2559,6 +2573,13 @@ class DossierApp(App):
         deltas_table = self.query_one("#deltas-table", DataTable)
         deltas_table.clear()
 
+        # Skip if delta tables don't exist
+        if not self._delta_tables_exist:
+            deltas_table.add_row(
+                "(No deltas)", "-", "-", "-", "-", "-", key="empty"
+            )
+            return
+
         # Phase display icons
         phase_icons = {
             DeltaPhase.BRAINSTORM: "💡",
@@ -2583,49 +2604,43 @@ class DossierApp(App):
             "chore": "🔧",
         }
 
-        try:
-            with self.session_factory() as session:
-                # Query deltas ordered by phase (active first) then by update time
-                deltas = session.exec(
-                    select(ProjectDelta)
-                    .where(ProjectDelta.project_id == project.id)
-                    .order_by(ProjectDelta.updated_at.desc())
-                ).all()
+        with self.session_factory() as session:
+            # Query deltas ordered by phase (active first) then by update time
+            deltas = session.exec(
+                select(ProjectDelta)
+                .where(ProjectDelta.project_id == project.id)
+                .order_by(ProjectDelta.updated_at.desc())
+            ).all()
 
-                if not deltas:
+            if not deltas:
+                deltas_table.add_row(
+                    "(No deltas)", "-", "-", "-", "-", "-", key="empty"
+                )
+            else:
+                for delta in deltas:
+                    # Count links for this delta
+                    link_count = session.exec(
+                        select(DeltaLink).where(DeltaLink.delta_id == delta.id)
+                    ).all()
+
+                    phase_icon = phase_icons.get(delta.phase, "❓")
+                    priority_icon = priority_icons.get(delta.priority, "⚪")
+                    type_icon = type_icons.get(delta.delta_type, "❓")
+
+                    # Truncate title if needed
+                    title_display = delta.title
+                    if len(title_display) > 28:
+                        title_display = title_display[:25] + "..."
+
                     deltas_table.add_row(
-                        "(No deltas)", "-", "-", "-", "-", "-", key="empty"
+                        delta.name,
+                        title_display,
+                        f"{phase_icon} {delta.phase.value}",
+                        f"{type_icon} {delta.delta_type}",
+                        f"{priority_icon} {delta.priority}",
+                        f"🔗{len(link_count)}" if link_count else "-",
+                        key=f"delta-{delta.id}",
                     )
-                else:
-                    for delta in deltas:
-                        # Count links for this delta
-                        link_count = session.exec(
-                            select(DeltaLink).where(DeltaLink.delta_id == delta.id)
-                        ).all()
-
-                        phase_icon = phase_icons.get(delta.phase, "❓")
-                        priority_icon = priority_icons.get(delta.priority, "⚪")
-                        type_icon = type_icons.get(delta.delta_type, "❓")
-
-                        # Truncate title if needed
-                        title_display = delta.title
-                        if len(title_display) > 28:
-                            title_display = title_display[:25] + "..."
-
-                        deltas_table.add_row(
-                            delta.name,
-                            title_display,
-                            f"{phase_icon} {delta.phase.value}",
-                            f"{type_icon} {delta.delta_type}",
-                            f"{priority_icon} {delta.priority}",
-                            f"🔗{len(link_count)}" if link_count else "-",
-                            key=f"delta-{delta.id}",
-                        )
-        except Exception:
-            # Delta tables may not exist yet (migration not applied)
-            deltas_table.add_row(
-                "(No deltas)", "-", "-", "-", "-", "-", key="empty"
-            )
 
     def load_dossier_view(self, project: Project) -> None:
         """Load the dossier view for a project."""
