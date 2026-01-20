@@ -1106,6 +1106,7 @@ class DossierApp(App):
                     "pr": "%/pr/%",
                     "ver": "%/ver/%",
                     "doc": "%/doc/%",
+                    "delta": "%/delta/%",
                     "repo": None,  # Special case: owner/repo without entity type
                 }
                 pattern = entity_patterns.get(self.filter_entity)
@@ -1122,6 +1123,7 @@ class DossierApp(App):
                             Project.name.notlike("%/pr/%"),
                             Project.name.notlike("%/ver/%"),
                             Project.name.notlike("%/doc/%"),
+                            Project.name.notlike("%/delta/%"),
                         )
                     )
             
@@ -1167,6 +1169,7 @@ class DossierApp(App):
             prs_by_project: dict[int, list] = {}
             releases_by_project: dict[int, list] = {}
             branches_by_project: dict[int, list] = {}
+            deltas_by_project: dict[int, list] = {}
             
             if repo_project_ids:
                 # Languages
@@ -1252,7 +1255,23 @@ class DossierApp(App):
                     if branch.project_id not in branches_by_project:
                         branches_by_project[branch.project_id] = []
                     branches_by_project[branch.project_id].append(branch)
-            
+
+                # Deltas (wrapped in try/except for missing migration)
+                try:
+                    deltas = session.exec(
+                        select(ProjectDelta)
+                        .where(ProjectDelta.project_id.in_(repo_project_ids))
+                        .order_by(ProjectDelta.updated_at.desc())
+                    ).all()
+                    for delta in deltas:
+                        session.expunge(delta)
+                        if delta.project_id not in deltas_by_project:
+                            deltas_by_project[delta.project_id] = []
+                        deltas_by_project[delta.project_id].append(delta)
+                except Exception:
+                    # Delta tables may not exist yet (migration not applied)
+                    pass
+
             # Group projects hierarchically
             # Structure: { group_key: { subgroup_key: [projects] } }
             groups: dict = {}
@@ -1296,6 +1315,7 @@ class DossierApp(App):
                             "pr": "🔀",
                             "ver": "🏷️",
                             "doc": "📄",
+                            "delta": "🔺",
                         }
                         icon = type_icons.get(entity_type, "•")
                         display = f"{icon} {entity_type}/{entity_id}"
@@ -1576,7 +1596,40 @@ class DossierApp(App):
                 if len(project_branches) > 10:
                     more = branches_folder.add_leaf(f"... {len(project_branches) - 10} more")
                     more.data = {"type": "section", "section": "tab-branches"}
-            
+
+            def add_deltas_to_node(parent_node, project):
+                """Add deltas as children of a project node."""
+                project_deltas = deltas_by_project.get(project.id, [])
+                if not project_deltas:
+                    return
+                # Count by phase
+                active_count = sum(1 for d in project_deltas if d.phase not in [DeltaPhase.COMPLETE, DeltaPhase.ABANDONED])
+                deltas_folder = parent_node.add(f"🔺 Deltas ({len(project_deltas)}, {active_count} active)", expand=False)
+                deltas_folder.data = {"type": "section", "section": "tab-deltas"}
+                phase_icons = {
+                    DeltaPhase.BRAINSTORM: "💡",
+                    DeltaPhase.PLANNING: "📋",
+                    DeltaPhase.IMPLEMENTATION: "⚙️",
+                    DeltaPhase.REVIEW: "🔍",
+                    DeltaPhase.DOCUMENTATION: "📝",
+                    DeltaPhase.COMPLETE: "✅",
+                    DeltaPhase.ABANDONED: "❌",
+                }
+                for delta in project_deltas[:15]:
+                    phase_icon = phase_icons.get(delta.phase, "•")
+                    leaf = deltas_folder.add_leaf(f"{phase_icon} {delta.name}: {delta.title[:30]}")
+                    leaf.data = {
+                        "type": "delta",
+                        "delta_id": delta.id,
+                        "name": delta.name,
+                        "title": delta.title,
+                        "phase": delta.phase.value,
+                        "project_id": project.id,
+                    }
+                if len(project_deltas) > 15:
+                    more = deltas_folder.add_leaf(f"... {len(project_deltas) - 15} more")
+                    more.data = {"type": "section", "section": "tab-deltas"}
+
             def add_all_data_to_node(parent_node, project):
                 """Add all entity data folders to a project node."""
                 add_docs_to_node(parent_node, project)
@@ -1587,6 +1640,7 @@ class DossierApp(App):
                 add_releases_to_node(parent_node, project)
                 add_issues_to_node(parent_node, project)
                 add_prs_to_node(parent_node, project)
+                add_deltas_to_node(parent_node, project)
             
             first_project = None
             for group in sorted_groups:
@@ -1613,6 +1667,7 @@ class DossierApp(App):
                         project.id in prs_by_project,
                         project.id in releases_by_project,
                         project.id in branches_by_project,
+                        project.id in deltas_by_project,
                     ])
                     
                     if has_data:
