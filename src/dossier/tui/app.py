@@ -882,6 +882,7 @@ class DossierApp(App):
                                 yield Button("➕ New Delta", id="btn-new-delta", variant="primary")
                                 yield Button("▶ Advance", id="btn-advance-phase", variant="default")
                                 yield Button("📝 Note", id="btn-add-note", variant="default")
+                                yield Button("🔗 Link", id="btn-add-delta-link", variant="default")
 
         # Bottom command bar
         with Horizontal(id="command-bar"):
@@ -4564,6 +4565,11 @@ class DossierApp(App):
         """Handle add note button press."""
         self.action_add_delta_note()
 
+    @on(Button.Pressed, "#btn-add-delta-link")
+    def on_add_delta_link_pressed(self) -> None:
+        """Handle add delta link button press."""
+        self.action_add_delta_link()
+
     @on(Button.Pressed, "#btn-filter-all")
     def on_filter_all_pressed(self) -> None:
         """Show all projects (clear sync filter)."""
@@ -6489,6 +6495,151 @@ class DossierApp(App):
             session.commit()
 
         self.notify("Note added successfully")
+
+    def action_add_delta_link(self) -> None:
+        """Add a link to the selected delta."""
+        if not self.selected_project:
+            self.notify("Select a project first", severity="warning")
+            return
+
+        if not self._delta_tables_exist:
+            self.notify("Delta tables not available (run migration)", severity="warning")
+            return
+
+        deltas_table = self.query_one("#deltas-table", DataTable)
+
+        if deltas_table.cursor_row is None:
+            self.notify("Select a delta first", severity="warning")
+            return
+
+        try:
+            row_key = deltas_table.coordinate_to_cell_key((deltas_table.cursor_row, 0)).row_key
+        except Exception:
+            self.notify("Select a delta first", severity="warning")
+            return
+
+        row_key_str = str(row_key.value) if row_key else ""
+        if not row_key_str.startswith("delta-"):
+            self.notify("Select a delta first", severity="warning")
+            return
+
+        delta_id = int(row_key_str.split("-")[1])
+
+        # Get delta info for the modal
+        with self.session_factory() as session:
+            delta = session.get(ProjectDelta, delta_id)
+            if not delta:
+                self.notify("Delta not found", severity="error")
+                return
+            delta_name = delta.name
+
+        class AddLinkModal(ModalScreen[Optional[tuple[str, str]]]):
+            """Modal for adding a link to a delta."""
+
+            CSS = """
+            AddLinkModal {
+                align: center middle;
+            }
+
+            #add-link-dialog {
+                width: 70;
+                height: auto;
+                padding: 1 2;
+                background: $surface;
+                border: solid $primary;
+            }
+
+            #add-link-dialog Select {
+                margin: 1 0;
+            }
+
+            #add-link-dialog Input {
+                margin: 1 0;
+            }
+
+            #add-link-dialog Horizontal {
+                margin-top: 1;
+                align: right middle;
+            }
+
+            #add-link-dialog Button {
+                margin-left: 1;
+            }
+            """
+
+            def compose(self) -> ComposeResult:
+                with Vertical(id="add-link-dialog"):
+                    yield Label(f"Add Link to '{delta_name}'", classes="title")
+                    yield Label("Link type:")
+                    yield Select(
+                        [
+                            ("Issue", "issue"),
+                            ("Pull Request", "pr"),
+                            ("Branch", "branch"),
+                            ("Documentation", "doc"),
+                            ("Other Delta", "delta"),
+                        ],
+                        id="link-type",
+                        value="issue",
+                    )
+                    yield Label("Target (issue #, PR #, branch name, etc.):")
+                    yield Input(placeholder="Enter target identifier...", id="link-target")
+                    with Horizontal():
+                        yield Button("Cancel", id="cancel-btn")
+                        yield Button("Add Link", id="add-btn", variant="primary")
+
+            @on(Button.Pressed, "#add-btn")
+            def on_add(self) -> None:
+                link_type = self.query_one("#link-type", Select).value
+                target = self.query_one("#link-target", Input).value.strip()
+                if not target:
+                    self.notify("Target is required", severity="error")
+                    return
+                self.dismiss((link_type, target))
+
+            @on(Button.Pressed, "#cancel-btn")
+            def on_cancel(self) -> None:
+                self.dismiss(None)
+
+        def handle_result(result: Optional[tuple[str, str]]) -> None:
+            if result:
+                link_type, target = result
+                self._add_delta_link(delta_id, link_type, target)
+
+        self.push_screen(AddLinkModal(), handle_result)
+
+    def _add_delta_link(self, delta_id: int, link_type: str, target: str) -> None:
+        """Add a link to a delta."""
+        # Parse target based on link type
+        target_id = None
+        target_name = target
+
+        # Try to parse numeric targets for issue/pr/delta
+        if link_type in ("issue", "pr", "delta"):
+            try:
+                # Remove leading # if present
+                clean_target = target.lstrip("#")
+                target_id = int(clean_target)
+                target_name = None
+            except ValueError:
+                # Keep as name if not a number
+                pass
+
+        with self.session_factory() as session:
+            link = DeltaLink(
+                delta_id=delta_id,
+                link_type=link_type,
+                target_id=target_id,
+                target_name=target_name,
+            )
+            session.add(link)
+            session.commit()
+
+        self.notify(f"Link added: {link_type} -> {target}")
+
+        # Refresh the deltas tab
+        if self.selected_project:
+            self._load_deltas_tab(self.selected_project)
 
     def action_search(self) -> None:
         """Focus the search input."""
