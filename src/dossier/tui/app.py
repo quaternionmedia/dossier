@@ -56,6 +56,19 @@ from dossier.dossier_file import generate_dossier
 PAGE_SIZE = 100  # Number of projects to load per page
 DEBOUNCE_MS = 300  # Milliseconds to wait before filtering
 TREE_ENTITY_LIMIT = 20  # Max entities to show per section in tree
+MAIN_TABS = {"tab-dossier", "tab-projects", "tab-deltas"}
+PROJECT_TABS = {
+    "tab-details",
+    "tab-docs",
+    "tab-languages",
+    "tab-branches",
+    "tab-dependencies",
+    "tab-contributors",
+    "tab-issues",
+    "tab-prs",
+    "tab-releases",
+    "tab-components",
+}
 
 
 def extract_file_path(source_file: str | None) -> str | None:
@@ -617,38 +630,36 @@ class DossierApp(App):
     #search-input {
         border: none;
     }
-    
-    #filter-bar {
+
+    #sidebar-controls {
+        dock: bottom;
         height: auto;
         width: 100%;
-        margin: 0 0 1 0;
+        padding: 1 0 0 0;
+        background: $surface;
+        border-top: solid $primary;
     }
-    
-    #filter-bar Button {
-        margin: 0 1 0 0;
-        min-width: 4;
-    }
-    
+
     #filter-bar-2 {
         height: auto;
         width: 100%;
         margin: 0 0 1 0;
     }
-    
+
     #filter-bar-2 Select {
         margin: 0 1 0 0;
         width: 1fr;
     }
-    
-    #sort-bar {
+
+    #filter-bar {
         height: auto;
         width: 100%;
-        margin: 0 0 1 0;
+        margin: 0;
     }
-    
-    #sort-bar Button {
+
+    #filter-bar Button {
         margin: 0 1 0 0;
-        min-width: 8;
+        min-width: 6;
     }
     
     SyncStatusWidget {
@@ -668,6 +679,10 @@ class DossierApp(App):
     
     TabPane {
         padding: 1;
+    }
+
+    #tab-projects {
+        padding: 0;
     }
     
     #dossier-layout {
@@ -816,74 +831,79 @@ class DossierApp(App):
         
         with Horizontal(id="main-layout"):
             with Vertical(id="sidebar"):
-                with Horizontal(id="filter-bar"):
-                    yield Button("All", id="btn-filter-all", variant="primary")
-                    yield Button("🔄", id="btn-filter-synced", variant="default")
-                    yield Button("○", id="btn-filter-unsynced", variant="default")
-                    yield Button("⭐", id="btn-filter-starred", variant="default")
-                with Horizontal(id="filter-bar-2"):
-                    yield Select(
-                        [("All Types", "all"), ("📁 Repos", "repo"), ("🌿 Branches", "branch"),
-                         ("📋 Issues", "issue"), ("🔀 PRs", "pr"), ("📦 Versions", "ver"),
-                         ("📄 Docs", "doc"), ("🔺 Deltas", "delta"), ("👤 Users", "user"),
-                         ("💻 Languages", "lang"), ("📚 Packages", "pkg")],
-                        value="all",
-                        id="select-entity-type",
-                        allow_blank=False,
-                    )
-                    yield Select(
-                        [("Any Language", "")],  # Will be populated on mount
-                        value="",
-                        id="select-language",
-                        allow_blank=False,
-                    )
-                with Horizontal(id="sort-bar"):
-                    yield Button("⭐ Stars", id="btn-sort-stars", variant="primary")
-                    yield Button("🔤 Name", id="btn-sort-name", variant="default")
-                    yield Button("🕐 Recent", id="btn-sort-synced", variant="default")
                 with Container(id="project-list-container"):
-                    yield Tree("📂 Projects", id="project-tree")
-            
+                    yield Tree("Projects", id="project-tree")
+                with Vertical(id="sidebar-controls"):
+                    with Horizontal(id="filter-bar-2"):
+                        yield Select(
+                            [("All Types", "all"), ("Repos", "repo"), ("Branches", "branch"),
+                             ("Issues", "issue"), ("PRs", "pr"), ("Versions", "ver"),
+                             ("Docs", "doc"), ("Deltas", "delta"), ("Users", "user"),
+                             ("Languages", "lang"), ("Packages", "pkg")],
+                            value="all",
+                            id="select-entity-type",
+                            allow_blank=False,
+                        )
+                        yield Select(
+                            [("Any Language", "")],  # Will be populated on mount
+                            value="",
+                            id="select-language",
+                            allow_blank=False,
+                        )
+                        yield Select(
+                            [("Sort: Stars", "stars"), ("Sort: Name", "name"), ("Sort: Recent", "synced")],
+                            value=self.sort_by,
+                            id="select-sort",
+                            allow_blank=False,
+                        )
+                    with Horizontal(id="filter-bar"):
+                        yield Button("All", id="btn-filter-all", variant="primary")
+                        yield Button("Synced", id="btn-filter-synced", variant="default")
+                        yield Button("Unsynced", id="btn-filter-unsynced", variant="default")
+                        yield Button("Star", id="btn-filter-starred", variant="default")
+
             with Vertical(id="main-content"):
-                with TabbedContent(id="project-tabs"):
+                with TabbedContent(id="main-tabs"):
                     with TabPane("Dossier", id="tab-dossier"):
                         with Horizontal(id="dossier-layout"):
                             yield VerticalScroll(Markdown("", id="dossier-view"), id="dossier-scroll")
                             yield DraggableSplitter("dossier-scroll", "component-tree", id="dossier-splitter")
                             yield Tree("Components", id="component-tree")
-                    with TabPane("Details", id="tab-details"):
-                        yield ProjectDetailPanel(id="project-detail")
-                    with TabPane("Documentation", id="tab-docs"):
-                        yield Tree("📄 Documentation", id="docs-tree")
-                    with TabPane("Languages", id="tab-languages"):
-                        yield DataTable(id="languages-table")
-                    with TabPane("Branches", id="tab-branches"):
-                        yield DataTable(id="branches-table")
-                    with TabPane("Dependencies", id="tab-dependencies"):
-                        yield DataTable(id="dependencies-table")
-                    with TabPane("Contributors", id="tab-contributors"):
-                        yield DataTable(id="contributors-table")
-                    with TabPane("Issues", id="tab-issues"):
-                        yield DataTable(id="issues-table")
-                    with TabPane("Pull Requests", id="tab-prs"):
-                        yield DataTable(id="prs-table")
-                    with TabPane("Releases", id="tab-releases"):
-                        yield DataTable(id="releases-table")
-                    with TabPane("Components", id="tab-components"):
-                        with Vertical():
-                            yield DataTable(id="components-table")
-                            with Horizontal(id="component-buttons"):
-                                yield Button("➕ Add Component", id="btn-add-component", variant="primary")
-                                yield Button("🔗 Link as Parent", id="btn-link-parent", variant="default")
-                                yield Button("❌ Remove", id="btn-remove-component", variant="error")
+                    with TabPane("Projects", id="tab-projects"):
+                        with TabbedContent(id="project-tabs"):
+                            with TabPane("Details", id="tab-details"):
+                                yield ProjectDetailPanel(id="project-detail")
+                            with TabPane("Documentation", id="tab-docs"):
+                                yield Tree("Documentation", id="docs-tree")
+                            with TabPane("Languages", id="tab-languages"):
+                                yield DataTable(id="languages-table")
+                            with TabPane("Branches", id="tab-branches"):
+                                yield DataTable(id="branches-table")
+                            with TabPane("Dependencies", id="tab-dependencies"):
+                                yield DataTable(id="dependencies-table")
+                            with TabPane("Contributors", id="tab-contributors"):
+                                yield DataTable(id="contributors-table")
+                            with TabPane("Issues", id="tab-issues"):
+                                yield DataTable(id="issues-table")
+                            with TabPane("Pull Requests", id="tab-prs"):
+                                yield DataTable(id="prs-table")
+                            with TabPane("Releases", id="tab-releases"):
+                                yield DataTable(id="releases-table")
+                            with TabPane("Components", id="tab-components"):
+                                with Vertical():
+                                    yield DataTable(id="components-table")
+                                    with Horizontal(id="component-buttons"):
+                                        yield Button("Add Component", id="btn-add-component", variant="primary")
+                                        yield Button("Link as Parent", id="btn-link-parent", variant="default")
+                                        yield Button("Remove", id="btn-remove-component", variant="error")
                     with TabPane("Deltas", id="tab-deltas"):
                         with Vertical():
                             yield DataTable(id="deltas-table")
                             with Horizontal(id="delta-buttons"):
-                                yield Button("➕ New Delta", id="btn-new-delta", variant="primary")
-                                yield Button("▶ Advance", id="btn-advance-phase", variant="default")
-                                yield Button("📝 Note", id="btn-add-note", variant="default")
-                                yield Button("🔗 Link", id="btn-add-delta-link", variant="default")
+                                yield Button("New Delta", id="btn-new-delta", variant="primary")
+                                yield Button("Advance", id="btn-advance-phase", variant="default")
+                                yield Button("Note", id="btn-add-note", variant="default")
+                                yield Button("Link", id="btn-add-delta-link", variant="default")
 
         # Bottom command bar
         with Horizontal(id="command-bar"):
@@ -1884,7 +1904,10 @@ class DossierApp(App):
         """Handle internal dossier:// links.
         
         Link formats:
-        - dossier://tab/languages - Switch to tab
+        - dossier://tab/dossier - Switch to Dossier tab
+        - dossier://tab/projects - Switch to Projects tab
+        - dossier://tab/deltas - Switch to Deltas tab
+        - dossier://tab/languages - Switch to Projects > Languages
         - dossier://lang/python - Link language entity
         - dossier://pkg/fastapi - Link dependency entity  
         - dossier://user/username - Show contributor
@@ -1906,8 +1929,7 @@ class DossierApp(App):
         if link_type == "tab":
             # Switch to tab
             tab_id = f"tab-{value}"
-            tabbed_content = self.query_one("#project-tabs", TabbedContent)
-            tabbed_content.active = tab_id
+            self._activate_tab(tab_id)
         
         elif link_type == "lang":
             # Link language entity
@@ -2163,7 +2185,7 @@ class DossierApp(App):
             self.notify(f"Unknown sort: {arg}. Use: stars, name, recent", severity="warning")
             return
         
-        self._update_sort_buttons()
+        self._update_sort_ui()
         self.load_projects()
         self.notify(f"Sort: {self.sort_by}")
     
@@ -2246,11 +2268,9 @@ class DossierApp(App):
                 self.show_project_details(project)
                 # Switch to configured default tab, unless navigating from tree
                 if not self._navigating_from_tree:
-                    tabbed_content = self.query_one("#project-tabs", TabbedContent)
-                    tabbed_content.active = self._config.default_tab
+                    self._activate_tab(self._config.default_tab)
                 elif self._tree_target_tab:
-                    tabbed_content = self.query_one("#project-tabs", TabbedContent)
-                    tabbed_content.active = self._tree_target_tab
+                    self._activate_tab(self._tree_target_tab)
                     self._tree_target_tab = None
                 self._navigating_from_tree = False
         
@@ -2275,8 +2295,7 @@ class DossierApp(App):
             # Switch to the corresponding tab
             section = nav_data.get("section")
             if section and section.startswith("tab-"):
-                tabbed_content = self.query_one("#project-tabs", TabbedContent)
-                tabbed_content.active = section
+                self._activate_tab(section)
         
         elif nav_type == "language":
             # Link language entity
@@ -2349,6 +2368,39 @@ class DossierApp(App):
             # Link delta as project and navigate to it
             self._link_delta_project(nav_data)
 
+    def _activate_tab(self, tab_id: str) -> None:
+        """Activate a main or project sub-tab by id."""
+        if not tab_id:
+            return
+        try:
+            main_tabs = self.query_one("#main-tabs", TabbedContent)
+        except Exception:
+            return
+        if tab_id in MAIN_TABS:
+            main_tabs.active = tab_id
+            return
+        if tab_id in PROJECT_TABS:
+            main_tabs.active = "tab-projects"
+            try:
+                project_tabs = self.query_one("#project-tabs", TabbedContent)
+                project_tabs.active = tab_id
+            except Exception:
+                pass
+
+    def _get_active_tab_id(self) -> Optional[str]:
+        """Return the active tab id across main and project tabs."""
+        try:
+            main_tabs = self.query_one("#main-tabs", TabbedContent)
+        except Exception:
+            return None
+        if main_tabs.active == "tab-projects":
+            try:
+                project_tabs = self.query_one("#project-tabs", TabbedContent)
+                return project_tabs.active
+            except Exception:
+                return "tab-projects"
+        return main_tabs.active
+
     def show_project_details(self, project: Project) -> None:
         """Show details for the selected project.
         
@@ -2370,8 +2422,20 @@ class DossierApp(App):
         self._tabs_loaded = {"tab-dossier"}
         
         # Load the currently active tab
-        tabbed_content = self.query_one("#project-tabs", TabbedContent)
-        self._load_tab_data(tabbed_content.active)
+        active_tab = self._get_active_tab_id()
+        if active_tab and active_tab != "tab-dossier":
+            self._load_tab_data(active_tab)
+
+    @on(TabbedContent.TabActivated, "#main-tabs")
+    def on_main_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        """Lazy load tab data when a main tab is activated."""
+        if not hasattr(self, "_current_project_id"):
+            return
+        if event.pane.id == "tab-projects":
+            project_tabs = self.query_one("#project-tabs", TabbedContent)
+            self._load_tab_data(project_tabs.active)
+        elif event.pane.id == "tab-deltas":
+            self._load_tab_data("tab-deltas")
     
     @on(TabbedContent.TabActivated, "#project-tabs")
     def on_tab_activated(self, event: TabbedContent.TabActivated) -> None:
@@ -2906,6 +2970,19 @@ class DossierApp(App):
                     stats.append(f"[🐛 {activity['open_issues']} open](dossier://tab/issues)")
                 if activity.get("open_prs"):
                     stats.append(f"[🔀 {activity['open_prs']} PRs](dossier://tab/prs)")
+            if self._delta_tables_exist:
+                deltas = session.exec(
+                    select(ProjectDelta).where(ProjectDelta.project_id == project.id)
+                ).all()
+                if deltas:
+                    active_count = sum(
+                        1 for d in deltas
+                        if d.phase not in (DeltaPhase.COMPLETE, DeltaPhase.ABANDONED)
+                    )
+                    stats.append(
+                        f"[Deltas {len(deltas)} / {active_count} active](dossier://tab/deltas)"
+                    )
+
             
             if stats:
                 md_lines.append(" • ".join(stats))
@@ -3594,9 +3671,7 @@ class DossierApp(App):
             }
             tab_id = tab_map.get(section)
             if tab_id:
-                tabs = self.query_one("#project-tabs", TabbedContent)
-                if tabs.active != tab_id:
-                    tabs.active = tab_id
+                self._activate_tab(tab_id)
         
         elif nav_type == "language":
             # Create/find language project and link it
@@ -4882,9 +4957,7 @@ class DossierApp(App):
         if self.selected_project and self.selected_project.name == name:
             # Still switch tab if requested
             if target_tab:
-                tabs = self.query_one("#project-tabs", TabbedContent)
-                if tabs.active != target_tab:
-                    tabs.active = target_tab
+                self._activate_tab(target_tab)
             return
         
         # Set flag to prevent auto-switch to dossier tab
@@ -5057,7 +5130,7 @@ class DossierApp(App):
     def on_sort_stars_pressed(self) -> None:
         """Sort by stars."""
         self.sort_by = "stars"
-        self._update_filter_buttons()
+        self._update_sort_ui()
         search_input = self.query_one("#search-input", Input)
         self.load_projects(search=search_input.value)
     
@@ -5065,7 +5138,7 @@ class DossierApp(App):
     def on_sort_name_pressed(self) -> None:
         """Sort by name."""
         self.sort_by = "name"
-        self._update_filter_buttons()
+        self._update_sort_ui()
         search_input = self.query_one("#search-input", Input)
         self.load_projects(search=search_input.value)
     
@@ -5073,7 +5146,7 @@ class DossierApp(App):
     def on_sort_synced_pressed(self) -> None:
         """Sort by recently synced."""
         self.sort_by = "synced"
-        self._update_filter_buttons()
+        self._update_sort_ui()
         search_input = self.query_one("#search-input", Input)
         self.load_projects(search=search_input.value)
     
@@ -5090,6 +5163,14 @@ class DossierApp(App):
         self.filter_language = event.value if event.value else None
         search_input = self.query_one("#search-input", Input)
         self.load_projects(search=search_input.value)
+
+    @on(Select.Changed, "#select-sort")
+    def on_sort_changed(self, event: Select.Changed) -> None:
+        """Handle sort selection change."""
+        if event.value:
+            self.sort_by = event.value
+        search_input = self.query_one("#search-input", Input)
+        self.load_projects(search=search_input.value)
     
     def _update_filter_buttons(self) -> None:
         """Update filter button variants to show active state."""
@@ -5097,31 +5178,23 @@ class DossierApp(App):
         btn_synced = self.query_one("#btn-filter-synced", Button)
         btn_unsynced = self.query_one("#btn-filter-unsynced", Button)
         btn_starred = self.query_one("#btn-filter-starred", Button)
-        btn_sort_stars = self.query_one("#btn-sort-stars", Button)
-        btn_sort_name = self.query_one("#btn-sort-name", Button)
-        btn_sort_synced = self.query_one("#btn-sort-synced", Button)
-        
+
         # Update sync filter buttons
         btn_all.variant = "primary" if self.filter_synced is None else "default"
         btn_synced.variant = "primary" if self.filter_synced is True else "default"
         btn_unsynced.variant = "primary" if self.filter_synced is False else "default"
-        
+
         # Update starred filter button (cycles through states)
         if self.filter_starred is None:
             btn_starred.variant = "default"
-            btn_starred.label = "⭐"
+            btn_starred.label = "Star"
         elif self.filter_starred is True:
             btn_starred.variant = "primary"
-            btn_starred.label = "⭐✓"
+            btn_starred.label = "Starred"
         else:
             btn_starred.variant = "warning"
-            btn_starred.label = "⭐✗"
-        
-        # Update sort buttons
-        btn_sort_stars.variant = "primary" if self.sort_by == "stars" else "default"
-        btn_sort_name.variant = "primary" if self.sort_by == "name" else "default"
-        btn_sort_synced.variant = "primary" if self.sort_by == "synced" else "default"
-    
+            btn_starred.label = "Unstarred"
+
     def _update_filter_ui(self) -> None:
         """Update all filter UI elements to match current filter state."""
         self._update_filter_buttons()
@@ -5139,20 +5212,17 @@ class DossierApp(App):
             select_lang.value = self.filter_language if self.filter_language else ""
         except Exception:
             pass
+
+        self._update_sort_ui()
     
     def _update_sort_ui(self) -> None:
-        """Update sort button UI to match current sort state."""
+        """Update sort UI to match current sort state."""
         try:
-            btn_sort_stars = self.query_one("#btn-sort-stars", Button)
-            btn_sort_name = self.query_one("#btn-sort-name", Button)
-            btn_sort_synced = self.query_one("#btn-sort-synced", Button)
-            
-            btn_sort_stars.variant = "primary" if self.sort_by == "stars" else "default"
-            btn_sort_name.variant = "primary" if self.sort_by == "name" else "default"
-            btn_sort_synced.variant = "primary" if self.sort_by == "synced" else "default"
+            select_sort = self.query_one("#select-sort", Select)
+            select_sort.value = self.sort_by
         except Exception:
             pass
-    
+
     def _restore_view_state(self) -> None:
         """Restore view state from config on app mount."""
         vs = self._config.view_state
@@ -5172,11 +5242,7 @@ class DossierApp(App):
                     
                     # Restore active tab
                     if vs.active_tab:
-                        try:
-                            tabbed_content = self.query_one("#project-tabs", TabbedContent)
-                            tabbed_content.active = vs.active_tab
-                        except Exception:
-                            pass
+                        self._activate_tab(vs.active_tab)
                     return
         
         # Fall back to auto-selecting first project
@@ -5185,12 +5251,7 @@ class DossierApp(App):
     def _save_view_state(self) -> None:
         """Save current view state to config."""
         # Get current active tab
-        active_tab = None
-        try:
-            tabbed_content = self.query_one("#project-tabs", TabbedContent)
-            active_tab = tabbed_content.active
-        except Exception:
-            pass
+        active_tab = self._get_active_tab_id()
         
         # Get selected project's full_name
         last_project = None
@@ -7188,26 +7249,27 @@ Press `o` while tree is focused to open the item in your web browser.
 
 Selected projects are highlighted. Use multi-select with Sync or Delete to batch operate.
 
-## Filter Bar
+## Sidebar Controls
 
-### Sync Status (Row 1)
+### Selectors (Row 1)
+- **Type** - Filter by entity type (Repos, Branches, Issues, PRs, Docs, Deltas, Users, Languages, Packages)
+- **Language** - Filter by primary language
+- **Sort** - Sort by stars, name, or recent sync
+
+### Buttons (Row 2)
 - **All** - Show all projects (clear sync filter)
-- **🔄** - Show only synced projects
-- **○** - Show only unsynced projects
-- **⭐** - Toggle starred filter (⭐ all → ⭐✓ starred → ⭐✗ no stars)
-
-### Type & Language (Row 2)
-- **Type dropdown** - Filter by entity type (Repos, Branches, Issues, PRs, etc.)
-- **Language dropdown** - Filter by primary language
-
-### Sort Options (Row 3)
-- **⭐ Stars** - Sort by GitHub stars (highest first)
-- **🔤 Name** - Sort alphabetically by name
-- **🕐 Recent** - Sort by most recently synced
+- **Synced** - Show only synced projects
+- **Unsynced** - Show only unsynced projects
+- **Star** - Cycle starred filter (all ? starred ? unstarred)
 
 ## Tabs
 
-- **Dossier** - Formatted project overview (default on select)
+Main Tabs:
+- **Dossier** - Formatted overview with component tree
+- **Projects** - Project detail workspace (subtabs below)
+- **Deltas** - Delta list with phases, notes, and links
+
+Project Subtabs (inside Projects):
 - **Details** - Project info with clickable links
 - **Documentation** - Parsed doc sections
 - **Languages** - Language breakdown with visual bars
@@ -7219,7 +7281,11 @@ Selected projects are highlighted. Use multi-select with Sync or Delete to batch
 - **Releases** - Version releases with tags
 - **Components** - Manage subproject relationships
 
-## Components Tab
+## Deltas Tab
+
+Deltas are the unit of change. Use this tab to manage phases, add notes, and compose/link deltas to issues, PRs, branches, docs, or other deltas.
+
+## Projects > Components
 
 Link projects together as components, dependencies, or related projects:
 - **➕ Add Component** - Add a subproject to the current project
