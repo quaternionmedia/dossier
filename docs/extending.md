@@ -267,9 +267,9 @@ Extend the dashboard with new tabs or widgets.
 def compose(self) -> ComposeResult:
     # ... existing code ...
     
-    with TabbedContent(id="detail-tabs"):
-        # ... existing tabs ...
-        with TabPane("Tags", id="tags-tab"):
+    with TabbedContent(id="project-tabs"):
+        # ... existing project subtabs ...
+        with TabPane("Tags", id="tab-tags"):
             yield DataTable(id="tags-table")
 
 # Add handler to populate the tab:

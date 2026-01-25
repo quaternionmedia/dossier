@@ -14,13 +14,13 @@ Dossier uses an **offline-first, cache-merge** pattern:
 
 ### 2. Data-Modeled, Not Schema-Free
 Every entity has a **defined SQLModel schema**:
-- 13 tables with typed fields and relationships
+- Core tables with typed fields and relationships
 - Foreign keys enforce data integrity
 - Query with SQL, not arbitrary JSON paths
 
 ### 3. Fixed Layouts, Muscle Memory
 The TUI uses **consistent layouts across all projects**:
-- Same tabs, same positions, same keybindings
+ - Main tabs and project subtabs stay in fixed positions with the same keybindings
 - Learn once, navigate any project blindfolded
 - No per-project customization that breaks flow
 
@@ -95,7 +95,10 @@ The Dossier tab supports clickable `dossier://` links for in-app navigation:
 
 | Link Format | Action |
 |-------------|--------|
-| `dossier://tab/languages` | Switch to Languages tab |
+| `dossier://tab/dossier` | Switch to Dossier tab |
+| `dossier://tab/projects` | Switch to Projects tab |
+| `dossier://tab/deltas` | Switch to Deltas tab |
+| `dossier://tab/languages` | Switch to Projects > Languages |
 | `dossier://lang/python` | Link to `lang/python` entity |
 | `dossier://pkg/fastapi` | Link to `pkg/fastapi` entity |
 | `dossier://user/username` | Show contributor info |
@@ -105,8 +108,12 @@ The Dossier tab supports clickable `dossier://` links for in-app navigation:
 | `dossier://branch/main` | Show branch info |
 | `dossier://doc/readme` | Open doc in viewer |
 
-Tabs (11 total):
-- **Dossier** - Formatted project overview with component tree
+Tabs:
+- **Dossier** (Main) - Formatted project overview with component tree
+- **Projects** (Main) - Project detail workspace (subtabs below)
+- **Deltas** (Main) - Delta list with phases, notes, and links
+
+Project Subtabs:
 - **Details** - Project info, GitHub metadata, clickable links
 - **Documentation** - Tree view grouped by source file (click to preview)
 - **Languages** - Language breakdown with file extensions and encoding
@@ -198,7 +205,7 @@ Endpoints:
 
 #### Data Models (`src/dossier/models/schemas.py`)
 
-Dossier uses **13 typed SQLModel schemas** — not arbitrary JSON. This enables SQL queries, consistent exports, and reliable API contracts.
+Dossier uses **typed SQLModel schemas** — not arbitrary JSON. This enables SQL queries, consistent exports, and reliable API contracts.
 
 ```python
 # Core entity

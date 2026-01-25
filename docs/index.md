@@ -1,6 +1,6 @@
 # Dossier Documentation
 
-> **Decentralized project tracking for cross-domain teams.** A data-modeled, offline-first alternative to Jira and proprietary trackers.
+> **Decentralized project tracking and delta-centric change management for cross-domain teams.** A data-modeled, offline-first alternative to Jira and proprietary trackers.
 
 ## Quick Links
 
@@ -12,6 +12,7 @@
 | [Overview](overview.md) | Core concepts and use cases |
 | [Workflows](workflows.md) | Copy-paste ready examples |
 | [Architecture](architecture.md) | Cache-merge design and data models |
+| [Analysis & Consolidation](ANALYSIS_AND_CONSOLIDATION.md) | Scope review, duplicates, and delta tutorial |
 | [Extending](extending.md) | Customize for personal/team needs |
 | [Contributing](contributing.md) | Development guide |
 | [Roadmap](roadmap.md) | Future features and vision |
@@ -23,8 +24,11 @@ Dossier is a **decentralized project tracking system** designed for teams workin
 - **Jira replacement** — Issues, PRs, releases, versions in one unified view
 - **Offline-first** — Local SQLite cache, sync when you have connectivity  
 - **Cross-domain** — Track projects across GitHub orgs, teams, even non-Git sources
-- **Data-modeled** — 13 structured schemas, not arbitrary JSON blobs
+- **Data-modeled** - Typed schemas, not arbitrary JSON blobs
+- **Delta-centric** - Deltas are the unit of change with phases, notes, and links
 - **Headless-native** — CLI, TUI, API — no browser tax
+
+Primary goal: standardize the flow of project information. Secondary goal: manage deltas through linking, composition, and human-in-the-loop updates.
 
 ## Key Benefits
 
@@ -35,7 +39,7 @@ Stop paying per-seat for Jira, Linear, or Notion. Dossier is free, open-source, 
 Work offline, sync when connected. No real-time websockets, no polling, no network dependency for reads.
 
 ### 📊 Data-Modeled, Not Schema-Free
-13 typed SQLModel schemas with relationships — query with SQL, not arbitrary JSON paths.
+Typed SQLModel schemas with relationships — query with SQL, not arbitrary JSON paths.
 
 ### 🌐 Cross-Domain Tracking
 Unified view across multiple GitHub orgs, teams, repos. One dashboard, consistent layouts.
@@ -44,7 +48,7 @@ Unified view across multiple GitHub orgs, teams, repos. One dashboard, consisten
 Projects auto-organized by org with inline documentation tree. Click docs to preview with prev/next navigation.
 
 ### ⌨️ Fixed-Layout TUI
-Same 11 tabs, same keybindings, every project. Build muscle memory, gain speed.
+Two-row tabs: main (Dossier, Projects, Deltas) plus project subtabs. Same positions, every project.
 
 ## Technology Stack
 

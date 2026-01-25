@@ -151,18 +151,18 @@ AVAILABLE_THEMES = [
 ]
 
 AVAILABLE_TABS = [
-    ("tab-dossier", "Dossier"),
-    ("tab-details", "Details"),
-    ("tab-docs", "Documentation"),
-    ("tab-languages", "Languages"),
-    ("tab-branches", "Branches"),
-    ("tab-dependencies", "Dependencies"),
-    ("tab-contributors", "Contributors"),
-    ("tab-issues", "Issues"),
-    ("tab-prs", "Pull Requests"),
-    ("tab-releases", "Releases"),
-    ("tab-components", "Components"),
-    ("tab-deltas", "Deltas"),
+    ("tab-dossier", "Dossier (Main)"),
+    ("tab-details", "Projects > Details"),
+    ("tab-docs", "Projects > Documentation"),
+    ("tab-languages", "Projects > Languages"),
+    ("tab-branches", "Projects > Branches"),
+    ("tab-dependencies", "Projects > Dependencies"),
+    ("tab-contributors", "Projects > Contributors"),
+    ("tab-issues", "Projects > Issues"),
+    ("tab-prs", "Projects > Pull Requests"),
+    ("tab-releases", "Projects > Releases"),
+    ("tab-components", "Projects > Components"),
+    ("tab-deltas", "Deltas (Main)"),
 ]
 
 TREE_DENSITY_OPTIONS = [

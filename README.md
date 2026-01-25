@@ -1,6 +1,7 @@
 # Dossier
 
-> **Decentralized project tracking for cross-domain teams.** Replace proprietary tools like Jira with a data-modeled, cache-merge architecture that works offline-first and syncs across repos, teams, and organizations.
+> **Decentralized project tracking and delta-centric change management for cross-domain teams.** Replace proprietary tools like Jira with a data-modeled, cache-merge architecture that works offline-first and syncs across repos, teams, and organizations.
+> Primary goal: standardize the flow of project information. Secondary goal: manage deltas through linking, composition, and human-in-the-loop updates.
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -41,10 +42,12 @@ uv run dossier github sync-user YOUR_USERNAME && uv run dossier dashboard
 
 **Feeling tired of context-switching between Jira, GitHub, Notion, and spreadsheets?** Dossier unifies project tracking into a single, data-modeled interface that:
 
-- **Works offline** — Local SQLite cache, sync when connected
-- **Scales across domains** — Same fixed layouts whether tracking 1 repo or 100 orgs
-- **No vendor lock-in** — Your data, your format, exportable `.dossier` files
-- **Keyboard-driven speed** — Consistent TUI layouts you can navigate blindfolded
+- **Works offline** - Local SQLite cache, sync when connected
+- **Scales across domains** - Same fixed layouts whether tracking 1 repo or 100 orgs
+- **Delta-centric change units** - Track work as deltas with phases, notes, and links
+- **No vendor lock-in** - Your data, your format, exportable `.dossier` files
+- **Keyboard-driven speed** - Consistent TUI layouts you can navigate blindfolded
+
 
 ## ✨ Features
 
@@ -56,6 +59,7 @@ uv run dossier github sync-user YOUR_USERNAME && uv run dossier dashboard
 | 🖥️ **Hierarchical Project Tree** | Auto-organized by org with inline documentation tree |
 | 📄 **Content Viewer** | Click docs/issues/PRs to preview inline with prev/next navigation |
 | 🔗 **Linkable Entities** | Every model element is navigable: `owner/repo/issue/123`, `lang/python`, `pkg/fastapi` |
+| **Delta Management** | Deltas track change units with phases, notes, and links to issues/PRs/docs |
 | ⌨️ **Headless-First** | CLI, TUI, and API — no browser required |
 | 📤 **Portable Exports** | `.dossier` YAML files for sharing and archival |
 | 🐙 **GitHub Native** | Deep integration with repos, users, orgs — but not locked to it |
@@ -64,7 +68,9 @@ uv run dossier github sync-user YOUR_USERNAME && uv run dossier dashboard
 
 Projects auto-organized by org, with docs tree inline. Same tabs, same positions, every project:
 
-`Dossier` • `Details` • `Documentation` • `Languages` • `Branches` • `Dependencies` • `Contributors` • `Issues` • `Pull Requests` • `Releases` • `Components`
+Main tabs: `Dossier` | `Projects` | `Deltas`
+
+Projects subtabs: `Details` | `Documentation` | `Languages` | `Branches` | `Dependencies` | `Contributors` | `Issues` | `Pull Requests` | `Releases` | `Components`
 
 ## 📦 Installation
 

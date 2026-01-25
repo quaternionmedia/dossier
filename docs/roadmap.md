@@ -12,9 +12,9 @@ Dossier aims to be the **decentralized alternative to Jira** — a data-modeled,
 
 Dossier currently provides:
 
-- ✅ **13 data models** — Projects, Versions, Docs, Languages, Branches, Dependencies, Contributors, Issues, PRs, Releases, Components, Entities, Links
+- ? **Core data models** ? Projects, Versions, Docs, Languages, Branches, Dependencies, Contributors, Issues, PRs, Releases, Components, Deltas, Entities, Links
 - ✅ **Cache-merge sync** — GitHub repos, users, and organizations with offline-first SQLite
-- ✅ **Fixed-layout TUI** — 11 tabs with consistent navigation across all projects
+- ✅ **Fixed-layout TUI** — Main tabs + project subtabs with consistent navigation across all projects
 - ✅ **Linkable entities** — Every data model element navigable in the component tree
 - ✅ **Content viewer** — Click tree items to preview docs, issues, and PRs inline
 - ✅ **Entity graphs** — Auto-build scoped entity graphs with disambiguation
@@ -61,23 +61,71 @@ Dossier currently provides:
 
 ---
 
-## Phase 2: Jira Replacement Features
+## Phase 2: Foundation & Delta Management
 
-**Goal**: Full-featured issue/project tracking to replace proprietary tools.
+**Goal**: Eliminate technical debt and complete the delta feature as the core local tracking mechanism.
 
-### 2.1 Issue Management
+### 2.1 Centralize Database Configuration
 
-- **Local Issue Creation** - Create issues without GitHub:
-  - Track tasks in non-GitHub projects
-  - Offline issue creation, sync later
-  - Custom fields per workspace
+- [ ] Create single `src/dossier/database.py` module with unified engine/session factory
+- [ ] Update CLI, API, and TUI to use centralized module
+- [ ] Support `DOSSIER_DB_PATH` environment variable override
+- [ ] Fix hardcoded `sqlite:///dossier.db` to match documented `~/.dossier/dossier.db`
 
-- **Cross-Project Issues** - Issues spanning multiple repos:
-  - "Epic" style groupings
-  - Dependencies between issues
-  - Unified backlog view
+### 2.2 Unify Configuration
 
-### 2.2 Board Views (TUI)
+- [ ] Add `github_token` to DossierConfig (with `GITHUB_TOKEN` env var fallback)
+- [ ] Add `database_path` to DossierConfig
+- [ ] Document all configuration options in one place
+- [ ] Create settings migration for old configs
+
+### 2.3 Complete Delta CLI & API
+
+- **CLI Commands**:
+  - `dossier deltas list [project]`
+  - `dossier deltas create <project> <name> --title "Title"`
+  - `dossier deltas advance <project> <name> [--note "Note"]`
+  - `dossier deltas link <project> <name> --issue 123`
+  - `dossier deltas show <project> <name>`
+
+- **API Endpoints**:
+  - `GET /projects/{name}/deltas`
+  - `POST /projects/{name}/deltas`
+  - `PUT /projects/{name}/deltas/{delta_name}/advance`
+  - `POST /projects/{name}/deltas/{delta_name}/links`
+
+### 2.4 Entity System Consolidation
+
+- [ ] Integrate DeltaLink with Entity/Link system (create both when linking)
+- [ ] Add delta entity type to autolinker
+- [ ] Create unified "get all links for X" query helper
+- [ ] Resolve Project-Delta identity: Deltas are NOT separate Projects
+- [ ] Document all entity name patterns in one reference
+- [ ] Create helper functions for parsing entity names
+
+---
+
+## Phase 3: Interface Parity & Jira Features
+
+**Goal**: CLI, API, and TUI have matching capabilities; add board views for project tracking.
+
+### 3.1 Interface Parity
+
+- **API Expansion**:
+  - Add `sync-user` and `sync-org` endpoints
+  - Add entity graph endpoints
+  - Add batch operations endpoint
+
+- **CLI Enhancement**:
+  - Add entity query commands
+  - Add workspace/filter commands
+
+- **TUI Refinement**:
+  - Complete delta detail view
+  - Add delta creation modal
+  - Implement delta-to-entity navigation
+
+### 3.2 Board Views (TUI)
 
 - **Kanban Tab** - Card-based view:
   - Columns: Backlog → In Progress → Review → Done
@@ -89,7 +137,19 @@ Dossier currently provides:
   - Velocity tracking
   - Burndown in ASCII
 
-### 2.3 Reporting
+### 3.3 Issue Management
+
+- **Local Issue Creation** - Create issues without GitHub:
+  - Track tasks in non-GitHub projects
+  - Offline issue creation, sync later
+  - Custom fields per workspace
+
+- **Cross-Project Issues** - Issues spanning multiple repos:
+  - "Epic" style groupings
+  - Dependencies between issues
+  - Unified backlog view
+
+### 3.4 Reporting
 
 - **Activity Dashboard** - Cross-project metrics:
   - Open issues/PRs trend
@@ -103,18 +163,18 @@ Dossier currently provides:
 
 ---
 
-## Phase 3: Multi-Platform & Extensibility
+## Phase 4: Multi-Platform & Extensibility
 
 **Goal**: Beyond GitHub — support other forges and custom sources.
 
-### 3.1 Additional Sources
+### 4.1 Additional Sources
 
 - **GitLab** - Full GitLab API integration
 - **Bitbucket** - Bitbucket Cloud/Server
 - **Gitea/Forgejo** - Self-hosted forges
 - **Local Git** - Parse `.git` directly (no remote needed)
 
-### 3.2 Plugin Architecture
+### 4.2 Plugin Architecture
 
 - **Custom Parsers** - Add your own sources:
   - Jira import (read-only migration)
@@ -126,32 +186,39 @@ Dossier currently provides:
   - CSV for spreadsheet fans
   - JSON-LD for linked data
 
-### 3.3 Sync Backends
+### 4.3 Sync Backends
 
 - **PostgreSQL** - Shared team cache
 - **SQLite over Syncthing** - Peer-to-peer sync
 - **Git-based sync** - Commit cache to repo
 
+### 4.4 Workspace Model
+
+- Add Workspace table for logical project groupings
+- Project-Workspace relationships (many-to-many)
+- Workspace-scoped views and filters
+- Cross-project deltas spanning multiple repositories
+
 ---
 
-## Phase 4: Team Collaboration
+## Phase 5: Team Collaboration
 
 **Goal**: Optional multi-user features for teams (still works fully offline for individuals).
 
-### 4.1 Shared Workspaces
+### 5.1 Shared Workspaces
 
 - **Team Cache** - Optional shared PostgreSQL backend
 - **Conflict Resolution** - Merge strategies for concurrent edits
 - **Audit Log** - Who changed what, when
 
-### 4.2 Integrations
+### 5.2 Integrations
 
 - **VS Code Extension** - Quick project lookup from editor
 - **Alfred/Raycast** - Launcher integration for macOS
 - **Slack/Discord Bot** - Query projects from chat
 - **CLI Completion** - Fish/Zsh/Bash completions
 
-### 4.3 Knowledge Base
+### 5.3 Knowledge Base
 
 - **Notes & Annotations** - Add notes to any entity
 - **Tags & Labels** - Custom taxonomy beyond GitHub labels
@@ -175,10 +242,12 @@ We welcome contributions! See [contributing.md](contributing.md) for guidelines.
 
 ### Current Priorities
 
-1. 🟡 **Multi-Org Workspaces** - Track projects across GitHub orgs
-2. ✅ **Dependency Graph** - Auto-link from manifests (implemented)
-3. ✅ **Entity Graphs** - Full entity linking with disambiguation (implemented)
-4. 🟡 **Kanban Board Tab** - Card-based issue view in TUI
-5. 🟡 **GitLab Support** - Second forge integration
-6. 🟢 **Sprint Planning** - Time-boxed iteration support
+1. 🔴 **Centralize Database Config** - Eliminate hardcoded paths and duplicate initialization
+2. 🔴 **Delta CLI/API Commands** - Complete the delta feature with full interface support
+3. 🟡 **Entity System Consolidation** - Unify DeltaLink with Entity/Link system
+4. 🟡 **Interface Parity** - Match capabilities across CLI, API, and TUI
+5. ✅ **Dependency Graph** - Auto-link from manifests (implemented)
+6. ✅ **Entity Graphs** - Full entity linking with disambiguation (implemented)
+7. 🟡 **Kanban Board Tab** - Card-based issue view in TUI
+8. 🟢 **GitLab Support** - Second forge integration
 

@@ -25,36 +25,22 @@ uv run dossier dashboard
 ## Interface Overview
 
 ```
-┌────────────────────────────────────────────────────────────────────────────┐
-│ Dossier Dashboard                                            📊 5 projects │
-├──────────────────────┬─────────────────────────────────────────────────────┤
-│ 🏢 astral-sh (2)     │ Dossier │ Details │ Docs │ Lang │ ... │            │
-│   🔄 ruff ⭐12000    │─────────────────────────────────────────────────────│
-│     📚 Docs (5)      │                                                     │
-│       📝 README.md   │  # astral-sh/ruff                                   │
-│       📝 docs/...    │                                                     │
-│   🔄 uv ⭐8000       │  Fast Python linter written in Rust                 │
-│ 🏢 pallets (1)       │                                                     │
-│   ○ flask            │  ⭐ 12,000 stars | 🍴 2,000 forks                   │
-│ 👤 Users (2)         │  📝 MIT License | 🐍 Python, Rust                   │
-│   github/user/...    │                                                     │
-│ 💻 Languages (3)     │  Dependencies: pydantic, click, ...                 │
-│   lang/python        │                                                     │
-│ 📦 Packages (5)      │                                                     │
-│   pkg/fastapi        │                                                     │
-├──────────────────────┴─────────────────────────────────────────────────────┤
-│ 🔍 Search... or :cmd (try :help)  [Sync] [Add] [Del] [?]                   │
-├────────────────────────────────────────────────────────────────────────────┤
-│ q Quit │ s Sync │ a Add │ d Delete │ o Open │ / Search │ f Filter │ ? Help │
-└────────────────────────────────────────────────────────────────────────────┘
++------------------------------+----------------------------------------+
+| Project Tree                 | Main Tabs: Dossier | Projects | Deltas |
+| (controls pinned below)      | Project Subtabs: Details | Documentation | ... |
+|                              |                                        |
++------------------------------+----------------------------------------+
+| Command Bar (search, sync, add, del, help)                          |
++------------------------------------------------------------------------
 ```
+
 
 ### Layout
 
 | Panel | Description |
 |-------|-------------|
-| **Left: Project Tree** | Hierarchical browser organized by org/category |
-| **Right: Tab Panels** | 11 tabs with project details |
+| **Left: Project Tree** | Hierarchical browser organized by org/category with controls pinned below |
+| **Right: Tab Panels** | Main tabs for Dossier, Projects, Deltas with project subtabs inside Projects |
 | **Bottom: Command Bar** | Search, vim-style commands, action buttons |
 | **Footer: Key Bindings** | Quick reference for keyboard shortcuts |
 
@@ -66,6 +52,7 @@ The project tree automatically organizes projects hierarchically:
 
 ### Organization Grouping
 
+Projects with deltas show a Deltas node in the tree; selecting it switches to the Deltas tab.
 ```
 🏢 astral-sh (3)              # GitHub org/owner
   🔄 ruff ⭐12000             # Synced repo with star count
@@ -124,7 +111,10 @@ The project tree automatically organizes projects hierarchically:
 
 ## Tab Panels (Right Panel)
 
-### Tab 1: Dossier
+Main tabs: Dossier, Projects, Deltas. The rest appear as subtabs inside Projects.
+
+
+### Dossier (Main)
 
 Formatted project overview showing:
 - Project name and description
@@ -132,7 +122,14 @@ Formatted project overview showing:
 - License and primary language
 - Component tree (languages, dependencies, contributors)
 
-### Tab 2: Details
+### Deltas (Main)
+
+Track deltas as the unit of change:
+- Create deltas and advance phases
+- Add notes for human-in-the-loop updates
+- Compose/link deltas to issues, PRs, branches, docs, or other deltas
+
+### Projects > Details
 
 Raw project metadata:
 - Full name, description
@@ -141,7 +138,7 @@ Raw project metadata:
 - Sync timestamps
 - Creation/update dates
 
-### Tab 3: Documentation
+### Projects > Documentation
 
 **Tree view** of docs grouped by source file:
 
@@ -157,7 +154,7 @@ Raw project metadata:
 
 **Click any doc** to open the content viewer with prev/next navigation.
 
-### Tab 4: Languages
+### Projects > Languages
 
 Language breakdown table:
 - Language name
@@ -168,7 +165,7 @@ Language breakdown table:
 
 **Click a language row** to navigate to its entity project (`lang/python`).
 
-### Tab 5: Branches
+### Projects > Branches
 
 Repository branches:
 - Branch name
@@ -180,7 +177,7 @@ Repository branches:
 
 **Click a branch row** to navigate to its entity (`owner/repo/branch/main`).
 
-### Tab 6: Dependencies
+### Projects > Dependencies
 
 Dependencies from manifest files:
 - Package name
@@ -190,7 +187,7 @@ Dependencies from manifest files:
 
 **Click a dependency row** to navigate to its entity (`pkg/fastapi`).
 
-### Tab 7: Contributors
+### Projects > Contributors
 
 Top contributors by commit count:
 - Username
@@ -199,7 +196,7 @@ Top contributors by commit count:
 
 Contributors are view-only (no click action).
 
-### Tab 8: Issues
+### Projects > Issues
 
 Open and closed issues:
 - Issue number
@@ -210,7 +207,7 @@ Open and closed issues:
 
 **Click an issue row** to navigate to its entity (`owner/repo/issue/123`).
 
-### Tab 9: Pull Requests
+### Projects > Pull Requests
 
 Pull requests with:
 - PR number
@@ -221,7 +218,7 @@ Pull requests with:
 
 **Click a PR row** to navigate to its entity (`owner/repo/pr/456`).
 
-### Tab 10: Releases
+### Projects > Releases
 
 Version releases:
 - Tag name
@@ -231,7 +228,7 @@ Version releases:
 
 **Click a release row** to navigate to its entity (`owner/repo/ver/v1.0.0`).
 
-### Tab 11: Components
+### Projects > Components
 
 Parent-child project relationships:
 - Child project name
@@ -464,7 +461,7 @@ uv run dossier dashboard
 
 ### Speed Navigation
 
-- **Learn the tabs**: Dossier, Details, Docs, Lang, Branch, Deps, People, Issues, PRs, Releases, Links
+- **Learn the tabs**: Main: Dossier, Projects, Deltas; Projects: Details, Documentation, Languages, Branches, Dependencies, Contributors, Issues, PRs, Releases, Components
 - **Use Tab key**: Quickly cycle through panels
 - **Vim keys work**: `j`/`k` for up/down, `/` for search
 
@@ -506,7 +503,7 @@ Press `r` to refresh, or use `:r` in command bar.
 
 ### Can't see all tabs
 
-Use `Tab` key to navigate, or resize terminal window wider.
+Switch to the Projects main tab to see project subtabs, or use `Tab` to navigate between panels. Resize the terminal if labels truncate.
 
 ### Viewer not opening
 

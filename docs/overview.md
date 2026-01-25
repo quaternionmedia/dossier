@@ -10,9 +10,12 @@ Dossier is a **decentralized project tracking system** built for modern, distrib
 
 1. **Replaces proprietary trackers** — Unified view of issues, PRs, releases, dependencies across all your projects
 2. **Cache-merge architecture** — Work offline, sync incrementally, merge changes from multiple sources
-3. **Data-modeled** — 13 structured SQLModel schemas (not arbitrary fields) for consistent querying
-4. **Cross-domain** — Track projects across GitHub orgs, teams, repos — even non-GitHub sources
-5. **Fixed-layout TUI** — Consistent interface across all projects for keyboard-driven speed
+3. **Data-modeled** - Typed SQLModel schemas (not arbitrary fields) for consistent querying
+4. **Delta-centric** - Deltas are the unit of change, with phases, notes, and links
+5. **Cross-domain** - Track projects across GitHub orgs, teams, repos - even non-GitHub sources
+6. **Fixed-layout TUI** - Main tabs + project subtabs, consistent across projects for keyboard-driven speed
+
+Primary goal: standardize the flow of project information. Secondary goal: facilitate delta linking, composition, and management with both automation and human-in-the-loop updates.
 
 ## Use Cases
 
@@ -47,7 +50,11 @@ Every piece of information in Dossier has a **typed schema** — not arbitrary J
 - Consistent exports and migrations
 - Reliable integrations via API
 
-### The 13 Data Models
+### Delta-Centric Change Units
+
+Deltas are the unit of change. Each delta moves through phases, collects notes, and links to issues, PRs, branches, docs, or other deltas for both automation and human-in-the-loop updates.
+
+### Core Data Models
 
 | Model | Purpose | Linkable | Scoping |
 |-------|---------|----------|--------|
@@ -62,6 +69,9 @@ Every piece of information in Dossier has a **typed schema** — not arbitrary J
 | `ProjectPullRequest` | PRs with merge status, diff stats | ✔️ | `owner/repo/pr/{number}` |
 | `ProjectRelease` | Releases with tags, prerelease flags | ✔️ | `owner/repo/ver/v{tag}` |
 | `ProjectComponent` | Parent-child project relationships | ✔️ | — |
+| `ProjectDelta` | Delta unit of change with phases and metadata | Yes | `owner/repo/delta/{name}` |
+| `DeltaNote` | Notes and updates for a delta phase | Yes | delta scoped |
+| `DeltaLink` | Links a delta to issues, PRs, branches, docs, or other deltas | Yes | delta scoped |
 | `Entity` | Named entities for graph linking | ✔️ | scoped by type |
 | `Link` | Relationships between entities | ✔️ | project/entity scoped |
 
@@ -86,23 +96,25 @@ The TUI uses **hierarchical project organization** and **consistent tab layouts*
 ```
 
 **Tab Panels (Right Panel):**
-```
-┌───────────────────────────────────────────────────┐
-│ Tab 1: Dossier    │ Overview with component tree      │
-│ Tab 2: Details    │ Metadata, links, timestamps       │
-│ Tab 3: Docs       │ Tree view grouped by source file  │
-│ Tab 4: Languages  │ Language breakdown + extensions   │
-│ Tab 5: Branches   │ Branches with commit info         │
-│ Tab 6: Deps       │ Dependencies (click to link)      │
-│ Tab 7: People     │ Contributors by commit count      │
-│ Tab 8: Issues     │ Issues (click to link entity)     │
-│ Tab 9: PRs        │ Pull requests (click to link)     │
-│ Tab 10: Releases  │ Version releases (click to link)  │
-│ Tab 11: Links     │ Component relationships           │
-└───────────────────────────────────────────────────┘
-```
 
-**Why this design?** You learn the positions once. After a week, you navigate by muscle memory — Tab-Tab-Tab to Dependencies, every project, every time. The project tree groups repos by org, so you can quickly find projects across organizations.
+Main tabs:
+- Dossier
+- Projects (subtabs below)
+- Deltas
+
+Projects subtabs:
+- Details
+- Documentation
+- Languages
+- Branches
+- Dependencies
+- Contributors
+- Issues
+- Pull Requests
+- Releases
+- Components
+
+**Why this design?** You learn the main tabs and project subtabs once. After a week, you navigate by muscle memory - same positions, every project, every time. The project tree groups repos by org, so you can quickly find projects across organizations.
 
 ### Cache-Merge Sync
 
@@ -254,7 +266,7 @@ All data stored locally in `~/.dossier/dossier.db`:
 - Portable — copy the file to another machine
 - No server — no Docker, no PostgreSQL, no setup
 
-### 13 Data Tables
+### Core Data Tables
 
 | Table | Purpose |
 |-------|---------|
@@ -262,6 +274,9 @@ All data stored locally in `~/.dossier/dossier.db`:
 | `project_version` | Semver-parsed versions |
 | `documentsection` | Parsed documentation |
 | `project_component` | Parent-child relationships |
+| `project_delta` | Delta units of change |
+| `delta_note` | Notes for delta phases |
+| `delta_link` | Links from deltas to related entities |
 | `project_language` | Language breakdown |
 | `project_branch` | Branches with commits |
 | `project_dependency` | Dependencies from manifests |
