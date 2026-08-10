@@ -164,6 +164,33 @@ Core models live in `schemas.py`:
 by the next sync, silently and completely, so governance state belongs in a
 table sync does not touch.
 
+## Governance commands
+
+- `uv run dossier governance load` — read both corpus documents into the store
+- `uv run dossier governance show` — where every project stands
+- `uv run dossier governance threads` — every line of work in flight
+
+`--corpus-dir` points the loader somewhere other than `governance/qm`, which
+is how it is usable before a pin bump carries the documents into the
+submodule. The Governance tab in the dashboard shows the same two tables.
+
+Three rules bind anything you add here, and each exists because the obvious
+alternative produces a table that looks right and is not:
+
+- **Never write back to a document, and never re-derive a fact it does not
+  carry.** Both are generated in the corpus. A fact the view wants and the
+  document lacks is a change to the generator, reviewed once, so every reader
+  gets it — not a computation in the renderer, which would be a second
+  definition of a governance rule.
+- **`{"unknown": "<reason>"}` is a value.** It means nobody could establish
+  the fact, and says why. It is not zero, not empty, and not compliant.
+  Render it as its own state, never as blank and never as the healthy value.
+  A stated `null` is different again: `last_propagation: null` means *never
+  propagated*, which is established.
+- **Always show the document's age.** A dashboard that looks live and is three
+  days old is worse than one that admits its age, because the first stops
+  people checking.
+
 ## Development commands
 
 - `uv run dossier` — run CLI
