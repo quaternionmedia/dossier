@@ -154,6 +154,7 @@ thing this view could print.
 
 | Symptom | Cause |
 |---|---|
+| `Nothing stored. Run: dossier governance load` — **and a new `dossier.db` appeared next to you** | You are in the wrong repository. Every command calls `init_db()`, which creates an empty `dossier.db` in the *current directory* before the subcommand runs, so running `dossier` in the corpus or in another project silently makes an empty database there and then truthfully reports it as empty. `cd` to the dossier checkout and delete the stray. This has already cost one person three repositories' worth of attempts. |
 | `unavailable - the document is not at this path` | Prep step 1. The vendored pin does not carry the documents; pass `--corpus-dir`. |
 | `no such column: governance_repository.…` | A database built by an older version of this feature. `dossier db stamp head` does not add columns — delete the local `dossier.db` and re-sync, or add the column by hand. |
 | `Nothing stored. Run: dossier governance load` | `show` before `load`. |

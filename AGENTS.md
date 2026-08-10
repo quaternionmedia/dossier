@@ -173,6 +173,13 @@ Full reference, including what each column means: `docs/governance.md`.
 has nothing to run, because the documents are generated and stored only in the
 corpus and dossier is their only reader.
 
+Being in the wrong directory does not announce itself: every command calls
+`init_db()`, which creates an empty `dossier.db` in the **current** directory
+before your subcommand runs. So `dossier governance show` in the corpus or in
+another project makes an empty database there and then truthfully reports
+`Nothing stored`, which reads as a broken feature. If a `dossier.db` appears
+somewhere unexpected, that is what happened; delete it and `cd` here.
+
 Two prep steps, both once:
 
 ```sh
