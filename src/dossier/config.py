@@ -161,6 +161,7 @@ AVAILABLE_TABS = [
     ("tab-issues", "Issues"),
     ("tab-prs", "Pull Requests"),
     ("tab-releases", "Releases"),
+    ("tab-governance", "Governance"),
     ("tab-components", "Components"),
 ]
 

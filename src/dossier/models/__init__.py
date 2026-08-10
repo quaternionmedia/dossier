@@ -1,5 +1,9 @@
 """Data models for Dossier."""
 
+from .governance import (
+    GovernanceRepository,
+    GovernanceThread,
+)
 from .schemas import (
     Project,
     ProjectBranch,
@@ -19,6 +23,8 @@ from .schemas import (
 )
 
 __all__ = [
+    "GovernanceRepository",
+    "GovernanceThread",
     "Project",
     "ProjectBranch",
     "ProjectComponent",
