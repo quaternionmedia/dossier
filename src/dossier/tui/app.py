@@ -428,12 +428,17 @@ class ProjectDetailPanel(Vertical):
     """Panel showing detailed project information."""
     
     project: reactive[Optional[Project]] = reactive(None)
+    # Governance is handed in rather than looked up: this panel has no session,
+    # and the app that selects a project already has one. Keeping the lookup out
+    # of here also keeps the read-time join in a single place.
+    governance: reactive[Optional[tuple]] = reactive(None)
     
     def compose(self) -> ComposeResult:
         yield Label("Select a project", id="project-title", classes="title")
         yield Rule()
         yield VerticalScroll(
             Static("", id="project-info", markup=True),
+            Static("", id="project-governance", markup=True),
             Markdown("", id="project-docs"),
             id="detail-scroll",
         )
@@ -442,6 +447,7 @@ class ProjectDetailPanel(Vertical):
         if project is None:
             self.query_one("#project-title", Label).update("Select a project")
             self.query_one("#project-info", Static).update("")
+            self.query_one("#project-governance", Static).update("")
             self.query_one("#project-docs", Markdown).update("")
             return
         
@@ -467,6 +473,25 @@ class ProjectDetailPanel(Vertical):
             info_lines.append("🔄 [dim]Not synced - press 's' to sync[/]")
         
         self.query_one("#project-info", Static).update("\n".join(info_lines))
+        self._render_governance()
+
+    def watch_governance(self, _value) -> None:
+        """Re-render: the row can arrive after the project it describes."""
+        self._render_governance()
+
+    def _render_governance(self) -> None:
+        """The selected project's governance state, or why there is none."""
+        from dossier import governance as gov
+
+        target = self.query_one("#project-governance", Static)
+        if self.project is None:
+            target.update("")
+            return
+        row, matched_by = self.governance or (None, None)
+        state = gov.health(row) if row is not None else gov.UNKNOWN_TEXT
+        colour = {"ok": "green", "drift": "red", gov.UNKNOWN_TEXT: "yellow"}[state]
+        body = "\n".join(f"  {line}" for line in gov.summary_lines(row, matched_by))
+        target.update(f"\n[bold]Governance[/] [{colour}]{state}[/]\n{body}")
 
 
 class StatsWidget(Static):
@@ -896,7 +921,11 @@ class DossierApp(App):
         governance_table.add_column("Corpus", width=13)
         governance_table.add_column("Seed", width=8)
         governance_table.add_column("Slot", width=9)
-        governance_table.add_column("Evidence (landed)", width=54)
+        governance_table.add_column("Evidence (landed)", width=46)
+        # The reverse link: which governed repositories this store has synced.
+        # A blank here means nobody has looked at that project in dossier, which
+        # is worth seeing beside its governance state.
+        governance_table.add_column("In dossier", width=16)
         governance_table.cursor_type = "row"
 
         threads_table = self.query_one("#governance-threads-table", DataTable)
@@ -2161,6 +2190,13 @@ class DossierApp(App):
         # Update detail panel
         detail_panel = self.query_one("#project-detail", ProjectDetailPanel)
         detail_panel.project = project
+        # Governance is joined by name at read time -- never stored as a key,
+        # because github sync rebuilds the project tables and would take it with
+        # them. The panel gets the row and how it was matched.
+        from dossier import governance as gov
+
+        with self.session_factory() as session:
+            detail_panel.governance = gov.governance_for_project(session, project)
         
         # Load dossier view (always needed as default tab)
         self.load_dossier_view(project)
@@ -2551,6 +2587,14 @@ class DossierApp(App):
             rows = gov.repositories(session)
             thread_rows = gov.threads(session)
             ages = gov.document_age(session)
+            # One pass for the reverse link, so the table is not N queries deep.
+            projects = {}
+            synced_prs = set()
+            for row in rows:
+                match, how = gov.project_for_repository(session, row)
+                projects[row.name] = gov.coverage_text(match, how)
+                if match is not None:
+                    synced_prs |= gov.synced_pr_numbers(session, match)
             budget = next(
                 (r.harness_staleness_budget_hours for r in rows
                  if r.harness_staleness_budget_hours),
@@ -2588,6 +2632,7 @@ class DossierApp(App):
                     gov.show_pair(row.slot_state, row.slot_unknown)
                 ),
                 self._governance_cell(evidence),
+                self._coverage_cell(projects.get(row.name, "not synced")),
                 key=f"governance-{row.name}",
             )
 
@@ -2626,9 +2671,29 @@ class DossierApp(App):
                 f"{thread.commits or 0}c {thread.changed_files or 0}f "
                 f"+{thread.additions or 0}/-{thread.deletions or 0}",
                 idle,
-                f"#{thread.pr}" if thread.pr else "-",
+                self._pr_cell(thread.pr, synced_prs),
                 key=f"thread-{thread.id}",
             )
+
+    @staticmethod
+    def _coverage_cell(text: str) -> str:
+        """Dim what this store does not hold; flag a match made on a weak key."""
+        if text == "not synced":
+            return f"[dim]{text}[/]"
+        if text != "synced":
+            return f"[yellow]{text}[/]"
+        return text
+
+    @staticmethod
+    def _pr_cell(number, synced: set) -> str:
+        """The pull request, dimmed when this store has not synced it.
+
+        Absence is not an error: it means the project has not been synced since
+        that pull request opened.
+        """
+        if not number:
+            return "-"
+        return f"#{number}" if number in synced else f"[dim]#{number}[/]"
 
     @staticmethod
     def _governance_cell(text: str) -> str:

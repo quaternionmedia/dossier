@@ -351,6 +351,115 @@ def _stamp(value: Optional[datetime]) -> str:
     return value.strftime("%Y-%m-%d %H:%MZ") if value else "unknown"
 
 
+# --- Joining governance rows to the projects dossier already knows ---------
+#
+# The two sides are stored independently, on purpose: `github sync` rebuilds the
+# project tables and would take governance state with them. So the link is made
+# at **read** time, here, and never stored as a foreign key.
+#
+# It is a match on names, which means it can be wrong, so each match carries how
+# it was made. `slug` is the strong key -- `quaternionmedia/alfred` identifies
+# one repository on one host. A bare name is a guess that happens to be safe
+# inside a single org and would not be across two.
+
+#: Match rules, strongest first. Each takes (governance row, project) and
+#: returns True. The first to fire names the match.
+_MATCH_RULES = (
+    (
+        "slug",
+        lambda row, project: bool(row.slug)
+        and row.slug in {project.full_name, project.get_full_name(), project.name},
+    ),
+    (
+        "repo name",
+        lambda row, project: bool(project.github_repo)
+        and row.name == project.github_repo,
+    ),
+    ("name", lambda row, project: row.name == project.name),
+    (
+        "trailing name",
+        lambda row, project: "/" in project.name
+        and row.name == project.name.rsplit("/", 1)[-1],
+    ),
+)
+
+
+def match_strength(row: GovernanceRepository, project) -> Optional[str]:
+    """How this governance row matches this project, or ``None``.
+
+    The returned word is shown to the reader. A match on `slug` is an identity;
+    a match on a bare name is an inference, and saying which is the difference
+    between a link and a guess presented as one.
+    """
+    for how, rule in _MATCH_RULES:
+        try:
+            if rule(row, project):
+                return how
+        except AttributeError:  # a partially-populated project row
+            continue
+    return None
+
+
+def governance_for_project(session: Session, project) -> tuple[Optional[GovernanceRepository], Optional[str]]:
+    """The governance row describing this project, and how it was matched."""
+    if project is None:
+        return None, None
+    best: tuple[Optional[GovernanceRepository], Optional[str], int] = (None, None, len(_MATCH_RULES))
+    for row in session.exec(select(GovernanceRepository)).all():
+        how = match_strength(row, project)
+        if how is None:
+            continue
+        rank = [name for name, _ in _MATCH_RULES].index(how)
+        if rank < best[2]:
+            best = (row, how, rank)
+    return best[0], best[1]
+
+
+def project_for_repository(session: Session, row: GovernanceRepository):
+    """The project dossier holds for this governance row, and how it matched.
+
+    The coverage direction: which repositories the corpus governs have actually
+    been synced into this store. A repository with no project is not a problem
+    -- it means nobody has looked at it here, which is worth being able to see.
+    """
+    from dossier.models import Project
+
+    best = (None, None, len(_MATCH_RULES))
+    for project in session.exec(select(Project)).all():
+        how = match_strength(row, project)
+        if how is None:
+            continue
+        rank = [name for name, _ in _MATCH_RULES].index(how)
+        if rank < best[2]:
+            best = (project, how, rank)
+    return best[0], best[1]
+
+
+def threads_for_project(session: Session, project) -> list[GovernanceThread]:
+    """Threads in flight for this project, most idle first."""
+    row, _ = governance_for_project(session, project)
+    if row is None:
+        return []
+    return [t for t in threads(session) if t.repository_name == row.name]
+
+
+def synced_pr_numbers(session: Session, project) -> set[int]:
+    """Pull request numbers dossier has synced for this project.
+
+    Lets a thread say whether the pull request it names is one this store knows
+    about. A thread whose pull request is absent is not an error -- it means the
+    project has not been synced since it opened.
+    """
+    from dossier.models import ProjectPullRequest
+
+    if project is None or project.id is None:
+        return set()
+    rows = session.exec(
+        select(ProjectPullRequest).where(ProjectPullRequest.project_id == project.id)
+    ).all()
+    return {r.pr_number for r in rows}
+
+
 # --- Presentation, shared so the CLI and the TUI cannot disagree -----------
 #
 # Every one of these renders unknown as its own state. None of them renders it
@@ -372,6 +481,21 @@ def show_pair(value, unknown: Optional[str], null_text: str = "-") -> str:
     if value is None:
         return null_text
     return str(value)
+
+
+def coverage_text(project, matched_by: Optional[str]) -> str:
+    """Whether this store holds the repository, and whether that was a guess.
+
+    Deliberately not the project's name: the match means they are the same
+    repository, so repeating the name says nothing the row does not. What is
+    worth a column is that a weaker key than the slug was used, because a bare
+    name is safe inside one org and would not be across two.
+    """
+    if project is None:
+        return "not synced"
+    if matched_by == "slug":
+        return "synced"
+    return f"synced ({matched_by})"
 
 
 def drift_text(row: GovernanceRepository) -> str:
@@ -397,3 +521,38 @@ def health(row: GovernanceRepository) -> str:
     if (row.behind_corpus or 0) > 0 or row.seed_drift == "drift" or row.slot_state == "over":
         return "drift"
     return "ok"
+
+
+def summary_lines(row: Optional[GovernanceRepository], matched_by: Optional[str] = None) -> list[str]:
+    """A project's governance state in a few lines, for a detail view.
+
+    One implementation so the detail panel and any other reader cannot end up
+    with two vocabularies for the same row. Returns plain strings; the caller
+    decides on markup.
+    """
+    if row is None:
+        return [
+            "not in the corpus's governance documents",
+            "either the corpus does not govern it, or nothing has been loaded",
+        ]
+
+    lines = [
+        f"phase {row.phase or '-'} (claimed{', ' + row.phase_source if row.phase_source else ''})",
+        f"corpus {drift_text(row)}",
+        f"seed {show_pair(row.seed_drift, row.seed_drift_unknown)}",
+        f"evidence {show_pair(row.precondition, row.precondition_unknown)}"
+        + (f" - missing {row.precondition_missing}" if row.precondition_missing else ""),
+        f"slot {show_pair(row.slot_state, row.slot_unknown)}"
+        + (f" holds {row.slot_violations}" if row.slot_violations else ""),
+    ]
+    if row.records_total is not None:
+        lines.append(f"records {row.records_total} ({row.records_ratified or 0} ratified)")
+    if row.last_propagation_unknown:
+        lines.append("last propagation unknown")
+    elif row.last_propagation is None:
+        lines.append("never propagated")
+    else:
+        lines.append(f"last propagation {row.last_propagation:%Y-%m-%d}")
+    if matched_by and matched_by != "slug":
+        lines.append(f"matched to this project by {matched_by}, not by slug")
+    return lines

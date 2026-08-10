@@ -457,6 +457,96 @@ async def test_governance_tab_says_so_when_nothing_has_been_loaded():
         assert app.query_one("#governance-table").row_count == 0
 
 
+# --- Joining governance rows to projects, at read time ---------------------
+
+
+def make_project(**kwargs):
+    from dossier.models import Project
+
+    return Project(**kwargs)
+
+
+def test_the_slug_is_the_strong_key(session):
+    row = GovernanceRepository(name="alfred", slug="quaternionmedia/alfred")
+    project = make_project(name="alfred-thing", full_name="quaternionmedia/alfred")
+    assert gov.match_strength(row, project) == "slug"
+
+
+def test_matching_falls_back_through_weaker_keys(session):
+    row = GovernanceRepository(name="alfred", slug="quaternionmedia/alfred")
+    assert gov.match_strength(row, make_project(name="x", github_repo="alfred")) == "repo name"
+    assert gov.match_strength(row, make_project(name="alfred")) == "name"
+    assert gov.match_strength(row, make_project(name="someone/alfred")) == "trailing name"
+
+
+def test_an_unrelated_project_does_not_match():
+    row = GovernanceRepository(name="alfred", slug="quaternionmedia/alfred")
+    assert gov.match_strength(row, make_project(name="rad")) is None
+
+
+def test_the_strongest_match_wins_when_several_could(session):
+    """A weak name collision must not beat an exact slug."""
+    session.add(GovernanceRepository(name="alfred", slug="quaternionmedia/alfred"))
+    session.add(make_project(name="alfred"))  # matches by bare name
+    session.add(make_project(name="elsewhere/alfred", full_name="quaternionmedia/alfred"))
+    session.commit()
+
+    row = session.exec(select(GovernanceRepository)).one()
+    project, how = gov.project_for_repository(session, row)
+    assert how == "slug"
+    assert project.name == "elsewhere/alfred"
+
+
+def test_governance_for_project_reports_how_it_matched(session):
+    session.add(GovernanceRepository(name="alfred", slug="quaternionmedia/alfred", phase="v0.0.1"))
+    session.commit()
+    row, how = gov.governance_for_project(session, make_project(name="alfred"))
+    assert row.phase == "v0.0.1"
+    assert how == "name"
+
+
+def test_a_project_the_corpus_does_not_govern_has_no_row(session):
+    session.add(GovernanceRepository(name="alfred"))
+    session.commit()
+    row, how = gov.governance_for_project(session, make_project(name="unrelated"))
+    assert row is None and how is None
+
+
+def test_coverage_says_synced_and_flags_a_weak_match():
+    project = make_project(name="alfred")
+    assert gov.coverage_text(None, None) == "not synced"
+    assert gov.coverage_text(project, "slug") == "synced"
+    assert gov.coverage_text(project, "name") == "synced (name)"
+
+
+def test_summary_lines_distinguish_never_propagated_from_unknown():
+    never = GovernanceRepository(name="a")
+    unknown = GovernanceRepository(name="b", last_propagation_unknown="no branch")
+    assert any("never propagated" in line for line in gov.summary_lines(never))
+    assert any("unknown" in line for line in gov.summary_lines(unknown))
+
+
+def test_summary_lines_say_so_when_there_is_no_row():
+    lines = gov.summary_lines(None)
+    assert any("not in the corpus" in line for line in lines)
+
+
+def test_summary_lines_flag_a_match_made_on_a_weak_key():
+    row = GovernanceRepository(name="alfred")
+    assert any("not by slug" in line for line in gov.summary_lines(row, "name"))
+    assert not any("not by slug" in line for line in gov.summary_lines(row, "slug"))
+
+
+def test_threads_for_a_project_come_from_its_governance_row(session):
+    session.add(GovernanceRepository(name="alfred", slug="quaternionmedia/alfred"))
+    session.add(GovernanceThread(repository_name="alfred", name="config", idle_hours=5.0))
+    session.add(GovernanceThread(repository_name="rad", name="other", idle_hours=9.0))
+    session.commit()
+
+    found = gov.threads_for_project(session, make_project(name="alfred"))
+    assert [t.name for t in found] == ["config"]
+
+
 # --- Finding the corpus ----------------------------------------------------
 
 
@@ -605,6 +695,91 @@ async def test_the_dashboard_can_open_directly_on_the_governance_tab(tmp_path):
         await pilot.pause()
         assert app.query_one("#project-tabs").active == "tab-governance"
         assert app.query_one("#governance-table").row_count == 1
+
+
+@pytest.mark.asyncio
+async def test_selecting_a_project_shows_its_governance_in_the_details_tab(tmp_path):
+    """The project->org link, driven through the real app.
+
+    Worth an app-level test rather than a helper test: the panel has no session,
+    so if the app stops handing the row over the block silently renders empty --
+    and empty reads as fine.
+    """
+    from dossier.models import Project
+    from dossier.tui import DossierApp
+
+    engine = create_engine("sqlite://")
+    SQLModel.metadata.create_all(engine)
+    write_governance(
+        tmp_path,
+        [{"name": "alfred", "branch": {"behind_corpus": 62}, "seed": {"adr_template_vs_corpus": "drift"}}],
+    )
+    with Session(engine) as active:
+        gov.load_documents(active, corpus_dir=tmp_path)
+        active.add(Project(name="alfred", full_name="quaternionmedia/alfred"))
+        active.commit()
+
+    app = DossierApp(session_factory=lambda: Session(engine))
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        with Session(engine) as active:
+            project = active.exec(select(Project)).one()
+        app.show_project_details(project)
+        await pilot.pause()
+
+        block = str(app.query_one("#project-governance").content)
+        assert "Governance" in block
+        assert "62 behind" in block
+        assert "drift" in block
+
+
+@pytest.mark.asyncio
+async def test_a_project_the_corpus_does_not_govern_says_so_rather_than_nothing(tmp_path):
+    from dossier.models import Project
+    from dossier.tui import DossierApp
+
+    engine = create_engine("sqlite://")
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as active:
+        active.add(Project(name="unrelated"))
+        active.commit()
+
+    app = DossierApp(session_factory=lambda: Session(engine))
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        with Session(engine) as active:
+            project = active.exec(select(Project)).one()
+        app.show_project_details(project)
+        await pilot.pause()
+        block = str(app.query_one("#project-governance").content)
+        assert "not in the corpus" in block
+
+
+@pytest.mark.asyncio
+async def test_the_governance_table_shows_which_repositories_are_synced(tmp_path):
+    """The org->project link: coverage, in the org-wide table."""
+    from dossier.models import Project
+    from dossier.tui import DossierApp
+
+    engine = create_engine("sqlite://")
+    SQLModel.metadata.create_all(engine)
+    write_governance(tmp_path, [{"name": "alfred"}, {"name": "rad"}])
+    with Session(engine) as active:
+        gov.load_documents(active, corpus_dir=tmp_path)
+        active.add(Project(name="alfred", full_name="quaternionmedia/alfred"))
+        active.commit()
+
+    app = DossierApp(session_factory=lambda: Session(engine), initial_tab="tab-governance")
+    async with app.run_test(size=(180, 50)) as pilot:
+        await pilot.pause()
+        table = app.query_one("#governance-table")
+        rendered = {
+            str(table.get_row_at(i)[0]): str(table.get_row_at(i)[-1])
+            for i in range(table.row_count)
+        }
+        assert any("alfred" in name and "synced" in cell and "not" not in cell
+                   for name, cell in rendered.items())
+        assert any("rad" in name and "not synced" in cell for name, cell in rendered.items())
 
 
 # --- The real documents, if this checkout has them -------------------------
