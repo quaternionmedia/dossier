@@ -2897,15 +2897,11 @@ def _warn_if_run_outside_dossier() -> None:
     cwd = Path.cwd()
     if (cwd / "src" / "dossier").is_dir():
         return  # a dossier checkout, which is the expected place
-    looks_like_corpus = (cwd / "PRINCIPLES.md").exists() and (cwd / "records").is_dir()
-    where = "the corpus checkout" if looks_like_corpus else str(cwd)
     click.echo(
         click.style("note:", fg="yellow")
-        + f" running in {where}, so the store is ./dossier.db here rather than "
-        "the one in your dossier checkout.\n"
-        "      That works, and it leaves a stray database behind and keeps a "
-        "second store that will disagree with the first.\n"
-        "      Run this from the dossier checkout unless you meant otherwise.",
+        + f" the store for this run is {cwd / 'dossier.db'}, which is per-directory."
+        "\n      Running from elsewhere gets a different store, and the two will"
+        " not agree.",
         err=True,
     )
 
@@ -3058,21 +3054,21 @@ def governance_threads() -> None:
     "--corpus-dir",
     type=click.Path(path_type=Path),
     default=None,
-    help="Corpus checkout to read. Defaults to governance/qm, which is empty "
-    "until a pin bump carries the documents in.",
+    help="Corpus checkout to read. Found automatically when omitted: the "
+    "current directory, then governance/qm, then ../qm.",
 )
 @click.option(
-    "--refresh",
-    is_flag=True,
-    default=False,
+    "--refresh/--no-refresh",
+    default=True,
     help="Regenerate both documents first, by running the corpus's own "
-    "generators. Reads the network and writes into the corpus checkout.",
+    "generators. On by default; reads the network and writes into the "
+    "corpus checkout.",
 )
 @click.option(
     "--offline",
     is_flag=True,
     default=False,
-    help="With --refresh, pass --offline to the governance generator.",
+    help="With a refresh, pass --offline to the governance generator.",
 )
 @click.option(
     "--no-load",
@@ -3095,38 +3091,49 @@ def governance_dashboard(
 ) -> None:
     """Get the latest and open the dashboard, in one command.
 
-    Refresh (optional) -> load -> launch, on the Governance tab.
+    Refresh -> load -> launch, on the Governance tab.
 
     \b
-    Typical use, from a dossier checkout with the corpus beside it:
+    From a corpus checkout, or from a project that vendors one:
+        dossier governance dashboard
+        dossier governance dashboard --no-refresh      # read what is on disk
         dossier governance dashboard --corpus-dir ../qm
-        dossier governance dashboard --corpus-dir ../qm --refresh
 
     \b
-    --refresh runs the corpus's own generators, which is why it is opt-in:
-    they query the host for every repository in the org, so it is slow and
-    needs credentials, and it writes into the corpus checkout's working tree.
-    Without it, whatever the documents say on disk is what you see -- and the
-    view always prints how old that is.
+    The corpus is found automatically: the current directory, then
+    governance/qm, then ../qm. Whichever wins is printed, because a resolution
+    that stays silent is how a reader ends up looking at a different
+    repository than the one they think they are.
+
+    \b
+    A refresh runs the corpus's own generators, so it queries the host for
+    every repository in the org and rewrites two committed files in that
+    checkout. That diff is yours to review. --no-refresh skips it and reads
+    what is on disk; either way the view prints how old the documents are.
     """
     from dossier import corpus as corpus_tools
     from dossier import governance as gov
 
-    root = corpus_dir or gov.DEFAULT_CORPUS_DIR
+    root, why = gov.resolve_corpus_dir(corpus_dir)
+    click.echo(f"corpus  {root}  ({why})")
 
     if refresh:
-        click.echo(f"Refreshing both documents in {root} ...")
-        for outcome in corpus_tools.refresh(root, offline=offline):
-            mark = "ok  " if outcome.ok else ("skip" if not outcome.ran else "FAIL")
-            click.echo(f"{mark} {outcome.document:<24} {outcome.summary}")
-            if outcome.output and not outcome.ok:
-                for line in outcome.output.splitlines():
-                    click.echo(f"       {line}")
-        click.echo(
-            "     the refresh writes committed files -- review that checkout's "
-            "diff before committing it"
-        )
-        click.echo()
+        blocked = corpus_tools.can_refresh(root)
+        if blocked:
+            click.echo(f"skip    refresh - {blocked}")
+        else:
+            click.echo("refresh running the corpus's own generators ...")
+            for outcome in corpus_tools.refresh(root, offline=offline):
+                mark = "ok  " if outcome.ok else ("skip" if not outcome.ran else "FAIL")
+                click.echo(f"{mark}    {outcome.document:<24} {outcome.summary}")
+                if outcome.output and not outcome.ok:
+                    for line in outcome.output.splitlines():
+                        click.echo(f"           {line}")
+            click.echo(
+                f"        two committed files in {root} now differ -- that diff "
+                "is yours to review"
+            )
+    click.echo()
 
     if not no_load:
         with get_session() as session:
@@ -3147,11 +3154,12 @@ def governance_dashboard(
             )
             if corpus_dir is None:
                 click.echo(
-                    "The default path is the vendored corpus, which is pinned to "
-                    "a branch cut from the corpus's main and does not carry the\n"
-                    "documents yet. Pass --corpus-dir pointing at a corpus "
-                    "checkout that does, for example:\n"
-                    "    dossier governance dashboard --corpus-dir ../qm"
+                    "Nothing was found in the current directory, in "
+                    "governance/qm, or in ../qm. A project's vendored copy is\n"
+                    "pinned to a branch cut from the corpus's main, and the "
+                    "documents are not on main yet, so it is empty by\n"
+                    "construction. Point at a corpus checkout that has them:\n"
+                    "    dossier governance dashboard --corpus-dir <corpus>"
                 )
             raise SystemExit(1)
         click.echo()

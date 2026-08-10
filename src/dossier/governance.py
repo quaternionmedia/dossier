@@ -59,6 +59,58 @@ def default_paths(corpus_dir: Path | str | None = None) -> tuple[Path, Path]:
     return root / GOVERNANCE_FILENAME, root / HARNESS_FILENAME
 
 
+def has_documents(corpus_dir: Path | str) -> bool:
+    """Whether either document is present at this root."""
+    governance, harness = default_paths(corpus_dir)
+    return governance.exists() or harness.exists()
+
+
+def looks_like_corpus(corpus_dir: Path | str) -> bool:
+    """Whether this directory is a corpus checkout, documents or not.
+
+    Two markers rather than one, and both prose rather than generated, so a
+    branch that predates `ci/` still identifies itself.
+    """
+    root = Path(corpus_dir)
+    return (root / "PRINCIPLES.md").exists() and (root / "records").is_dir()
+
+
+#: Where to look for the corpus, in order, when nobody said. Each entry is a
+#: path and the sentence a caller should print if it wins -- resolution that
+#: cannot explain itself is the kind of convenience that later gets blamed for
+#: reading the wrong repository.
+SEARCH_ORDER = (
+    (Path("."), "the current directory is a corpus checkout"),
+    (DEFAULT_CORPUS_DIR, "the corpus vendored at governance/qm"),
+    (Path("..") / "qm", "a corpus checkout beside this one"),
+)
+
+
+def resolve_corpus_dir(explicit: Path | str | None = None) -> tuple[Path, str]:
+    """Decide which corpus checkout to read, and say why.
+
+    Returns the path and a short reason, always. A caller prints the reason:
+    an implicit choice that stays silent is how a reader ends up looking at a
+    different repository than the one they think they are looking at.
+
+    A candidate carrying the documents wins over one that merely looks like a
+    corpus, because reading is the point. Falling all the way through returns
+    the first candidate anyway, so the caller reports "not found here" against
+    a concrete path rather than against nothing.
+    """
+    if explicit is not None:
+        return Path(explicit), "given with --corpus-dir"
+
+    for candidate, reason in SEARCH_ORDER:
+        if has_documents(candidate):
+            return candidate, reason
+    for candidate, reason in SEARCH_ORDER:
+        if looks_like_corpus(candidate):
+            return candidate, f"{reason}, though neither document is there yet"
+
+    return SEARCH_ORDER[0][0], "nothing looked like a corpus, so: the current directory"
+
+
 @dataclass
 class SourceOutcome:
     """What happened to one document during a load."""

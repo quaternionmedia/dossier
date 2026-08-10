@@ -166,78 +166,36 @@ table sync does not touch.
 
 ## Governance commands
 
-Full reference, including what each column means: `docs/governance.md`.
-
-**Run these here, in dossier.** The corpus repo renders its own documents with
-`ci/harness_dashboard.py` and `ci/governance_render.py`; every other project
-has nothing to run, because the documents are generated and stored only in the
-corpus and dossier is their only reader.
-
-Being in the wrong directory does not announce itself: every command calls
-`init_db()`, which creates an empty `dossier.db` in the **current** directory
-before your subcommand runs. So `dossier governance show` in the corpus or in
-another project makes an empty database there and then truthfully reports
-`Nothing stored`, which reads as a broken feature. If a `dossier.db` appears
-somewhere unexpected, that is what happened; delete it and `cd` here.
-
-Two prep steps, both once:
-
 ```sh
-# 1. A corpus checkout that carries the documents. The vendored pin does NOT:
-#    it is cut from the corpus's main, and they are not on main yet, so the
-#    default path is empty by construction. Confirm before running:
-ls ../qm/governance-status.yaml ../qm/harness-status.json
-
-# 2. Record the governance tables' migration. Every command calls init_db(),
-#    whose create_all makes missing tables before your subcommand runs -- so
-#    on an older database the tables already exist and `db upgrade` aborts
-#    with "table already exists". Stamp rather than upgrade:
-uv run dossier db stamp head        # then: dossier db current -> 005_governance
+uv run dossier governance dashboard          # refresh, load, and open the tab
+uv run dossier governance dashboard --no-refresh
 ```
 
-On Windows set `PYTHONIOENCODING=utf-8` first: some commands print emoji and a
-`cp1252` console raises `UnicodeEncodeError` on them (`db current` is one). The
-`governance` commands themselves are ASCII-only.
+Works from a corpus checkout or from a project that vendors one; the corpus is
+found automatically and the choice is printed. Full reference, including the
+one prep step and what every column means: **`docs/governance.md`**.
 
-Then one command does refresh → load → launch, opening on the Governance tab:
-
-```sh
-uv run dossier governance dashboard --corpus-dir ../qm --refresh
-```
-
-Drop `--refresh` to read what is on disk, which is instant; the view always
-prints the documents' age, so skipping it never hides staleness. `--no-tui`
-prints both tables instead of launching. The steps are also available
-separately as `governance load`, `governance show` and `governance threads`.
-
-`--refresh` runs the corpus's own generators and is opt-in for three reasons:
-it is slow (~36s across 109 repositories), it needs host credentials, and it
-modifies committed files in the corpus checkout — that diff is a human's to
-review. **The refresh lives in `dossier/corpus.py`, deliberately outside the
-read-and-render path**, because the corpus's rule is that a renderer may not
-run a command: a view that can shell out is a second place a governance rule
-gets defined. `tests/test_governance.py` asserts the word `subprocess` does not
-appear in the parser, the read model, or the presentation module.
-
-Nothing polls. `--corpus-dir` stops being necessary once the corpus change
-adding the documents lands on `main` and this project's pin is bumped.
-
-Three rules bind anything you add here, and each exists because the obvious
+Three rules bind anything added here, and each exists because the obvious
 alternative produces a table that looks right and is not:
 
 - **Never write back to a document, and never re-derive a fact it does not
-  carry.** Both are generated in the corpus. A fact the view wants and the
+  carry.** Both are generated in the corpus. A fact this view wants and the
   document lacks is a change to the generator, reviewed once, so every reader
-  gets it — not a computation in the renderer, which would be a second
-  definition of a governance rule.
-- **`{"unknown": "<reason>"}` is a value.** It means nobody could establish
-  the fact, and says why. It is not zero, not empty, and not compliant.
-  Render it as its own state, never as blank and never as the healthy value.
-  A stated `null` is different again: `last_propagation: null` means *never
-  propagated*, which is established.
+  gets it — not a computation here, which would be a second definition of a
+  governance rule.
+- **`{"unknown": "<reason>"}` is a value.** It means nobody could establish the
+  fact, and says why. Render it as its own state, never as blank and never as
+  the healthy value. A stated `null` is different again: `last_propagation:
+  null` means *never propagated*, which is established.
 - **Always show the document's age.** A dashboard that looks live and is three
   days old is worse than one that admits its age, because the first stops
   people checking.
+
+Refreshing runs the corpus's generators, so it lives in `dossier/corpus.py`,
+deliberately outside the read-and-render path — the corpus's rule is that a
+renderer may not run a command. `tests/test_governance.py` asserts the word
+`subprocess` appears in neither the parser, the read model, nor the
+presentation module.
 
 ## Development commands
 
