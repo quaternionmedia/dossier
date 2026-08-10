@@ -2874,11 +2874,40 @@ def governance_group() -> None:
     back to them.
 
     Examples:
+        dossier governance dashboard --corpus-dir ../qm --refresh
         dossier governance load       Read both documents into the store
         dossier governance show       Where every project stands
         dossier governance threads    What work is in flight, and where
     """
-    pass
+    _warn_if_run_outside_dossier()
+
+
+def _warn_if_run_outside_dossier() -> None:
+    """Say so when the store is being created somewhere unexpected.
+
+    Every command calls `init_db()`, which creates `dossier.db` in the current
+    directory. Run from the corpus checkout, that leaves a stray database in a
+    repository it has nothing to do with, and the store is then separate from
+    the one the dossier checkout uses -- so `load` here and `show` there
+    disagree for a reason neither command mentions.
+
+    A warning rather than an error: running from elsewhere with an explicit
+    --corpus-dir does work, and the operator may mean it.
+    """
+    cwd = Path.cwd()
+    if (cwd / "src" / "dossier").is_dir():
+        return  # a dossier checkout, which is the expected place
+    looks_like_corpus = (cwd / "PRINCIPLES.md").exists() and (cwd / "records").is_dir()
+    where = "the corpus checkout" if looks_like_corpus else str(cwd)
+    click.echo(
+        click.style("note:", fg="yellow")
+        + f" running in {where}, so the store is ./dossier.db here rather than "
+        "the one in your dossier checkout.\n"
+        "      That works, and it leaves a stray database behind and keeps a "
+        "second store that will disagree with the first.\n"
+        "      Run this from the dossier checkout unless you meant otherwise.",
+        err=True,
+    )
 
 
 @governance_group.command(name="load")
