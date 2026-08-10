@@ -166,13 +166,42 @@ table sync does not touch.
 
 ## Governance commands
 
-- `uv run dossier governance load` — read both corpus documents into the store
+Full reference, including what each column means: `docs/governance.md`.
+
+**Run these here, in dossier.** The corpus repo renders its own documents with
+`ci/harness_dashboard.py` and `ci/governance_render.py`; every other project
+has nothing to run, because the documents are generated and stored only in the
+corpus and dossier is their only reader.
+
+Two prep steps, both once:
+
+```sh
+# 1. A corpus checkout that carries the documents. The vendored pin does NOT:
+#    it is cut from the corpus's main, and they are not on main yet, so the
+#    default path is empty by construction. Confirm before running:
+ls ../qm/governance-status.yaml ../qm/harness-status.json
+
+# 2. Record the governance tables' migration. Every command calls init_db(),
+#    whose create_all makes missing tables before your subcommand runs -- so
+#    on an older database the tables already exist and `db upgrade` aborts
+#    with "table already exists". Stamp rather than upgrade:
+uv run dossier db stamp head        # then: dossier db current -> 005_governance
+```
+
+On Windows set `PYTHONIOENCODING=utf-8` first: some commands print emoji and a
+`cp1252` console raises `UnicodeEncodeError` on them (`db current` is one). The
+`governance` commands themselves are ASCII-only.
+
+Then:
+
+- `uv run dossier governance load --corpus-dir ../qm` — read both documents
 - `uv run dossier governance show` — where every project stands
 - `uv run dossier governance threads` — every line of work in flight
+- `uv run dossier dashboard` — the Governance tab shows the same two tables
 
-`--corpus-dir` points the loader somewhere other than `governance/qm`, which
-is how it is usable before a pin bump carries the documents into the
-submodule. The Governance tab in the dashboard shows the same two tables.
+Nothing polls and nothing refreshes on its own; re-run `load` after the corpus
+regenerates a document. `--corpus-dir` stops being necessary once the corpus
+change adding the documents lands on `main` and this project's pin is bumped.
 
 Three rules bind anything you add here, and each exists because the obvious
 alternative produces a table that looks right and is not:
