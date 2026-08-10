@@ -133,6 +133,37 @@ triggers it.
 Nothing polls and nothing refreshes on its own. The Governance tab is org-wide,
 so it needs no project selected.
 
+## How this links to the rest of dossier
+
+The governance rows and dossier's own `Project` rows are stored independently,
+and joined **at read time** on names — never as a stored foreign key. That is
+deliberate: `github sync` empties and rebuilds the project tables on every run,
+so a key pointing at them would take governance state with it.
+
+The join is visible in both directions:
+
+| Direction | Where | Shows |
+|---|---|---|
+| project → org | **Details** tab, per project | that project's phase, drift, evidence, slot and propagation, or that the corpus does not govern it |
+| org → project | **IN DOSSIER** column, `governance show` and the Governance tab | whether this store has synced that repository at all |
+| thread → PR | PR column in the threads table | dimmed when the store has not synced that pull request |
+
+Matching is ranked, strongest first, and a weak match says so:
+
+1. `slug` — `quaternionmedia/alfred`, an identity: one repository on one host
+2. `repo name` — the project's `github_repo`
+3. `name` — a bare name, safe inside one org and not across two
+4. `trailing name` — the last segment of an `owner/repo` name
+
+Anything below `slug` is rendered with the rule that made it, because a link and
+a guess presented as a link are different things. `synced (name)` in the
+coverage column, and "matched to this project by name, not by slug" in the
+Details block.
+
+**`not synced` is not a problem.** It means nobody has looked at that repository
+in dossier — worth seeing beside its governance state, since an ungoverned
+project nobody has synced is exactly the one that stays invisible.
+
 ## Reading the output
 
 ### `governance show`

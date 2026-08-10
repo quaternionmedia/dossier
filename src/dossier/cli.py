@@ -2967,6 +2967,11 @@ def governance_show() -> None:
     with get_session() as session:
         rows = gov.repositories(session)
         ages = gov.document_age(session)
+        # The reverse link: which governed repositories this store has synced.
+        synced = {}
+        for row in rows:
+            match, how = gov.project_for_repository(session, row)
+            synced[row.name] = gov.coverage_text(match, how)
 
     if not rows:
         click.echo("Nothing stored. Run: dossier governance load")
@@ -2975,7 +2980,10 @@ def governance_show() -> None:
     click.echo(_age_line("governance-status.yaml", ages["governance"], None))
     click.echo()
 
-    header = f"{'REPOSITORY':<25} {'PHASE':<8} {'CORPUS':<12} {'SEED':<7} {'SLOT':<6} EVIDENCE"
+    header = (
+        f"{'REPOSITORY':<25} {'PHASE':<8} {'CORPUS':<12} {'SEED':<7} "
+        f"{'SLOT':<6} {'IN DOSSIER':<14} EVIDENCE"
+    )
     click.echo(header)
     click.echo("-" * len(header))
     for row in rows:
@@ -2992,12 +3000,14 @@ def governance_show() -> None:
             f"{gov.drift_text(row):<12} "
             f"{gov.show_pair(row.seed_drift, row.seed_drift_unknown):<7} "
             f"{gov.show_pair(row.slot_state, row.slot_unknown):<6} "
+            f"{_fit(synced.get(row.name), 14):<14} "
             f"{evidence}"
         )
     click.echo()
     click.echo("? unknown - nobody could measure it, which is not the same as compliant")
     click.echo("! drift   - behind the corpus, seed drift, or over the slot limit")
     click.echo("phase is a claim a human entered; evidence is what has landed")
+    click.echo("in dossier - the project this store holds for it, if any")
 
 
 @governance_group.command(name="threads")
