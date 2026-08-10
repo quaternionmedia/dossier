@@ -1,0 +1,53 @@
+name: License check
+
+# The open-license record's section 4 enforcement, along the one runtime path
+# dossier presents: a Python package ecosystem. There is no container image,
+# so no SBOM gate is wired; the record's obligations are cumulative, so one
+# would be added beside this rather than instead of it.
+#
+# Not a seed file. The seed carries adr-lint, submodule-check and reuse-lint;
+# the licence gate is doctrine rather than one fixed script, because the
+# ecosystems genuinely differ. See governance/qm/project-seed/adr/README.md's
+# obligations table.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  licenses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install the locked environment
+        # --locked rather than a plain sync: the gate reports on what is
+        # installed, so an environment that drifted from uv.lock would produce
+        # a truthful report about the wrong dependency set.
+        run: uv sync --locked --dev
+
+      - name: Prove the gate can report bad
+        # A signal only ever observed green has not been tested, it has been
+        # watched. The selftest runs the normalizer and the allowlist check
+        # against fixtures that must fail -- source-available licences, an
+        # absent declaration, and an OSI licence outside the allowlist.
+        run: uv run python scripts/license_gate.py --selftest
+
+      - name: Check dependency licences
+        run: uv run python scripts/license_gate.py --json license-report.json
+
+      - name: Upload the generated report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-report
+          path: license-report.json
+          if-no-files-found: error
