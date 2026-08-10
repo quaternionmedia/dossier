@@ -13,38 +13,44 @@ carry.
 
 This is the question that wastes the most time, so it is first.
 
-| Repository | What to run there |
+| Repository | What works there |
 |---|---|
-| **dossier** | Everything on this page. `dossier governance …`, and the Governance tab in the dashboard. |
-| **qm** (the corpus) | Nothing from this page — but qm renders its own documents: `python ci/harness_dashboard.py harness-status.json --format md` and `python ci/governance_render.py`. Those are the reference readers this view was built to replace. |
-| **alfred, apothecary, any other project** | Nothing. The documents describe every project but are generated and stored only in the corpus, and dossier is the only reader. |
+| **qm** (the corpus) | `dossier governance dashboard` with no flags — the documents are at the root, so the current directory wins. qm also renders them itself, with `python ci/harness_dashboard.py harness-status.json --format md` and `python ci/governance_render.py`. |
+| **dossier** | The same command; resolution falls through to `../qm`. This is where the code lives and where its store belongs. |
+| **any other project** | Only with `--corpus-dir` pointing at a corpus checkout. Nothing is generated or stored in a project, so there is nothing local to read. |
+
+The store is `./dossier.db`, **per directory**. Run from two places and you get
+two stores that will not agree; the command prints a note when the current
+directory is not a dossier checkout.
+
+## Where it finds the corpus
+
+Both documents sit at the corpus root. With no `--corpus-dir`, three places are
+tried in order and **the winner is printed**, because a resolution that stays
+silent is how a reader ends up looking at a different repository than the one
+they think they are:
+
+1. the current directory — so this works with no flags from a corpus checkout
+2. `governance/qm` — a project's vendored copy
+3. `../qm` — a corpus checked out beside this one
+
+A candidate carrying the documents beats one that merely looks like a corpus.
+
+**A project's vendored copy does not carry them yet.** It is pinned to that
+project's branch, cut from the corpus's `main`, and the documents are not on
+`main` — so from a project checkout resolution normally falls through to `../qm`.
+Once the corpus change adding them lands on `main` and the pin is bumped past
+it, the vendored copy starts winning on its own.
+
+To check a specific checkout by hand:
+
+```sh
+ls <corpus>/governance-status.yaml <corpus>/harness-status.json
+```
 
 ## Prep, once
 
-### 1. A corpus checkout that actually has the documents
-
-`governance-status.yaml` and `harness-status.json` sit at the corpus root. The
-copy vendored at `governance/qm` is pinned to this project's own branch, which
-is cut from the corpus's `main` — and **the documents are not on `main` yet**.
-So the default path is empty by construction, and a bare `governance load`
-fails on purpose rather than by accident.
-
-Until that changes, point the loader at a corpus checkout on a branch that
-carries them. Confirm before running:
-
-```sh
-ls ../qm/governance-status.yaml ../qm/harness-status.json
-```
-
-Both listed means that checkout works. Neither listed means it is on a branch
-without them — the corpus branch adding `ci/` and the two documents has to be
-checked out there.
-
-Once the corpus change lands on `main` and this project's governance pin is
-bumped past it, `--corpus-dir` stops being necessary and the default path
-works.
-
-### 2. Tell the database the new tables exist
+### Tell the database the new tables exist
 
 The governance tables arrive in migration `005_governance`. There is a wrinkle:
 every `dossier` command calls `init_db()`, which runs `create_all` and creates
@@ -69,7 +75,7 @@ Skip this on a database created after this feature landed — `create_all` build
 the tables and the stamp is the only thing missing, so running it anyway is
 harmless and idempotent.
 
-### 3. On Windows, use UTF-8
+### On Windows, use UTF-8
 
 Several commands print emoji, and a `cp1252` console raises
 `UnicodeEncodeError` on them — `dossier db current` is one. Set the encoding
@@ -87,35 +93,42 @@ step above does.
 One command does refresh → load → launch, opening on the Governance tab:
 
 ```sh
-dossier governance dashboard --corpus-dir ../qm --refresh
+dossier governance dashboard
 ```
-
-Drop `--refresh` to read the documents as they are on disk, which is instant.
-The view always prints how old they are, so skipping the refresh never hides
-staleness.
 
 | Flag | Does |
 |---|---|
-| `--corpus-dir PATH` | Which corpus checkout to read. Needed until a pin bump carries the documents into `governance/qm`. |
-| `--refresh` | Regenerates both documents first, by running the corpus's own generators. **Reads the network and writes into that checkout.** Took ~36s across 109 repositories. |
-| `--offline` | With `--refresh`, passes `--offline` to the governance generator. |
-| `--no-load` | Opens on what is already stored, reading no document. |
-| `--no-tui` | Prints both tables instead of launching the dashboard. Useful in a pipe or over ssh. |
+| *(none)* | Find the corpus, regenerate both documents, load them, open the tab |
+| `--no-refresh` | Skip the regeneration and read what is on disk. Instant, and the view still prints the documents' age, so it never hides staleness. |
+| `--corpus-dir PATH` | Read a specific checkout instead of searching |
+| `--offline` | Pass `--offline` to the governance generator during a refresh |
+| `--no-load` | Open on what is already stored, reading no document |
+| `--no-tui` | Print both tables instead of launching. Useful in a pipe or over ssh. |
 
-`--refresh` is opt-in rather than the default for three reasons: it is slow, it
-needs host credentials, and it modifies committed files in the corpus checkout
-— that diff is a human's to review and commit.
+**A refresh writes.** It runs the corpus's generators, which query the host for
+every repository in the org — around 36 seconds across 109 — and rewrite two
+committed files in that checkout. The command says so and names the directory;
+that diff is yours to review and commit. Reach for `--no-refresh` when you only
+want to look, or when you are offline.
+
+A checkout without the generators cannot be refreshed — a project's vendored
+copy has no `ci/` at all — and the command reports that as a skip and carries on
+to the load, rather than failing.
 
 ### The same steps separately
 
 Sometimes you want one of them:
 
 ```sh
-dossier governance load --corpus-dir ../qm    # read both documents
-dossier governance show                       # where every project stands
-dossier governance threads                    # every line of work in flight
-dossier dashboard                             # then pick the Governance tab
+dossier governance load       # read both documents into the store
+dossier governance show       # where every project stands
+dossier governance threads    # every line of work in flight
+dossier dashboard             # then pick the Governance tab
 ```
+
+`load` never refreshes — it reads what is on disk. Refreshing is the corpus's
+own act, and `governance dashboard --refresh` is the only thing here that
+triggers it.
 
 Nothing polls and nothing refreshes on its own. The Governance tab is org-wide,
 so it needs no project selected.
@@ -174,7 +187,8 @@ thing this view could print.
 | Symptom | Cause |
 |---|---|
 | `Nothing stored. Run: dossier governance load` — **and a new `dossier.db` appeared next to you** | You are in the wrong repository. Every command calls `init_db()`, which creates an empty `dossier.db` in the *current directory* before the subcommand runs, so running `dossier` in the corpus or in another project silently makes an empty database there and then truthfully reports it as empty. `cd` to the dossier checkout and delete the stray. This has already cost one person three repositories' worth of attempts. |
-| `unavailable - the document is not at this path` | Prep step 1. The vendored pin does not carry the documents; pass `--corpus-dir`. |
+| `unavailable - the document is not at this path` | Nothing was found in any of the three search places. Pass `--corpus-dir` pointing at a corpus checkout that has them. |
+| `skip refresh - ... nothing here to run` | That checkout has no `ci/`, so there are no generators to run. Expected for a project's vendored copy; the load still happens. |
 | `no such column: governance_repository.…` | A database built by an older version of this feature. `dossier db stamp head` does not add columns — delete the local `dossier.db` and re-sync, or add the column by hand. |
 | `Nothing stored. Run: dossier governance load` | `show` before `load`. |
 | `harness-status.json has never been read` | Only one of the two documents loaded. This is distinct from "no threads in flight", and the message says which. |

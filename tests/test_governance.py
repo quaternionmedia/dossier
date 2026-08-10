@@ -457,6 +457,59 @@ async def test_governance_tab_says_so_when_nothing_has_been_loaded():
         assert app.query_one("#governance-table").row_count == 0
 
 
+# --- Finding the corpus ----------------------------------------------------
+
+
+def test_an_explicit_corpus_dir_always_wins(tmp_path):
+    path, why = gov.resolve_corpus_dir(tmp_path)
+    assert path == tmp_path
+    assert "--corpus-dir" in why
+
+
+def test_a_directory_holding_the_documents_is_chosen(tmp_path, monkeypatch):
+    write_governance(tmp_path, [{"name": "alfred"}])
+    monkeypatch.chdir(tmp_path)
+    path, why = gov.resolve_corpus_dir(None)
+    assert path == pathlib.Path(".")
+    assert "current directory" in why
+
+
+def test_the_documents_beat_a_directory_that_only_looks_like_a_corpus(
+    tmp_path, monkeypatch
+):
+    """A vendored corpus with no documents must not win over one that has them."""
+    project = tmp_path / "project"
+    (project / "governance" / "qm" / "records").mkdir(parents=True)
+    (project / "governance" / "qm" / "PRINCIPLES.md").write_text("x", encoding="utf-8")
+    corpus = tmp_path / "qm"
+    corpus.mkdir()
+    write_governance(corpus, [{"name": "alfred"}])
+
+    monkeypatch.chdir(project)
+    path, why = gov.resolve_corpus_dir(None)
+    assert path == pathlib.Path("..") / "qm"
+    assert "beside" in why
+
+
+def test_a_corpus_without_documents_is_still_named_with_the_caveat(
+    tmp_path, monkeypatch
+):
+    """Reporting a concrete path beats reporting nothing."""
+    (tmp_path / "records").mkdir()
+    (tmp_path / "PRINCIPLES.md").write_text("x", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    path, why = gov.resolve_corpus_dir(None)
+    assert path == pathlib.Path(".")
+    assert "neither document is there yet" in why
+
+
+def test_finding_nothing_still_returns_a_path_and_says_so(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    path, why = gov.resolve_corpus_dir(None)
+    assert path == pathlib.Path(".")
+    assert "nothing looked like a corpus" in why
+
+
 # --- Refreshing, and the boundary that keeps it out of the renderer --------
 
 
