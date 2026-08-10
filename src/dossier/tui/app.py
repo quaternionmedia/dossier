@@ -767,8 +767,12 @@ class DossierApp(App):
     _navigating_from_tree: bool = False  # Flag to prevent tab switch during tree navigation
     _tree_target_tab: Optional[str] = None  # Target tab when navigating from tree
     
-    def __init__(self, session_factory=None):
+    def __init__(self, session_factory=None, initial_tab: str | None = None):
         super().__init__()
+        # Which tab to open on, overriding the configured default. Set by
+        # `dossier governance dashboard` so one command lands the reader on the
+        # view they asked for instead of on whatever they last configured.
+        self._initial_tab = initial_tab
         if session_factory is None:
             from dossier.cli import get_session, init_db
             init_db()
@@ -964,7 +968,15 @@ class DossierApp(App):
         
         # Restore view state - load projects and select last viewed project
         self._restore_view_state()
-    
+
+        # An explicitly requested tab wins over the restored state, and is
+        # applied last for that reason: _restore_view_state may select a
+        # project, which switches to the configured default tab.
+        if self._initial_tab:
+            tabs = self.query_one("#project-tabs", TabbedContent)
+            tabs.active = self._initial_tab
+            self._load_tab_data(self._initial_tab)
+
     def _populate_language_filter(self) -> None:
         """Populate the language filter dropdown with available languages."""
         with self.session_factory() as session:

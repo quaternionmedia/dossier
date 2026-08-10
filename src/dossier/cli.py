@@ -3024,6 +3024,121 @@ def governance_threads() -> None:
         )
 
 
+@governance_group.command(name="dashboard")
+@click.option(
+    "--corpus-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Corpus checkout to read. Defaults to governance/qm, which is empty "
+    "until a pin bump carries the documents in.",
+)
+@click.option(
+    "--refresh",
+    is_flag=True,
+    default=False,
+    help="Regenerate both documents first, by running the corpus's own "
+    "generators. Reads the network and writes into the corpus checkout.",
+)
+@click.option(
+    "--offline",
+    is_flag=True,
+    default=False,
+    help="With --refresh, pass --offline to the governance generator.",
+)
+@click.option(
+    "--no-load",
+    is_flag=True,
+    default=False,
+    help="Open the view on what is already stored, reading no document.",
+)
+@click.option(
+    "--no-tui",
+    is_flag=True,
+    default=False,
+    help="Print both tables instead of launching the dashboard.",
+)
+def governance_dashboard(
+    corpus_dir: Optional[Path],
+    refresh: bool,
+    offline: bool,
+    no_load: bool,
+    no_tui: bool,
+) -> None:
+    """Get the latest and open the dashboard, in one command.
+
+    Refresh (optional) -> load -> launch, on the Governance tab.
+
+    \b
+    Typical use, from a dossier checkout with the corpus beside it:
+        dossier governance dashboard --corpus-dir ../qm
+        dossier governance dashboard --corpus-dir ../qm --refresh
+
+    \b
+    --refresh runs the corpus's own generators, which is why it is opt-in:
+    they query the host for every repository in the org, so it is slow and
+    needs credentials, and it writes into the corpus checkout's working tree.
+    Without it, whatever the documents say on disk is what you see -- and the
+    view always prints how old that is.
+    """
+    from dossier import corpus as corpus_tools
+    from dossier import governance as gov
+
+    root = corpus_dir or gov.DEFAULT_CORPUS_DIR
+
+    if refresh:
+        click.echo(f"Refreshing both documents in {root} ...")
+        for outcome in corpus_tools.refresh(root, offline=offline):
+            mark = "ok  " if outcome.ok else ("skip" if not outcome.ran else "FAIL")
+            click.echo(f"{mark} {outcome.document:<24} {outcome.summary}")
+            if outcome.output and not outcome.ok:
+                for line in outcome.output.splitlines():
+                    click.echo(f"       {line}")
+        click.echo(
+            "     the refresh writes committed files -- review that checkout's "
+            "diff before committing it"
+        )
+        click.echo()
+
+    if not no_load:
+        with get_session() as session:
+            report = gov.load_documents(session, corpus_dir=root)
+        for label, outcome in (
+            ("governance", report.governance),
+            ("harness", report.harness),
+        ):
+            mark = "ok  " if outcome.loaded else "MISS"
+            click.echo(f"{mark} {label:<11} {outcome.summary}")
+        if report.threads:
+            click.echo(f"     {report.threads} thread(s) in flight")
+
+        if not report.anything_loaded:
+            click.echo(
+                f"\nNeither document could be read under {root}, so there is "
+                "nothing new to show."
+            )
+            if corpus_dir is None:
+                click.echo(
+                    "The default path is the vendored corpus, which is pinned to "
+                    "a branch cut from the corpus's main and does not carry the\n"
+                    "documents yet. Pass --corpus-dir pointing at a corpus "
+                    "checkout that does, for example:\n"
+                    "    dossier governance dashboard --corpus-dir ../qm"
+                )
+            raise SystemExit(1)
+        click.echo()
+
+    if no_tui:
+        ctx = click.get_current_context()
+        ctx.invoke(governance_show)
+        click.echo()
+        ctx.invoke(governance_threads)
+        return
+
+    from dossier.tui import DossierApp
+
+    DossierApp(initial_tab="tab-governance").run()
+
+
 def _fit(text: Optional[str], width: int) -> str:
     """Truncate to width so a long name cannot shunt every later column.
 

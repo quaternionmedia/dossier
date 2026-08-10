@@ -12,6 +12,7 @@ does not render it as healthy.
 """
 
 import json
+import pathlib
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -454,6 +455,103 @@ async def test_governance_tab_says_so_when_nothing_has_been_loaded():
         message = str(app.query_one("#governance-age").content)
         assert "No governance document has been read" in message
         assert app.query_one("#governance-table").row_count == 0
+
+
+# --- Refreshing, and the boundary that keeps it out of the renderer --------
+
+
+def test_the_read_and_render_path_runs_no_commands():
+    """The corpus's rule, enforced here the way the corpus enforces it.
+
+    A renderer that can shell out is a second place a governance rule gets
+    defined, and two definitions drift. Refreshing is a different act and
+    lives in `dossier.corpus`; these three modules must stay clean.
+    """
+    import dossier.governance
+    import dossier.models.governance
+    import dossier.parsers.governance
+
+    for module in (
+        dossier.parsers.governance,
+        dossier.models.governance,
+        dossier.governance,
+    ):
+        source = pathlib.Path(module.__file__).read_text(encoding="utf-8")
+        assert "subprocess" not in source, f"{module.__name__} must not run commands"
+
+
+def test_refresh_reports_a_checkout_without_the_generators(tmp_path):
+    """A project's vendored corpus has no ci/ -- absent, not broken."""
+    from dossier import corpus
+
+    (tmp_path / ".git").mkdir()
+    reason = corpus.can_refresh(tmp_path)
+    assert reason is not None
+    assert "ci/governance_status.py" in reason
+
+    outcomes = corpus.refresh(tmp_path)
+    assert len(outcomes) == 2
+    assert all(not o.ran for o in outcomes)
+    assert all("nothing here to run" in o.summary for o in outcomes)
+
+
+def test_refresh_reports_a_missing_directory_rather_than_raising(tmp_path):
+    from dossier import corpus
+
+    outcomes = corpus.refresh(tmp_path / "absent")
+    assert all(not o.ran and "does not exist" in o.reason for o in outcomes)
+
+
+def test_refresh_runs_the_generators_in_order_and_reports_failure(tmp_path):
+    """Governance first: the harness generator can read the governance document.
+
+    Stand-in generators, so this exercises the ordering and the failure path
+    without the network. One exits non-zero to prove a failure is reported
+    rather than swallowed.
+    """
+    from dossier import corpus
+
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "ci").mkdir()
+    (tmp_path / "ci" / "governance_status.py").write_text(
+        "import pathlib\n"
+        "pathlib.Path('order.log').write_text('governance\\n')\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "ci" / "harness_status.py").write_text(
+        "import pathlib, sys\n"
+        "p = pathlib.Path('order.log')\n"
+        "p.write_text(p.read_text() + 'harness\\n')\n"
+        "sys.stderr.write('deliberate failure\\n')\n"
+        "sys.exit(3)\n",
+        encoding="utf-8",
+    )
+
+    outcomes = corpus.refresh(tmp_path)
+
+    assert (tmp_path / "order.log").read_text().split() == ["governance", "harness"]
+    assert outcomes[0].ok is True
+    assert outcomes[1].ok is False
+    assert "deliberate failure" in outcomes[1].reason
+    assert "failed" in outcomes[1].summary
+
+
+@pytest.mark.asyncio
+async def test_the_dashboard_can_open_directly_on_the_governance_tab(tmp_path):
+    """What `governance dashboard` relies on: an initial tab that wins."""
+    from dossier.tui import DossierApp
+
+    engine = create_engine("sqlite://")
+    SQLModel.metadata.create_all(engine)
+    write_governance(tmp_path, [{"name": "alfred", "branch": {"behind_corpus": 62}}])
+    with Session(engine) as active:
+        gov.load_documents(active, corpus_dir=tmp_path)
+
+    app = DossierApp(session_factory=lambda: Session(engine), initial_tab="tab-governance")
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        assert app.query_one("#project-tabs").active == "tab-governance"
+        assert app.query_one("#governance-table").row_count == 1
 
 
 # --- The real documents, if this checkout has them -------------------------

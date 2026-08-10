@@ -84,22 +84,41 @@ step above does.
 
 ## Run it
 
+One command does refresh → load → launch, opening on the Governance tab:
+
+```sh
+dossier governance dashboard --corpus-dir ../qm --refresh
+```
+
+Drop `--refresh` to read the documents as they are on disk, which is instant.
+The view always prints how old they are, so skipping the refresh never hides
+staleness.
+
+| Flag | Does |
+|---|---|
+| `--corpus-dir PATH` | Which corpus checkout to read. Needed until a pin bump carries the documents into `governance/qm`. |
+| `--refresh` | Regenerates both documents first, by running the corpus's own generators. **Reads the network and writes into that checkout.** Took ~36s across 109 repositories. |
+| `--offline` | With `--refresh`, passes `--offline` to the governance generator. |
+| `--no-load` | Opens on what is already stored, reading no document. |
+| `--no-tui` | Prints both tables instead of launching the dashboard. Useful in a pipe or over ssh. |
+
+`--refresh` is opt-in rather than the default for three reasons: it is slow, it
+needs host credentials, and it modifies committed files in the corpus checkout
+— that diff is a human's to review and commit.
+
+### The same steps separately
+
+Sometimes you want one of them:
+
 ```sh
 dossier governance load --corpus-dir ../qm    # read both documents
 dossier governance show                       # where every project stands
 dossier governance threads                    # every line of work in flight
+dossier dashboard                             # then pick the Governance tab
 ```
 
-`load` reads; `show` and `threads` display what was read. Re-run `load` to pick
-up regenerated documents — nothing polls, and nothing refreshes on its own.
-
-For the dashboard, launch it and open the **Governance** tab:
-
-```sh
-dossier dashboard
-```
-
-The tab is org-wide, so it needs no project selected.
+Nothing polls and nothing refreshes on its own. The Governance tab is org-wide,
+so it needs no project selected.
 
 ## Reading the output
 

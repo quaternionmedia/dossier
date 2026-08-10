@@ -199,16 +199,28 @@ On Windows set `PYTHONIOENCODING=utf-8` first: some commands print emoji and a
 `cp1252` console raises `UnicodeEncodeError` on them (`db current` is one). The
 `governance` commands themselves are ASCII-only.
 
-Then:
+Then one command does refresh → load → launch, opening on the Governance tab:
 
-- `uv run dossier governance load --corpus-dir ../qm` — read both documents
-- `uv run dossier governance show` — where every project stands
-- `uv run dossier governance threads` — every line of work in flight
-- `uv run dossier dashboard` — the Governance tab shows the same two tables
+```sh
+uv run dossier governance dashboard --corpus-dir ../qm --refresh
+```
 
-Nothing polls and nothing refreshes on its own; re-run `load` after the corpus
-regenerates a document. `--corpus-dir` stops being necessary once the corpus
-change adding the documents lands on `main` and this project's pin is bumped.
+Drop `--refresh` to read what is on disk, which is instant; the view always
+prints the documents' age, so skipping it never hides staleness. `--no-tui`
+prints both tables instead of launching. The steps are also available
+separately as `governance load`, `governance show` and `governance threads`.
+
+`--refresh` runs the corpus's own generators and is opt-in for three reasons:
+it is slow (~36s across 109 repositories), it needs host credentials, and it
+modifies committed files in the corpus checkout — that diff is a human's to
+review. **The refresh lives in `dossier/corpus.py`, deliberately outside the
+read-and-render path**, because the corpus's rule is that a renderer may not
+run a command: a view that can shell out is a second place a governance rule
+gets defined. `tests/test_governance.py` asserts the word `subprocess` does not
+appear in the parser, the read model, or the presentation module.
+
+Nothing polls. `--corpus-dir` stops being necessary once the corpus change
+adding the documents lands on `main` and this project's pin is bumped.
 
 Three rules bind anything you add here, and each exists because the obvious
 alternative produces a table that looks right and is not:
