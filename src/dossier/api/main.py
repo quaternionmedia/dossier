@@ -3,36 +3,28 @@
 import os
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import select
 
+from dossier.database import get_session, init_db
 from dossier.models import (
+    DeltaLink,
+    DeltaNote,
+    DeltaPhase,
     DocumentationLevel,
     DocumentationQuery,
     DocumentationResponse,
     DocumentSection,
     Project,
     ProjectComponent,
+    ProjectDelta,
     utcnow,
 )
 from dossier.parsers import GitHubClient, GitHubParser
-
-# Database setup
-DATABASE_URL = "sqlite:///dossier.db"
-engine = create_engine(DATABASE_URL, echo=False)
-
-
-def get_session() -> Session:
-    """Get database session."""
-    return Session(engine)
-
-
-def init_db() -> None:
-    """Initialize database tables."""
-    SQLModel.metadata.create_all(engine)
 
 
 @asynccontextmanager
@@ -750,5 +742,393 @@ def list_all_components(
                     relationship_type=comp.relationship_type,
                     order=comp.order,
                 ))
-        
+
         return results
+
+
+# =============================================================================
+# Delta API Endpoints
+# =============================================================================
+
+
+class DeltaCreateRequest(BaseModel):
+    """Request to create a new delta."""
+
+    name: str
+    title: str
+    description: Optional[str] = None
+    delta_type: str = "feature"
+    priority: str = "medium"
+    issue_number: Optional[int] = None
+
+
+class DeltaResponse(BaseModel):
+    """Response model for a delta."""
+
+    id: int
+    project_id: int
+    name: str
+    title: str
+    description: Optional[str]
+    phase: str
+    phase_changed_at: datetime
+    delta_type: str
+    priority: str
+    started_at: Optional[datetime]
+    completed_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
+    issue_number: Optional[int]
+    pr_number: Optional[int]
+    branch_name: Optional[str]
+
+
+class DeltaAdvanceRequest(BaseModel):
+    """Request to advance delta phase."""
+
+    note: Optional[str] = None
+
+
+class DeltaAdvanceResponse(BaseModel):
+    """Response from advancing delta phase."""
+
+    old_phase: str
+    new_phase: str
+    note_added: bool
+
+
+class DeltaLinkCreateRequest(BaseModel):
+    """Request to create a delta link."""
+
+    link_type: str
+    target_id: Optional[int] = None
+    target_name: Optional[str] = None
+
+
+class DeltaLinkResponse(BaseModel):
+    """Response model for a delta link."""
+
+    id: int
+    delta_id: int
+    link_type: str
+    target_id: Optional[int]
+    target_name: Optional[str]
+    created_at: datetime
+
+
+class DeltaNoteResponse(BaseModel):
+    """Response model for a delta note."""
+
+    id: int
+    delta_id: int
+    phase: str
+    content: str
+    created_at: datetime
+
+
+class DeltaDetailResponse(BaseModel):
+    """Detailed delta response with notes and links."""
+
+    delta: DeltaResponse
+    notes: list[DeltaNoteResponse]
+    links: list[DeltaLinkResponse]
+
+
+def _delta_to_response(delta: ProjectDelta) -> DeltaResponse:
+    """Convert a ProjectDelta to DeltaResponse."""
+    return DeltaResponse(
+        id=delta.id,
+        project_id=delta.project_id,
+        name=delta.name,
+        title=delta.title,
+        description=delta.description,
+        phase=delta.phase.value if isinstance(delta.phase, DeltaPhase) else delta.phase,
+        phase_changed_at=delta.phase_changed_at,
+        delta_type=delta.delta_type,
+        priority=delta.priority,
+        started_at=delta.started_at,
+        completed_at=delta.completed_at,
+        created_at=delta.created_at,
+        updated_at=delta.updated_at,
+        issue_number=delta.issue_number,
+        pr_number=delta.pr_number,
+        branch_name=delta.branch_name,
+    )
+
+
+@app.get("/projects/{project_name}/deltas", response_model=list[DeltaResponse])
+def list_project_deltas(
+    project_name: str,
+    phase: Optional[str] = Query(None, description="Filter by phase"),
+    include_completed: bool = Query(
+        False, description="Include completed/abandoned deltas"
+    ),
+) -> list[DeltaResponse]:
+    """List all deltas for a project.
+
+    Returns deltas sorted by update time, most recent first.
+    By default, excludes completed and abandoned deltas.
+    """
+    with get_session() as session:
+        project = session.exec(
+            select(Project).where(Project.name == project_name)
+        ).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        stmt = select(ProjectDelta).where(ProjectDelta.project_id == project.id)
+
+        if phase:
+            stmt = stmt.where(ProjectDelta.phase == phase)
+        elif not include_completed:
+            stmt = stmt.where(
+                ProjectDelta.phase.notin_(
+                    [DeltaPhase.COMPLETE.value, DeltaPhase.ABANDONED.value]
+                )
+            )
+
+        stmt = stmt.order_by(ProjectDelta.updated_at.desc())
+        deltas = session.exec(stmt).all()
+
+        return [_delta_to_response(d) for d in deltas]
+
+
+@app.post(
+    "/projects/{project_name}/deltas", response_model=DeltaResponse, status_code=201
+)
+def create_project_delta(
+    project_name: str,
+    request: DeltaCreateRequest,
+) -> DeltaResponse:
+    """Create a new delta for a project.
+
+    Deltas start in the 'brainstorm' phase and progress through:
+    brainstorm -> planning -> implementation -> review -> documentation -> complete
+    """
+    with get_session() as session:
+        project = session.exec(
+            select(Project).where(Project.name == project_name)
+        ).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        # Check for duplicate name
+        existing = session.exec(
+            select(ProjectDelta).where(
+                ProjectDelta.project_id == project.id,
+                ProjectDelta.name == request.name,
+            )
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Delta '{request.name}' already exists for this project",
+            )
+
+        delta = ProjectDelta(
+            project_id=project.id,
+            name=request.name,
+            title=request.title,
+            description=request.description,
+            delta_type=request.delta_type,
+            priority=request.priority,
+            issue_number=request.issue_number,
+        )
+        session.add(delta)
+        session.commit()
+        session.refresh(delta)
+
+        return _delta_to_response(delta)
+
+
+@app.get(
+    "/projects/{project_name}/deltas/{delta_name}", response_model=DeltaDetailResponse
+)
+def get_project_delta(
+    project_name: str,
+    delta_name: str,
+) -> DeltaDetailResponse:
+    """Get detailed information about a specific delta.
+
+    Includes the delta, all notes, and all links.
+    """
+    with get_session() as session:
+        project = session.exec(
+            select(Project).where(Project.name == project_name)
+        ).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        delta = session.exec(
+            select(ProjectDelta).where(
+                ProjectDelta.project_id == project.id,
+                ProjectDelta.name == delta_name,
+            )
+        ).first()
+        if not delta:
+            raise HTTPException(status_code=404, detail="Delta not found")
+
+        notes = session.exec(
+            select(DeltaNote)
+            .where(DeltaNote.delta_id == delta.id)
+            .order_by(DeltaNote.created_at)
+        ).all()
+
+        links = session.exec(
+            select(DeltaLink).where(DeltaLink.delta_id == delta.id)
+        ).all()
+
+        return DeltaDetailResponse(
+            delta=_delta_to_response(delta),
+            notes=[
+                DeltaNoteResponse(
+                    id=n.id,
+                    delta_id=n.delta_id,
+                    phase=(
+                        n.phase.value if isinstance(n.phase, DeltaPhase) else n.phase
+                    ),
+                    content=n.content,
+                    created_at=n.created_at,
+                )
+                for n in notes
+            ],
+            links=[
+                DeltaLinkResponse(
+                    id=lnk.id,
+                    delta_id=lnk.delta_id,
+                    link_type=lnk.link_type,
+                    target_id=lnk.target_id,
+                    target_name=lnk.target_name,
+                    created_at=lnk.created_at,
+                )
+                for lnk in links
+            ],
+        )
+
+
+@app.put(
+    "/projects/{project_name}/deltas/{delta_name}/advance",
+    response_model=DeltaAdvanceResponse,
+)
+def advance_project_delta(
+    project_name: str,
+    delta_name: str,
+    request: DeltaAdvanceRequest,
+) -> DeltaAdvanceResponse:
+    """Advance a delta to the next phase.
+
+    Phase sequence: brainstorm -> planning -> implementation -> review -> documentation -> complete
+
+    Optionally add a note about the phase transition.
+    """
+    with get_session() as session:
+        project = session.exec(
+            select(Project).where(Project.name == project_name)
+        ).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        delta = session.exec(
+            select(ProjectDelta).where(
+                ProjectDelta.project_id == project.id,
+                ProjectDelta.name == delta_name,
+            )
+        ).first()
+        if not delta:
+            raise HTTPException(status_code=404, detail="Delta not found")
+
+        if not delta.can_advance():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot advance delta: already at final phase ({delta.phase.value})",
+            )
+
+        old_phase = delta.phase
+        delta.advance_phase()
+
+        note_added = False
+        if request.note:
+            note = DeltaNote(
+                delta_id=delta.id,
+                phase=old_phase,
+                content=request.note,
+            )
+            session.add(note)
+            note_added = True
+
+        session.add(delta)
+        session.commit()
+
+        return DeltaAdvanceResponse(
+            old_phase=(
+                old_phase.value if isinstance(old_phase, DeltaPhase) else old_phase
+            ),
+            new_phase=(
+                delta.phase.value
+                if isinstance(delta.phase, DeltaPhase)
+                else delta.phase
+            ),
+            note_added=note_added,
+        )
+
+
+@app.post(
+    "/projects/{project_name}/deltas/{delta_name}/links",
+    response_model=DeltaLinkResponse,
+    status_code=201,
+)
+def create_delta_link(
+    project_name: str,
+    delta_name: str,
+    request: DeltaLinkCreateRequest,
+) -> DeltaLinkResponse:
+    """Create a link from a delta to another entity.
+
+    Link types:
+    - issue: Link to a GitHub issue (target_id = issue number)
+    - pr: Link to a GitHub PR (target_id = PR number)
+    - branch: Link to a branch (target_name = branch name)
+    - delta: Link to another delta (target_id = delta id, target_name = delta name)
+    """
+    with get_session() as session:
+        project = session.exec(
+            select(Project).where(Project.name == project_name)
+        ).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        delta = session.exec(
+            select(ProjectDelta).where(
+                ProjectDelta.project_id == project.id,
+                ProjectDelta.name == delta_name,
+            )
+        ).first()
+        if not delta:
+            raise HTTPException(status_code=404, detail="Delta not found")
+
+        # Validate link type
+        valid_types = ["issue", "pr", "branch", "delta", "doc"]
+        if request.link_type not in valid_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid link_type. Must be one of: {valid_types}",
+            )
+
+        link = DeltaLink(
+            delta_id=delta.id,
+            link_type=request.link_type,
+            target_id=request.target_id,
+            target_name=request.target_name,
+        )
+        session.add(link)
+        session.commit()
+        session.refresh(link)
+
+        return DeltaLinkResponse(
+            id=link.id,
+            delta_id=link.delta_id,
+            link_type=link.link_type,
+            target_id=link.target_id,
+            target_name=link.target_name,
+            created_at=link.created_at,
+        )

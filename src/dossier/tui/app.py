@@ -790,7 +790,7 @@ class DossierApp(App):
     def __init__(self, session_factory=None):
         super().__init__()
         if session_factory is None:
-            from dossier.cli import get_session, init_db
+            from dossier.database import get_session, init_db
             init_db()
             session_factory = get_session
         self.session_factory = session_factory

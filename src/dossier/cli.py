@@ -5,16 +5,21 @@ from pathlib import Path
 from typing import Optional
 
 import click
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import SQLModel, select
 from trogon import tui
 
+from dossier.database import get_engine, get_session, init_db
 from dossier.models import (
+    DeltaLink,
+    DeltaNote,
+    DeltaPhase,
     DocumentationLevel,
     DocumentSection,
     Project,
     ProjectBranch,
     ProjectComponent,
     ProjectContributor,
+    ProjectDelta,
     ProjectDependency,
     ProjectIssue,
     ProjectLanguage,
@@ -22,21 +27,6 @@ from dossier.models import (
     ProjectRelease,
 )
 from dossier.parsers import GitHubParser, ParserRegistry
-
-
-# Database setup
-DATABASE_URL = "sqlite:///dossier.db"
-engine = create_engine(DATABASE_URL, echo=False)
-
-
-def init_db() -> None:
-    """Initialize the database."""
-    SQLModel.metadata.create_all(engine)
-
-
-def get_session() -> Session:
-    """Get database session."""
-    return Session(engine)
 
 
 @tui()
@@ -1551,14 +1541,17 @@ def dev_reset(yes: bool) -> None:
             abort=True,
         )
     
-    db_path = Path("dossier.db")
-    
+    from dossier.database import get_db_path
+
+    db_path = get_db_path()
+    engine = get_engine()
+
     # Drop and recreate tables
     SQLModel.metadata.drop_all(engine)
     SQLModel.metadata.create_all(engine)
-    
+
     click.echo(click.style("✓ Database reset to fresh state", fg="green"))
-    
+
     if db_path.exists():
         size = db_path.stat().st_size
         click.echo(f"  Database file: {db_path} ({size} bytes)")
@@ -1639,7 +1632,9 @@ def dev_clear(
 @dev.command("status")
 def dev_status() -> None:
     """Show database status and statistics."""
-    db_path = Path("dossier.db")
+    from dossier.database import get_db_path
+
+    db_path = get_db_path()
     
     click.echo("\n📊 Database Status")
     click.echo("=" * 40)
@@ -1683,18 +1678,20 @@ def dev_status() -> None:
 @dev.command("vacuum")
 def dev_vacuum() -> None:
     """Optimize database by running VACUUM.
-    
+
     Reclaims unused space and defragments the database file.
     """
     from sqlalchemy import text
-    
-    db_path = Path("dossier.db")
+
+    from dossier.database import get_db_path
+
+    db_path = get_db_path()
     size_before = db_path.stat().st_size if db_path.exists() else 0
-    
-    with engine.connect() as conn:
+
+    with get_engine().connect() as conn:
         conn.execute(text("VACUUM"))
         conn.commit()
-    
+
     size_after = db_path.stat().st_size if db_path.exists() else 0
     saved = size_before - size_after
     
@@ -2176,6 +2173,7 @@ def graph_group() -> None:
 @click.option("--no-prs", is_flag=True, help="Skip pull requests")
 @click.option("--no-versions", is_flag=True, help="Skip versions/releases")
 @click.option("--no-docs", is_flag=True, help="Skip documentation")
+@click.option("--no-deltas", is_flag=True, help="Skip deltas")
 @click.option("--max-contributors", default=10, help="Max contributors to link")
 @click.option("--max-issues", default=50, help="Max issues to link")
 @click.option("--max-prs", default=50, help="Max PRs to link")
@@ -2189,36 +2187,37 @@ def graph_build(
     no_prs: bool,
     no_versions: bool,
     no_docs: bool,
+    no_deltas: bool,
     max_contributors: int,
     max_issues: int,
     max_prs: int,
 ) -> None:
     """Build entity graph for a project.
-    
+
     PROJECT_NAME is the project to build graph for (e.g., owner/repo).
-    
+
     This command discovers all entities (contributors, languages, dependencies,
-    branches, issues, PRs, versions, docs) and creates linked project nodes
+    branches, issues, PRs, versions, docs, deltas) and creates linked project nodes
     for each, building a navigable entity graph.
-    
+
     Examples:
         dossier graph build microsoft/vscode
         dossier graph build astral-sh/ruff --no-issues --no-prs
         dossier graph build myorg/myrepo --max-contributors 5
     """
     from dossier.parsers.autolinker import AutoLinker
-    
+
     with get_session() as session:
         project = session.exec(
             select(Project).where(Project.name == project_name)
         ).first()
-        
+
         if not project:
             click.echo(click.style(f"Project '{project_name}' not found", fg="red"))
             raise click.Abort()
-        
+
         click.echo(f"🔗 Building entity graph for {project_name}...")
-        
+
         linker = AutoLinker(session)
         stats = linker.build_graph(
             project,
@@ -2230,6 +2229,7 @@ def graph_build(
             include_prs=not no_prs,
             include_versions=not no_versions,
             include_docs=not no_docs,
+            include_deltas=not no_deltas,
             max_contributors=max_contributors,
             max_issues=max_issues,
             max_prs=max_prs,
@@ -2256,6 +2256,7 @@ def graph_build(
 @click.option("--no-prs", is_flag=True, help="Skip pull requests")
 @click.option("--no-versions", is_flag=True, help="Skip versions/releases")
 @click.option("--no-docs", is_flag=True, help="Skip documentation")
+@click.option("--no-deltas", is_flag=True, help="Skip deltas")
 @click.option("--max-contributors", default=10, help="Max contributors per project")
 @click.option("--max-issues", default=50, help="Max issues per project")
 @click.option("--max-prs", default=50, help="Max PRs per project")
@@ -2268,22 +2269,23 @@ def graph_build_all(
     no_prs: bool,
     no_versions: bool,
     no_docs: bool,
+    no_deltas: bool,
     max_contributors: int,
     max_issues: int,
     max_prs: int,
 ) -> None:
     """Build entity graphs for all synced projects.
-    
+
     This processes all projects with GitHub owner/repo info and builds
     their entity graphs, creating a fully-linked knowledge base.
-    
+
     Examples:
         dossier graph build-all
         dossier graph build-all --no-issues --no-prs
         dossier graph build-all --max-contributors 5
     """
     from dossier.parsers.autolinker import AutoLinker
-    
+
     with get_session() as session:
         # Count projects first
         projects = session.exec(
@@ -2292,13 +2294,13 @@ def graph_build_all(
                 Project.github_repo.isnot(None),
             )
         ).all()
-        
+
         if not projects:
             click.echo(click.style("No synced projects found", fg="yellow"))
             return
-        
+
         click.echo(f"🔗 Building entity graphs for {len(projects)} projects...")
-        
+
         linker = AutoLinker(session)
         total_stats = linker.build_all_graphs(
             include_contributors=not no_contributors,
@@ -2309,6 +2311,7 @@ def graph_build_all(
             include_prs=not no_prs,
             include_versions=not no_versions,
             include_docs=not no_docs,
+            include_deltas=not no_deltas,
             max_contributors=max_contributors,
             max_issues=max_issues,
             max_prs=max_prs,
@@ -2344,6 +2347,7 @@ def graph_stats() -> None:
             "PRs": 0,
             "Versions": 0,
             "Docs": 0,
+            "Deltas": 0,
             "Other": 0,
         }
         
@@ -2365,7 +2369,9 @@ def graph_stats() -> None:
                 categories["Versions"] += 1
             elif "/doc/" in name:
                 categories["Docs"] += 1
-            elif "/" in name and not any(x in name for x in ["/branch/", "/issue/", "/pr/", "/ver/", "/doc/"]):
+            elif "/delta/" in name:
+                categories["Deltas"] += 1
+            elif "/" in name and not any(x in name for x in ["/branch/", "/issue/", "/pr/", "/ver/", "/doc/", "/delta/"]):
                 categories["GitHub Repos"] += 1
             else:
                 categories["Other"] += 1
@@ -2863,6 +2869,472 @@ def view_cmd(
                 os.unlink(temp_path)
             except OSError:
                 pass
+
+
+# =============================================================================
+# Delta Commands - Manage project deltas (changes/features)
+# =============================================================================
+
+
+@cli.group()
+def deltas() -> None:
+    """Manage project deltas (changes, features, bugfixes).
+
+    Deltas track discrete units of work through phases:
+    brainstorm -> planning -> implementation -> review -> documentation -> complete
+    """
+    pass
+
+
+@deltas.command("list")
+@click.argument("project", required=False)
+@click.option(
+    "--phase",
+    "-p",
+    type=click.Choice([p.value for p in DeltaPhase]),
+    help="Filter by phase",
+)
+@click.option(
+    "--type",
+    "-t",
+    "delta_type",
+    help="Filter by type (feature, bugfix, refactor, docs, chore)",
+)
+@click.option(
+    "--all", "-a", "show_all", is_flag=True, help="Show completed and abandoned deltas"
+)
+def deltas_list(
+    project: Optional[str],
+    phase: Optional[str],
+    delta_type: Optional[str],
+    show_all: bool,
+) -> None:
+    """List deltas, optionally filtered by project.
+
+    PROJECT: Optional project name (owner/repo format) to filter by
+
+    Examples:
+        dossier deltas list
+        dossier deltas list astral-sh/ruff
+        dossier deltas list --phase implementation
+        dossier deltas list astral-sh/ruff --type bugfix
+    """
+    with get_session() as session:
+        stmt = select(ProjectDelta).join(Project)
+
+        if project:
+            stmt = stmt.where(Project.name == project)
+
+        if phase:
+            stmt = stmt.where(ProjectDelta.phase == DeltaPhase(phase))
+        elif not show_all:
+            # By default, hide completed/abandoned
+            stmt = stmt.where(
+                ProjectDelta.phase.notin_([DeltaPhase.COMPLETE, DeltaPhase.ABANDONED])
+            )
+
+        if delta_type:
+            stmt = stmt.where(ProjectDelta.delta_type == delta_type)
+
+        stmt = stmt.order_by(ProjectDelta.updated_at.desc())
+        delta_list = session.exec(stmt).all()
+
+        if not delta_list:
+            click.echo("No deltas found.")
+            return
+
+        click.echo("\n🔺 Deltas:")
+        click.echo("=" * 70)
+
+        phase_icons = {
+            DeltaPhase.BRAINSTORM: "💡",
+            DeltaPhase.PLANNING: "📋",
+            DeltaPhase.IMPLEMENTATION: "⚙️",
+            DeltaPhase.REVIEW: "🔍",
+            DeltaPhase.DOCUMENTATION: "📝",
+            DeltaPhase.COMPLETE: "✅",
+            DeltaPhase.ABANDONED: "❌",
+        }
+
+        for delta in delta_list:
+            proj = session.get(Project, delta.project_id)
+            proj_name = proj.name if proj else "unknown"
+
+            icon = phase_icons.get(delta.phase, "❓")
+            click.echo(f"\n  {icon} {proj_name}/{delta.name}")
+            click.echo(f"     {delta.title}")
+            click.echo(
+                f"     Phase: {delta.phase.value} | Type: {delta.delta_type} | Priority: {delta.priority}"
+            )
+
+        click.echo(f"\nTotal: {len(delta_list)} deltas")
+
+
+@deltas.command("create")
+@click.argument("project")
+@click.argument("name")
+@click.option("--title", "-t", required=True, help="Human-readable title")
+@click.option("--description", "-d", help="Detailed description")
+@click.option(
+    "--type",
+    "delta_type",
+    default="feature",
+    type=click.Choice(["feature", "bugfix", "refactor", "docs", "chore"]),
+    help="Delta type (default: feature)",
+)
+@click.option(
+    "--priority",
+    "-p",
+    default="medium",
+    type=click.Choice(["low", "medium", "high", "critical"]),
+    help="Priority level (default: medium)",
+)
+@click.option("--issue", type=int, help="Link to GitHub issue number")
+def deltas_create(
+    project: str,
+    name: str,
+    title: str,
+    description: Optional[str],
+    delta_type: str,
+    priority: str,
+    issue: Optional[int],
+) -> None:
+    """Create a new delta for a project.
+
+    PROJECT: Project name (owner/repo format)
+    NAME: Short identifier (e.g., "add-dark-mode", "fix-auth-bug")
+
+    Examples:
+        dossier deltas create astral-sh/ruff add-caching --title "Add query caching"
+        dossier deltas create astral-sh/ruff fix-memory --title "Fix memory leak" --type bugfix --priority high
+    """
+    with get_session() as session:
+        proj = session.exec(select(Project).where(Project.name == project)).first()
+        if not proj:
+            click.echo(f"Error: Project '{project}' not found.", err=True)
+            raise SystemExit(1)
+
+        # Check for duplicate name within project
+        existing = session.exec(
+            select(ProjectDelta).where(
+                ProjectDelta.project_id == proj.id,
+                ProjectDelta.name == name,
+            )
+        ).first()
+        if existing:
+            click.echo(
+                f"Error: Delta '{name}' already exists for project '{project}'.",
+                err=True,
+            )
+            raise SystemExit(1)
+
+        delta = ProjectDelta(
+            project_id=proj.id,
+            name=name,
+            title=title,
+            description=description,
+            delta_type=delta_type,
+            priority=priority,
+            issue_number=issue,
+        )
+        session.add(delta)
+        session.commit()
+
+        click.echo(f"✓ Created delta: {project}/{name}")
+        click.echo(f"  Title: {title}")
+        click.echo(f"  Phase: {delta.phase.value}")
+        if issue:
+            click.echo(f"  Linked to issue: #{issue}")
+
+
+@deltas.command("show")
+@click.argument("project")
+@click.argument("name")
+def deltas_show(project: str, name: str) -> None:
+    """Show detailed information about a delta.
+
+    PROJECT: Project name (owner/repo format)
+    NAME: Delta identifier
+
+    Examples:
+        dossier deltas show astral-sh/ruff add-caching
+    """
+    with get_session() as session:
+        proj = session.exec(select(Project).where(Project.name == project)).first()
+        if not proj:
+            click.echo(f"Error: Project '{project}' not found.", err=True)
+            raise SystemExit(1)
+
+        delta = session.exec(
+            select(ProjectDelta).where(
+                ProjectDelta.project_id == proj.id,
+                ProjectDelta.name == name,
+            )
+        ).first()
+        if not delta:
+            click.echo(
+                f"Error: Delta '{name}' not found in project '{project}'.", err=True
+            )
+            raise SystemExit(1)
+
+        # Get notes and links
+        notes = session.exec(
+            select(DeltaNote)
+            .where(DeltaNote.delta_id == delta.id)
+            .order_by(DeltaNote.created_at)
+        ).all()
+        links = session.exec(
+            select(DeltaLink).where(DeltaLink.delta_id == delta.id)
+        ).all()
+
+        phase_icons = {
+            DeltaPhase.BRAINSTORM: "💡",
+            DeltaPhase.PLANNING: "📋",
+            DeltaPhase.IMPLEMENTATION: "⚙️",
+            DeltaPhase.REVIEW: "🔍",
+            DeltaPhase.DOCUMENTATION: "📝",
+            DeltaPhase.COMPLETE: "✅",
+            DeltaPhase.ABANDONED: "❌",
+        }
+
+        click.echo(f"\n{'=' * 60}")
+        click.echo(f"  {phase_icons.get(delta.phase, '❓')} {project}/{delta.name}")
+        click.echo(f"{'=' * 60}")
+
+        click.echo(f"\n📋 {delta.title}")
+        if delta.description:
+            click.echo(f"\n{delta.description}")
+
+        click.echo(f"\n🔹 Details:")
+        click.echo(f"  Phase: {delta.phase.value}")
+        click.echo(f"  Type: {delta.delta_type}")
+        click.echo(f"  Priority: {delta.priority}")
+        click.echo(f"  Created: {delta.created_at.strftime('%Y-%m-%d %H:%M')}")
+        if delta.started_at:
+            click.echo(f"  Started: {delta.started_at.strftime('%Y-%m-%d %H:%M')}")
+        if delta.completed_at:
+            click.echo(f"  Completed: {delta.completed_at.strftime('%Y-%m-%d %H:%M')}")
+
+        if links:
+            click.echo(f"\n🔗 Links:")
+            for link in links:
+                if link.link_type == "issue":
+                    click.echo(f"  - Issue #{link.target_id}")
+                elif link.link_type == "pr":
+                    click.echo(f"  - PR #{link.target_id}")
+                elif link.link_type == "branch":
+                    click.echo(f"  - Branch: {link.target_name}")
+                elif link.link_type == "delta":
+                    click.echo(f"  - Delta: {link.target_name}")
+
+        if notes:
+            click.echo(f"\n📝 Notes:")
+            for note in notes:
+                click.echo(
+                    f"\n  [{note.phase.value}] {note.created_at.strftime('%Y-%m-%d %H:%M')}"
+                )
+                for line in note.content.split("\n"):
+                    click.echo(f"    {line}")
+
+
+@deltas.command("advance")
+@click.argument("project")
+@click.argument("name")
+@click.option("--note", "-n", help="Add a note about the phase transition")
+def deltas_advance(project: str, name: str, note: Optional[str]) -> None:
+    """Advance a delta to the next phase.
+
+    PROJECT: Project name (owner/repo format)
+    NAME: Delta identifier
+
+    Phase sequence: brainstorm -> planning -> implementation -> review -> documentation -> complete
+
+    Examples:
+        dossier deltas advance astral-sh/ruff add-caching
+        dossier deltas advance astral-sh/ruff add-caching --note "Design doc approved"
+    """
+    with get_session() as session:
+        proj = session.exec(select(Project).where(Project.name == project)).first()
+        if not proj:
+            click.echo(f"Error: Project '{project}' not found.", err=True)
+            raise SystemExit(1)
+
+        delta = session.exec(
+            select(ProjectDelta).where(
+                ProjectDelta.project_id == proj.id,
+                ProjectDelta.name == name,
+            )
+        ).first()
+        if not delta:
+            click.echo(
+                f"Error: Delta '{name}' not found in project '{project}'.", err=True
+            )
+            raise SystemExit(1)
+
+        old_phase = delta.phase
+        if not delta.can_advance():
+            click.echo(
+                f"Error: Delta is already at final phase ({delta.phase.value}).",
+                err=True,
+            )
+            raise SystemExit(1)
+
+        delta.advance_phase()
+
+        # Add note if provided
+        if note:
+            delta_note = DeltaNote(
+                delta_id=delta.id,
+                phase=old_phase,  # Note is about the completed phase
+                content=note,
+            )
+            session.add(delta_note)
+
+        session.add(delta)
+        session.commit()
+
+        click.echo(f"✓ Advanced delta: {project}/{name}")
+        click.echo(f"  {old_phase.value} -> {delta.phase.value}")
+        if note:
+            click.echo(f"  Note added for {old_phase.value} phase")
+
+
+@deltas.command("link")
+@click.argument("project")
+@click.argument("name")
+@click.option("--issue", type=int, help="Link to GitHub issue number")
+@click.option("--pr", type=int, help="Link to GitHub PR number")
+@click.option("--branch", help="Link to branch name")
+@click.option("--delta", "linked_delta", help="Link to another delta (name)")
+def deltas_link(
+    project: str,
+    name: str,
+    issue: Optional[int],
+    pr: Optional[int],
+    branch: Optional[str],
+    linked_delta: Optional[str],
+) -> None:
+    """Link a delta to GitHub entities.
+
+    PROJECT: Project name (owner/repo format)
+    NAME: Delta identifier
+
+    Examples:
+        dossier deltas link astral-sh/ruff add-caching --issue 123
+        dossier deltas link astral-sh/ruff add-caching --pr 456 --branch feature/caching
+    """
+    if not any([issue, pr, branch, linked_delta]):
+        click.echo(
+            "Error: Must specify at least one link type (--issue, --pr, --branch, --delta).",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    with get_session() as session:
+        proj = session.exec(select(Project).where(Project.name == project)).first()
+        if not proj:
+            click.echo(f"Error: Project '{project}' not found.", err=True)
+            raise SystemExit(1)
+
+        delta = session.exec(
+            select(ProjectDelta).where(
+                ProjectDelta.project_id == proj.id,
+                ProjectDelta.name == name,
+            )
+        ).first()
+        if not delta:
+            click.echo(
+                f"Error: Delta '{name}' not found in project '{project}'.", err=True
+            )
+            raise SystemExit(1)
+
+        links_created = []
+
+        if issue:
+            link = DeltaLink(delta_id=delta.id, link_type="issue", target_id=issue)
+            session.add(link)
+            links_created.append(f"Issue #{issue}")
+
+        if pr:
+            link = DeltaLink(delta_id=delta.id, link_type="pr", target_id=pr)
+            session.add(link)
+            links_created.append(f"PR #{pr}")
+
+        if branch:
+            link = DeltaLink(delta_id=delta.id, link_type="branch", target_name=branch)
+            session.add(link)
+            links_created.append(f"Branch: {branch}")
+
+        if linked_delta:
+            # Find the target delta
+            target = session.exec(
+                select(ProjectDelta).where(
+                    ProjectDelta.project_id == proj.id,
+                    ProjectDelta.name == linked_delta,
+                )
+            ).first()
+            if target:
+                link = DeltaLink(
+                    delta_id=delta.id,
+                    link_type="delta",
+                    target_id=target.id,
+                    target_name=linked_delta,
+                )
+                session.add(link)
+                links_created.append(f"Delta: {linked_delta}")
+            else:
+                click.echo(
+                    f"Warning: Delta '{linked_delta}' not found, skipping.", err=True
+                )
+
+        session.commit()
+
+        click.echo(f"✓ Added links to delta: {project}/{name}")
+        for link_desc in links_created:
+            click.echo(f"  - {link_desc}")
+
+
+@deltas.command("note")
+@click.argument("project")
+@click.argument("name")
+@click.option("--content", "-c", required=True, help="Note content (markdown)")
+def deltas_note(project: str, name: str, content: str) -> None:
+    """Add a note to a delta.
+
+    PROJECT: Project name (owner/repo format)
+    NAME: Delta identifier
+
+    Examples:
+        dossier deltas note astral-sh/ruff add-caching -c "Started implementation"
+    """
+    with get_session() as session:
+        proj = session.exec(select(Project).where(Project.name == project)).first()
+        if not proj:
+            click.echo(f"Error: Project '{project}' not found.", err=True)
+            raise SystemExit(1)
+
+        delta = session.exec(
+            select(ProjectDelta).where(
+                ProjectDelta.project_id == proj.id,
+                ProjectDelta.name == name,
+            )
+        ).first()
+        if not delta:
+            click.echo(
+                f"Error: Delta '{name}' not found in project '{project}'.", err=True
+            )
+            raise SystemExit(1)
+
+        note = DeltaNote(
+            delta_id=delta.id,
+            phase=delta.phase,
+            content=content,
+        )
+        session.add(note)
+        session.commit()
+
+        click.echo(f"✓ Added note to delta: {project}/{name}")
+        click.echo(f"  Phase: {delta.phase.value}")
 
 
 def main() -> None:

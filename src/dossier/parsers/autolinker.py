@@ -14,17 +14,18 @@ from typing import Optional
 from sqlmodel import Session, select
 
 from dossier.models import (
+    DocumentSection,
     Project,
+    ProjectBranch,
     ProjectComponent,
     ProjectContributor,
+    ProjectDelta,
+    ProjectDependency,
     ProjectIssue,
     ProjectLanguage,
-    ProjectBranch,
-    ProjectDependency,
     ProjectPullRequest,
     ProjectRelease,
     ProjectVersion,
-    DocumentSection,
 )
 
 
@@ -72,49 +73,53 @@ class AutoLinker:
         include_prs: bool = True,
         include_versions: bool = True,
         include_docs: bool = True,
+        include_deltas: bool = True,
         max_contributors: int = 10,
         max_issues: int = 50,
         max_prs: int = 50,
     ) -> LinkStats:
         """Build an entity graph for a single project.
-        
+
         Args:
             project: The root project to build graph for
             include_*: Flags to control which entity types to include
             max_*: Limits on certain entity types to avoid huge graphs
-            
+
         Returns:
             LinkStats with counts of created/found projects and links
         """
         stats = LinkStats()
-        
+
         owner = project.github_owner
         repo = project.github_repo
-        
+
         if include_contributors:
             self._link_contributors(project, stats, max_contributors)
-        
+
         if include_languages:
             self._link_languages(project, stats)
-        
+
         if include_dependencies:
             self._link_dependencies(project, stats)
-        
+
         if include_branches and owner and repo:
             self._link_branches(project, owner, repo, stats)
-        
+
         if include_issues and owner and repo:
             self._link_issues(project, owner, repo, stats, max_issues)
-        
+
         if include_prs and owner and repo:
             self._link_prs(project, owner, repo, stats, max_prs)
-        
+
         if include_versions and owner and repo:
             self._link_versions(project, owner, repo, stats)
-        
+
         if include_docs and owner and repo:
             self._link_docs(project, owner, repo, stats)
-        
+
+        if include_deltas and owner and repo:
+            self._link_deltas(project, owner, repo, stats)
+
         self.session.commit()
         return stats
     
@@ -490,6 +495,42 @@ class AutoLinker:
                 github_repo=repo,
             )
             self._create_link(project.id, child.id, "doc", stats, order=i)
+
+    def _link_deltas(
+        self,
+        project: Project,
+        owner: str,
+        repo: str,
+        stats: LinkStats,
+    ) -> None:
+        """Link deltas as repo-scoped delta/ projects."""
+        deltas = self.session.exec(
+            select(ProjectDelta)
+            .where(ProjectDelta.project_id == project.id)
+            .order_by(ProjectDelta.created_at.desc())
+        ).all()
+
+        for i, delta in enumerate(deltas):
+            if not delta.name:
+                continue
+
+            # Repo-scoped: owner/repo/delta/{name}
+            name = f"{owner}/{repo}/delta/{delta.name}"
+            desc = f"Delta: {delta.title}"
+            if delta.phase:
+                phase_val = (
+                    delta.phase.value if hasattr(delta.phase, "value") else delta.phase
+                )
+                desc += f" ({phase_val})"
+
+            child = self._get_or_create_project(
+                name=name,
+                description=desc,
+                stats=stats,
+                github_owner=owner,
+                github_repo=repo,
+            )
+            self._create_link(project.id, child.id, "delta", stats, order=i)
 
 
 def autolink_project(session: Session, project: Project, **kwargs) -> LinkStats:

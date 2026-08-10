@@ -2,11 +2,15 @@
 
 import pytest
 from dossier.models import (
+    DeltaLink,
+    DeltaNote,
+    DeltaPhase,
     DocumentationLevel,
     DocumentSection,
     DocumentationQuery,
     DocumentationResponse,
     Project,
+    ProjectDelta,
     ProjectVersion,
 )
 
@@ -221,3 +225,247 @@ class TestProjectVersion:
         assert version.is_latest is False
         assert version.release_url is None
         assert version.changelog_url is None
+
+
+class TestDeltaPhase:
+    """Tests for DeltaPhase enum."""
+
+    def test_phase_values(self) -> None:
+        """Test that all delta phases are defined."""
+        assert DeltaPhase.BRAINSTORM == "brainstorm"
+        assert DeltaPhase.PLANNING == "planning"
+        assert DeltaPhase.IMPLEMENTATION == "implementation"
+        assert DeltaPhase.REVIEW == "review"
+        assert DeltaPhase.DOCUMENTATION == "documentation"
+        assert DeltaPhase.COMPLETE == "complete"
+        assert DeltaPhase.ABANDONED == "abandoned"
+
+    def test_phase_count(self) -> None:
+        """Test all phases are present."""
+        phases = list(DeltaPhase)
+        assert len(phases) == 7
+
+
+class TestProjectDelta:
+    """Tests for ProjectDelta model."""
+
+    def test_delta_creation(self) -> None:
+        """Test creating a delta."""
+        delta = ProjectDelta(
+            project_id=1,
+            name="add-feature",
+            title="Add new feature",
+            description="Implement a new feature",
+        )
+        assert delta.project_id == 1
+        assert delta.name == "add-feature"
+        assert delta.title == "Add new feature"
+        assert delta.description == "Implement a new feature"
+
+    def test_delta_defaults(self) -> None:
+        """Test delta has appropriate defaults."""
+        delta = ProjectDelta(
+            project_id=1,
+            name="test-delta",
+            title="Test Delta",
+        )
+        assert delta.id is None
+        assert delta.phase == DeltaPhase.BRAINSTORM
+        assert delta.priority == "medium"
+        assert delta.delta_type == "feature"
+        assert delta.started_at is None
+        assert delta.completed_at is None
+        assert delta.issue_number is None
+        assert delta.pr_number is None
+        assert delta.branch_name is None
+
+    def test_phase_order(self) -> None:
+        """Test PHASE_ORDER constant is correct."""
+        assert ProjectDelta.PHASE_ORDER == [
+            DeltaPhase.BRAINSTORM,
+            DeltaPhase.PLANNING,
+            DeltaPhase.IMPLEMENTATION,
+            DeltaPhase.REVIEW,
+            DeltaPhase.DOCUMENTATION,
+            DeltaPhase.COMPLETE,
+        ]
+
+    def test_can_advance_from_brainstorm(self) -> None:
+        """Test can_advance returns True from initial phase."""
+        delta = ProjectDelta(project_id=1, name="test", title="Test")
+        assert delta.phase == DeltaPhase.BRAINSTORM
+        assert delta.can_advance() is True
+
+    def test_can_advance_from_complete(self) -> None:
+        """Test can_advance returns False from complete phase."""
+        delta = ProjectDelta(project_id=1, name="test", title="Test")
+        delta.phase = DeltaPhase.COMPLETE
+        assert delta.can_advance() is False
+
+    def test_can_advance_from_abandoned(self) -> None:
+        """Test can_advance returns False from abandoned phase."""
+        delta = ProjectDelta(project_id=1, name="test", title="Test")
+        delta.phase = DeltaPhase.ABANDONED
+        assert delta.can_advance() is False
+
+    def test_advance_phase_sequence(self) -> None:
+        """Test advancing through all phases."""
+        delta = ProjectDelta(project_id=1, name="test", title="Test")
+
+        # Brainstorm -> Planning
+        assert delta.phase == DeltaPhase.BRAINSTORM
+        assert delta.advance_phase() is True
+        assert delta.phase == DeltaPhase.PLANNING
+
+        # Planning -> Implementation
+        assert delta.advance_phase() is True
+        assert delta.phase == DeltaPhase.IMPLEMENTATION
+        assert delta.started_at is not None  # Should be set
+
+        # Implementation -> Review
+        assert delta.advance_phase() is True
+        assert delta.phase == DeltaPhase.REVIEW
+
+        # Review -> Documentation
+        assert delta.advance_phase() is True
+        assert delta.phase == DeltaPhase.DOCUMENTATION
+
+        # Documentation -> Complete
+        assert delta.advance_phase() is True
+        assert delta.phase == DeltaPhase.COMPLETE
+        assert delta.completed_at is not None  # Should be set
+
+        # Cannot advance past complete
+        assert delta.advance_phase() is False
+        assert delta.phase == DeltaPhase.COMPLETE
+
+    def test_advance_phase_sets_timestamps(self) -> None:
+        """Test that advance_phase sets appropriate timestamps."""
+        delta = ProjectDelta(project_id=1, name="test", title="Test")
+        original_phase_changed_at = delta.phase_changed_at
+
+        delta.advance_phase()
+
+        # phase_changed_at and updated_at should be updated
+        assert delta.phase_changed_at >= original_phase_changed_at
+        assert delta.updated_at >= original_phase_changed_at
+
+    def test_advance_phase_sets_started_at(self) -> None:
+        """Test that started_at is set when entering implementation."""
+        delta = ProjectDelta(project_id=1, name="test", title="Test")
+        assert delta.started_at is None
+
+        # Advance to planning
+        delta.advance_phase()
+        assert delta.started_at is None
+
+        # Advance to implementation
+        delta.advance_phase()
+        assert delta.started_at is not None
+
+    def test_advance_phase_sets_completed_at(self) -> None:
+        """Test that completed_at is set when entering complete."""
+        delta = ProjectDelta(project_id=1, name="test", title="Test")
+        delta.phase = DeltaPhase.DOCUMENTATION
+        assert delta.completed_at is None
+
+        delta.advance_phase()
+        assert delta.phase == DeltaPhase.COMPLETE
+        assert delta.completed_at is not None
+
+    def test_advance_phase_from_abandoned(self) -> None:
+        """Test that abandoned deltas cannot advance."""
+        delta = ProjectDelta(project_id=1, name="test", title="Test")
+        delta.phase = DeltaPhase.ABANDONED
+
+        assert delta.advance_phase() is False
+        assert delta.phase == DeltaPhase.ABANDONED
+
+    def test_delta_with_github_links(self) -> None:
+        """Test delta with GitHub entity links."""
+        delta = ProjectDelta(
+            project_id=1,
+            name="fix-bug",
+            title="Fix critical bug",
+            issue_number=123,
+            pr_number=456,
+            branch_name="fix/critical-bug",
+        )
+        assert delta.issue_number == 123
+        assert delta.pr_number == 456
+        assert delta.branch_name == "fix/critical-bug"
+
+
+class TestDeltaNote:
+    """Tests for DeltaNote model."""
+
+    def test_note_creation(self) -> None:
+        """Test creating a delta note."""
+        note = DeltaNote(
+            delta_id=1,
+            phase=DeltaPhase.PLANNING,
+            content="Design document completed.",
+        )
+        assert note.delta_id == 1
+        assert note.phase == DeltaPhase.PLANNING
+        assert note.content == "Design document completed."
+
+    def test_note_defaults(self) -> None:
+        """Test note has appropriate defaults."""
+        note = DeltaNote(
+            delta_id=1,
+            phase=DeltaPhase.BRAINSTORM,
+            content="Initial ideas",
+        )
+        assert note.id is None
+        assert note.created_at is not None
+
+
+class TestDeltaLink:
+    """Tests for DeltaLink model."""
+
+    def test_link_creation_issue(self) -> None:
+        """Test creating an issue link."""
+        link = DeltaLink(
+            delta_id=1,
+            link_type="issue",
+            target_id=123,
+        )
+        assert link.delta_id == 1
+        assert link.link_type == "issue"
+        assert link.target_id == 123
+        assert link.target_name is None
+
+    def test_link_creation_branch(self) -> None:
+        """Test creating a branch link."""
+        link = DeltaLink(
+            delta_id=1,
+            link_type="branch",
+            target_name="feature/new-feature",
+        )
+        assert link.delta_id == 1
+        assert link.link_type == "branch"
+        assert link.target_id is None
+        assert link.target_name == "feature/new-feature"
+
+    def test_link_creation_delta(self) -> None:
+        """Test creating a delta-to-delta link."""
+        link = DeltaLink(
+            delta_id=1,
+            link_type="delta",
+            target_id=2,
+            target_name="related-delta",
+        )
+        assert link.link_type == "delta"
+        assert link.target_id == 2
+        assert link.target_name == "related-delta"
+
+    def test_link_defaults(self) -> None:
+        """Test link has appropriate defaults."""
+        link = DeltaLink(
+            delta_id=1,
+            link_type="pr",
+            target_id=456,
+        )
+        assert link.id is None
+        assert link.created_at is not None

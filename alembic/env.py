@@ -9,16 +9,20 @@ from alembic import context
 
 # Import all models to ensure they're registered with SQLModel
 from dossier.models import (
+    DeltaLink,
+    DeltaNote,
     DocumentSection,
     Project,
     ProjectBranch,
     ProjectComponent,
     ProjectContributor,
+    ProjectDelta,
     ProjectDependency,
     ProjectIssue,
     ProjectLanguage,
     ProjectPullRequest,
     ProjectRelease,
+    ProjectVersion,
 )
 
 # this is the Alembic Config object, which provides

@@ -4,7 +4,8 @@ Handles persistent settings stored in ~/.dossier/config.json
 """
 
 import json
-from dataclasses import dataclass, field, asdict
+import os
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -59,7 +60,26 @@ class DossierConfig:
     
     # View state - stores last dashboard state for restoration
     view_state: Optional[ViewState] = None
-    
+
+    # Database configuration (env var DOSSIER_DB_PATH takes precedence)
+    database_path: Optional[str] = None
+
+    # GitHub configuration (env var GITHUB_TOKEN takes precedence)
+    github_token: Optional[str] = None
+
+    def get_github_token(self) -> Optional[str]:
+        """Get GitHub token with env var taking precedence."""
+        return os.environ.get("GITHUB_TOKEN") or self.github_token
+
+    def get_database_path(self) -> Path:
+        """Get database path with env var taking precedence."""
+        env_path = os.environ.get("DOSSIER_DB_PATH")
+        if env_path:
+            return Path(env_path).expanduser().resolve()
+        if self.database_path:
+            return Path(self.database_path).expanduser().resolve()
+        return Path.home() / ".dossier" / "dossier.db"
+
     @classmethod
     def get_config_path(cls) -> Path:
         """Get the path to the config file."""
@@ -113,6 +133,8 @@ class DossierConfig:
         self.export_format = DEFAULT_EXPORT_FORMAT
         self.sidebar_width = None
         self.view_state = None
+        self.database_path = None
+        self.github_token = None
     
     def save_view_state(
         self,

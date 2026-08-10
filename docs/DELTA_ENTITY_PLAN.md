@@ -355,40 +355,41 @@ def on_deltas_table_row_selected(self, event: DataTable.RowSelected) -> None:
 ## 7. Implementation Steps
 
 ### Step 1: Schema Changes
-- [ ] Add `DeltaPhase` enum to `schemas.py`
-- [ ] Add `ProjectDelta` model to `schemas.py`
-- [ ] Add `DeltaNote` model to `schemas.py`
-- [ ] Add `DeltaLink` model to `schemas.py`
-- [ ] Export new models in `models/__init__.py`
+- [x] Add `DeltaPhase` enum to `schemas.py`
+- [x] Add `ProjectDelta` model to `schemas.py`
+- [x] Add `DeltaNote` model to `schemas.py`
+- [x] Add `DeltaLink` model to `schemas.py`
+- [x] Export new models in `models/__init__.py`
 
 ### Step 2: Database Migration
-- [ ] Create migration file `005_add_delta_tables.py`
-- [ ] Test migration up/down
+- [x] Create migration file `005_add_delta_tables.py`
+- [x] Test migration up/down
 
 ### Step 3: Configuration
-- [ ] Add `("tab-deltas", "Deltas")` to `AVAILABLE_TABS` in `config.py`
+- [x] Add `("tab-deltas", "Deltas")` to `AVAILABLE_TABS` in `config.py`
 
 ### Step 4: TUI Tab Implementation
-- [ ] Add TabPane for Deltas in `compose()`
-- [ ] Add table column setup in `on_mount()`
-- [ ] Add `_load_deltas_tab()` loader method
-- [ ] Register loader in `loaders` dict
+- [x] Add TabPane for Deltas in `compose()`
+- [x] Add table column setup in `on_mount()`
+- [x] Add `_load_deltas_tab()` loader method
+- [x] Register loader in `loaders` dict
 
 ### Step 5: Entity Type Integration
-- [ ] Add delta detection to `_get_entity_type_from_name()`
-- [ ] Add delta filter option to entity type Select
-- [ ] Add delta shortening to `_shorten_project_name()`
+- [x] Add delta detection to `_get_entity_type_from_name()`
+- [x] Add delta filter option to entity type Select
+- [x] Add delta shortening to `_shorten_project_name()`
 
 ### Step 6: UI Actions
-- [ ] Implement "New Delta" button handler and modal
-- [ ] Implement "Advance Phase" button handler
-- [ ] Implement "Add Note" button handler
-- [ ] Implement delta row selection handler
+- [x] Implement "New Delta" button handler and modal
+- [x] Implement "Advance Phase" button handler
+- [x] Implement "Add Note" button handler
+- [x] Implement delta row selection handler
 
 ### Step 7: Testing
-- [ ] Unit tests for ProjectDelta model
-- [ ] Unit tests for phase transitions
-- [ ] Integration tests for delta tab loading
+- [x] Unit tests for ProjectDelta model
+- [x] Unit tests for phase transitions
+- [x] Integration tests for delta API endpoints
+- [x] Integration tests for delta CLI commands
 
 ---
 
@@ -401,6 +402,13 @@ def on_deltas_table_row_selected(self, event: DataTable.RowSelected) -> None:
 | `alembic/versions/005_*.py` | New migration for delta tables |
 | `src/dossier/config.py` | Add tab-deltas to AVAILABLE_TABS |
 | `src/dossier/tui/app.py` | Add tab, loader, handlers, entity type support |
+| `src/dossier/api/main.py` | Add 5 REST API endpoints for delta management |
+| `src/dossier/cli.py` | Add 6 CLI commands for delta management |
+| `src/dossier/database.py` | Register delta models in init_db() |
+| `src/dossier/parsers/autolinker.py` | Add delta auto-linking as project nodes |
+| `tests/test_models.py` | Add delta model unit tests |
+| `tests/test_api.py` | Add delta API integration tests |
+| `tests/test_cli.py` | Add delta CLI integration tests |
 
 ---
 
