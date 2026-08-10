@@ -10,15 +10,27 @@ from .github import (
     RateLimitInfo,
     sync_github_repo,
 )
+from .governance import (
+    DocumentUnavailable,
+    GovernanceDocument,
+    HarnessDocument,
+    load_governance,
+    load_harness,
+)
 
 __all__ = [
     "AutoLinker",
     "BaseParser",
     "BatchResult",
+    "DocumentUnavailable",
     "GitHubClient",
     "GitHubParser",
     "GitHubRepo",
+    "GovernanceDocument",
+    "HarnessDocument",
     "LinkStats",
+    "load_governance",
+    "load_harness",
     "MarkdownParser",
     "ParserRegistry",
     "RateLimitInfo",

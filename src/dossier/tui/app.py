@@ -849,6 +849,12 @@ class DossierApp(App):
                         yield DataTable(id="prs-table")
                     with TabPane("Releases", id="tab-releases"):
                         yield DataTable(id="releases-table")
+                    with TabPane("Governance", id="tab-governance"):
+                        with Vertical():
+                            yield Static("", id="governance-age")
+                            yield DataTable(id="governance-table")
+                            yield Static("", id="governance-threads-age")
+                            yield DataTable(id="governance-threads-table")
                     with TabPane("Components", id="tab-components"):
                         with Vertical():
                             yield DataTable(id="components-table")
@@ -877,6 +883,27 @@ class DossierApp(App):
         langs_table.add_columns("Language", "Extensions", "Encoding", "Bytes", "%")
         langs_table.cursor_type = "row"
         
+        # Governance: org-wide, not per-project. Both tables live in one tab
+        # because the two documents are read together and a reader comparing
+        # "who is drifting" against "what is in flight" wants them adjacent.
+        governance_table = self.query_one("#governance-table", DataTable)
+        governance_table.add_column("Repository", width=24)
+        governance_table.add_column("Phase (claim)", width=14)
+        governance_table.add_column("Corpus", width=13)
+        governance_table.add_column("Seed", width=8)
+        governance_table.add_column("Slot", width=9)
+        governance_table.add_column("Evidence (landed)", width=54)
+        governance_table.cursor_type = "row"
+
+        threads_table = self.query_one("#governance-threads-table", DataTable)
+        threads_table.add_column("Repository", width=17)
+        threads_table.add_column("Thread", width=38)
+        threads_table.add_column("Stage", width=16)
+        threads_table.add_column("Delta", width=22)
+        threads_table.add_column("Idle", width=9)
+        threads_table.add_column("PR", width=6)
+        threads_table.cursor_type = "row"
+
         # Setup branches table columns (with custom widths)
         branches_table = self.query_one("#branches-table", DataTable)
         branches_table.add_column("Branch", width=20)
@@ -2136,6 +2163,13 @@ class DossierApp(App):
     @on(TabbedContent.TabActivated, "#project-tabs")
     def on_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         """Lazy load tab data when tab is activated."""
+        if event.pane.id == "tab-governance":
+            # Handled before the project guard below on purpose: governance is
+            # org-wide and has to render with nothing selected. Hanging it off
+            # the per-project path would leave it permanently blank, and blank
+            # reads as "nothing is wrong".
+            self._load_governance_tab()
+            return
         if hasattr(self, "_current_project_id"):
             # Use pane.id (the TabPane ID like "tab-docs") not tab.id (which is "--content-tab-tab-docs")
             self._load_tab_data(event.pane.id)
@@ -2149,6 +2183,11 @@ class DossierApp(App):
             return  # Already loaded
         
         self._tabs_loaded.add(tab_id)
+
+        if tab_id == "tab-governance":
+            self._load_governance_tab()
+            return
+
         project = getattr(self, "_current_project", None)
         if not project:
             return
@@ -2475,6 +2514,137 @@ class DossierApp(App):
                         key=f"release-{release.id}",
                     )
     
+    def _load_governance_tab(self) -> None:
+        """Render what the corpus's generated documents say.
+
+        Org-wide, so it takes no project. Four states have to stay visually
+        distinct, because collapsing any of them is how a dashboard becomes
+        worse than no dashboard:
+
+        * nothing loaded -- say so, and say the command that fixes it
+        * stale -- show the age prominently, never silently
+        * unknown -- its own word, never blank and never the healthy value
+        * drift -- distinct in form as well as text, not only in a number
+        """
+        from dossier import governance as gov
+
+        age_label = self.query_one("#governance-age", Static)
+        table = self.query_one("#governance-table", DataTable)
+        threads_label = self.query_one("#governance-threads-age", Static)
+        threads_table = self.query_one("#governance-threads-table", DataTable)
+        table.clear()
+        threads_table.clear()
+
+        with self.session_factory() as session:
+            rows = gov.repositories(session)
+            thread_rows = gov.threads(session)
+            ages = gov.document_age(session)
+            budget = next(
+                (r.harness_staleness_budget_hours for r in rows
+                 if r.harness_staleness_budget_hours),
+                None,
+            )
+
+        if not rows:
+            age_label.update(
+                "[bold]No governance document has been read.[/]\n"
+                "This is not a claim that nothing is wrong -- it is the absence "
+                "of any measurement.\nRun [b]dossier governance load[/] to read "
+                "them from the vendored corpus."
+            )
+            threads_label.update("")
+            return
+
+        age_label.update(self._age_markup("governance-status.yaml", ages["governance"], None))
+
+        for row in rows:
+            state = gov.health(row)
+            marker = {"unknown": "[yellow]?[/] ", "drift": "[red]![/] ", "ok": "  "}[state]
+            evidence = gov.show_pair(row.precondition, row.precondition_unknown)
+            if row.precondition_missing:
+                evidence = f"{evidence} ({row.precondition_missing})"
+            if row.slot_violations:
+                evidence = f"{evidence} [holds {row.slot_violations}]"
+            table.add_row(
+                f"{marker}{row.name}",
+                f"{row.phase or '-'}",
+                self._governance_cell(gov.drift_text(row)),
+                self._governance_cell(
+                    gov.show_pair(row.seed_drift, row.seed_drift_unknown)
+                ),
+                self._governance_cell(
+                    gov.show_pair(row.slot_state, row.slot_unknown)
+                ),
+                self._governance_cell(evidence),
+                key=f"governance-{row.name}",
+            )
+
+        if ages["harness"] is None:
+            threads_label.update(
+                "[bold]harness-status.json has never been read.[/] "
+                "Nothing is known about work in flight,\nwhich is not the same "
+                "as nothing being in flight."
+            )
+            return
+
+        threads_label.update(
+            self._age_markup("harness-status.json", ages["harness"], budget)
+            + "  [dim]stages are observable states, not progress[/]"
+        )
+        if not thread_rows:
+            threads_table.add_row(
+                "[dim]The document was read and reports no threads in flight.[/]",
+                "", "", "", "", "", key="threads-empty",
+            )
+            return
+
+        for thread in thread_rows:
+            stage = thread.stage or "-"
+            if thread.stalled:
+                stage = f"[red]{stage} STALLED[/]"
+            idle = (
+                f"{thread.idle_hours:.0f}h"
+                if thread.idle_hours is not None
+                else "[yellow]unknown[/]"
+            )
+            threads_table.add_row(
+                thread.repository_name,
+                thread.name,
+                stage,
+                f"{thread.commits or 0}c {thread.changed_files or 0}f "
+                f"+{thread.additions or 0}/-{thread.deletions or 0}",
+                idle,
+                f"#{thread.pr}" if thread.pr else "-",
+                key=f"thread-{thread.id}",
+            )
+
+    @staticmethod
+    def _governance_cell(text: str) -> str:
+        """Colour unknown and drift, so form carries the distinction too.
+
+        A reader scanning the column should not have to read every cell to
+        find the ones nobody could measure.
+        """
+        if text.startswith("unknown"):
+            return f"[yellow]{text}[/]"
+        if "behind" in text or text.startswith("drift") or text.startswith("over"):
+            return f"[red]{text}[/]"
+        return text
+
+    @staticmethod
+    def _age_markup(name: str, age, budget) -> str:
+        """Always state the document's age. Never let it read as live."""
+        if age is None:
+            return f"[bold]{name}: never read[/]"
+        if budget is None:
+            return f"{name}: generated [b]{age:.0f}h[/] ago [dim](no stated budget)[/]"
+        if age > budget:
+            return (
+                f"[red]{name}: generated {age:.0f}h ago, PAST its {budget:.0f}h "
+                f"budget -- treat every figure below as stale[/]"
+            )
+        return f"{name}: generated [b]{age:.0f}h[/] ago, within its {budget:.0f}h budget"
+
     def _load_components_tab(self, project: Project) -> None:
         """Load components tab."""
         components_table = self.query_one("#components-table", DataTable)
