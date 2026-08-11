@@ -55,6 +55,54 @@ GENERATORS = (
 DEFAULT_TIMEOUT_SECONDS = 900
 
 
+def _fetch(root: Path, offline: bool, timeout: int) -> "RefreshOutcome":
+    """Bring the remote-tracking refs current before anything reads them.
+
+    The generators measure branch positions from **local** remote-tracking
+    refs. Without a fetch they describe whatever this clone last saw, and they
+    say so with a fresh `generated_at` — a stale document wearing a current
+    timestamp, which is the one failure this whole design exists to prevent.
+
+    Observed on 2026-08-11: seven propagation pull requests were merged, the
+    documents regenerated a minute later, and six projects were reported as up
+    to 102 commits behind a corpus they were level with.
+
+    The corpus's own `governance-status.yml` has a "Fetch the refs the document
+    describes" step for exactly this. Doing it here is not re-deriving a
+    governance fact; it is making the generators' input current, which is what
+    that workflow already does.
+    """
+    if offline:
+        return RefreshOutcome(
+            document="refs",
+            script="git fetch",
+            ran=False,
+            reason="offline was requested, so the refs are whatever this clone last saw",
+        )
+    try:
+        finished = subprocess.run(
+            ["git", "fetch", "--all", "--prune", "--quiet"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return RefreshOutcome(
+            document="refs", script="git fetch", ran=True, ok=False, reason=str(exc)
+        )
+    tail = (finished.stderr or "").strip().splitlines()
+    return RefreshOutcome(
+        document="refs",
+        script="git fetch",
+        ran=True,
+        ok=finished.returncode == 0,
+        reason=None if finished.returncode == 0 else (tail[-1] if tail else "fetch failed"),
+    )
+
+
 @dataclass
 class RefreshOutcome:
     """What happened to one generator."""
@@ -116,7 +164,7 @@ def refresh(
             for document, script, _ in GENERATORS
         ]
 
-    outcomes = []
+    outcomes = [_fetch(root, offline=offline, timeout=timeout)]
     for document, script, args in GENERATORS:
         command = [sys.executable, script, *args]
         if offline and script.endswith("governance_status.py"):
