@@ -874,3 +874,68 @@ def test_against_the_vendored_corpus_if_present(session):
     assert report.anything_loaded
     for row in gov.repositories(session):
         assert gov.health(row) in {"ok", "drift", "unknown"}
+
+
+# --- main is readiness; a v tag is governance passed -----------------------
+
+
+def test_the_release_layer_is_stored_with_its_unknown_reason(session, tmp_path):
+    write_harness(
+        tmp_path,
+        [
+            {"name": "qmetronome", "release": {"state": "current", "latest": "v0.2.0",
+                                               "annotated": True, "unreleased_commits": 0}},
+            {"name": "alfred", "release": {"state": "ahead", "latest": "v0.2.0",
+                                           "annotated": False, "unreleased_commits": 37}},
+            {"name": "qm", "release": {"state": "unreleased", "latest": None}},
+            {"name": "mystery", "release": {"unknown": "gh: Not Found"}},
+        ],
+    )
+    gov.load_documents(session, corpus_dir=tmp_path)
+    rows = {r.name: r for r in gov.repositories(session)}
+
+    assert gov.release_text(rows["qmetronome"]) == "v0.2.0"
+    assert gov.release_text(rows["alfred"]) == "v0.2.0 lightweight +37"
+    assert gov.release_text(rows["qm"]) == "never tagged"
+    assert gov.release_text(rows["mystery"]) == "unknown"
+    assert rows["mystery"].release_unknown == "gh: Not Found"
+
+
+def test_never_tagged_is_not_rendered_as_current(session, tmp_path):
+    """Both have nothing outstanding and they mean opposite things."""
+    write_harness(
+        tmp_path,
+        [
+            {"name": "a", "release": {"state": "unreleased", "latest": None}},
+            {"name": "b", "release": {"state": "current", "latest": "v1.0.0",
+                                      "annotated": True}},
+        ],
+    )
+    gov.load_documents(session, corpus_dir=tmp_path)
+    rows = {r.name: r for r in gov.repositories(session)}
+    assert gov.release_text(rows["a"]) != gov.release_text(rows["b"])
+    assert gov.release_text(rows["a"]) == "never tagged"
+
+
+def test_a_lightweight_tag_is_flagged_wherever_it_is_rendered(session, tmp_path):
+    """It names no reviewer and no manual test, so it is not a release."""
+    write_harness(
+        tmp_path,
+        [{"name": "datum", "release": {"state": "current", "latest": "v0.0.1",
+                                       "annotated": False}}],
+    )
+    gov.load_documents(session, corpus_dir=tmp_path)
+    row = gov.repositories(session)[0]
+    assert "lightweight" in gov.release_text(row)
+    assert any("lightweight" in line for line in gov.summary_lines(row))
+
+
+def test_a_document_with_no_release_layer_leaves_the_columns_empty_not_wrong(
+    session, tmp_path
+):
+    """An older document is a thing nobody measured."""
+    write_harness(tmp_path, [{"name": "old"}])
+    gov.load_documents(session, corpus_dir=tmp_path)
+    row = gov.repositories(session)[0]
+    assert row.release_state is None and row.release_unknown is None
+    assert gov.release_text(row) == "-"

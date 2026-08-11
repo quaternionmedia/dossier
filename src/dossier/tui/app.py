@@ -934,7 +934,8 @@ class DossierApp(App):
         governance_table.add_column("Corpus", width=13)
         governance_table.add_column("Seed", width=8)
         governance_table.add_column("Slot", width=9)
-        governance_table.add_column("Evidence (landed)", width=46)
+        governance_table.add_column("Release", width=22)
+        governance_table.add_column("Evidence (landed)", width=40)
         # The reverse link: which governed repositories this store has synced.
         # A blank here means nobody has looked at that project in dossier, which
         # is worth seeing beside its governance state.
@@ -3026,6 +3027,7 @@ class DossierApp(App):
                 self._governance_cell(
                     gov.show_pair(row.slot_state, row.slot_unknown)
                 ),
+                self._release_cell(gov.release_text(row)),
                 self._governance_cell(evidence),
                 self._coverage_cell(projects.get(row.name, "not synced")),
                 key=f"governance-{row.name}",
@@ -3069,6 +3071,21 @@ class DossierApp(App):
                 self._pr_cell(thread.pr, synced_prs),
                 key=f"thread-{thread.id}",
             )
+
+    @staticmethod
+    def _release_cell(text: str) -> str:
+        """Colour the two states that need a reader's attention.
+
+        Never-tagged is dimmed rather than reddened: it is the normal state of
+        a project nobody has released, not a fault.
+        """
+        if text.startswith("unknown"):
+            return f"[yellow]{text}[/]"
+        if "lightweight" in text:
+            return f"[red]{text}[/]"
+        if text == "never tagged":
+            return f"[dim]{text}[/]"
+        return text
 
     @staticmethod
     def _coverage_cell(text: str) -> str:

@@ -294,6 +294,11 @@ def _apply_harness(
     row.slot_unknown = repo.slot_unknown
     row.slot_open_prs = repo.slot_open_prs
     row.slot_violations = repo.slot_violations
+    row.release_state = repo.release_state
+    row.release_unknown = repo.release_unknown
+    row.release_latest = repo.release_latest
+    row.release_annotated = repo.release_annotated
+    row.release_unreleased_commits = repo.release_unreleased_commits
 
 
 def _as_datetime(value) -> Optional[datetime]:
@@ -483,6 +488,30 @@ def show_pair(value, unknown: Optional[str], null_text: str = "-") -> str:
     return str(value)
 
 
+def release_text(row: GovernanceRepository) -> str:
+    """What a v tag asserts here, beside what the default branch carries.
+
+    `main` is readiness; a tag is governance passed. `unreleased` and `current`
+    are never rendered as each other -- both have nothing outstanding and they
+    mean opposite things. A lightweight tag is flagged rather than counted as a
+    release: it carries no annotation, so it names neither the reviewer nor the
+    manual test the version-tags record requires.
+    """
+    if row.release_unknown:
+        return UNKNOWN_TEXT
+    if row.release_state is None:
+        return "-"
+    if row.release_state == "unreleased":
+        return "never tagged"
+    flag = "" if row.release_annotated else " lightweight"
+    if row.release_state == "current":
+        return f"{row.release_latest}{flag}"
+    n = row.release_unreleased_commits
+    if n is None:
+        return f"{row.release_latest}{flag} +? unreleased"
+    return f"{row.release_latest}{flag} +{n}"
+
+
 def coverage_text(project, matched_by: Optional[str]) -> str:
     """Whether this store holds the repository, and whether that was a guess.
 
@@ -553,6 +582,7 @@ def summary_lines(row: Optional[GovernanceRepository], matched_by: Optional[str]
         lines.append("never propagated")
     else:
         lines.append(f"last propagation {row.last_propagation:%Y-%m-%d}")
+    lines.append(f"release {release_text(row)}")
     if matched_by and matched_by != "slug":
         lines.append(f"matched to this project by {matched_by}, not by slug")
     return lines

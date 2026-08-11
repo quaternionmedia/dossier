@@ -113,6 +113,16 @@ class GovernanceRepository(SQLModel, table=True):
     precondition_unknown: Optional[str] = None
     precondition_missing: Optional[str] = None  # comma-joined, verbatim
 
+    # What a v tag asserts, beside what the default branch carries. `main` is
+    # readiness; a tag is governance passed. The gap between them is the fact
+    # worth storing, and `unreleased` is not `current` -- both have nothing
+    # outstanding and they mean opposite things.
+    release_state: Optional[str] = None
+    release_unknown: Optional[str] = None
+    release_latest: Optional[str] = None
+    release_annotated: Optional[bool] = None
+    release_unreleased_commits: Optional[int] = None
+
     slot_state: Optional[str] = None
     slot_unknown: Optional[str] = None
     slot_open_prs: Optional[int] = None
