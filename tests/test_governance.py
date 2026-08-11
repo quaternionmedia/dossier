@@ -19,6 +19,7 @@ import pytest
 import yaml
 from sqlmodel import Session, SQLModel, create_engine, select
 
+from tests import structural
 from dossier import governance as gov
 from dossier.models import GovernanceRepository, GovernanceThread
 from dossier.parsers.governance import (
@@ -609,6 +610,12 @@ def test_the_read_and_render_path_runs_no_commands():
     A renderer that can shell out is a second place a governance rule gets
     defined, and two definitions drift. Refreshing is a different act and
     lives in `dossier.corpus`; these three modules must stay clean.
+
+    Asserted **structurally**, not by scanning the source for a word. Every one
+    of these modules explains this rule in its docstring, and that prose names
+    `subprocess` — so a text scan fails on the explanation, and would pass
+    against a module that deleted the paragraph and added the call. Parsing the
+    module asks the question the rule actually poses.
     """
     import dossier.governance
     import dossier.models.governance
@@ -619,8 +626,23 @@ def test_the_read_and_render_path_runs_no_commands():
         dossier.models.governance,
         dossier.governance,
     ):
-        source = pathlib.Path(module.__file__).read_text(encoding="utf-8")
-        assert "subprocess" not in source, f"{module.__name__} must not run commands"
+        offenders = structural.runs_commands(module)
+        assert not offenders, f"{module.__name__} must not run commands: {offenders}"
+
+
+def test_the_guard_would_catch_a_module_that_did_run_commands():
+    """The guard itself, seen to report bad.
+
+    `dossier.corpus` is the module that legitimately shells out. Pointing the
+    same guard at it must fail — otherwise the assertion above is watching
+    rather than testing.
+    """
+    from dossier import corpus
+
+    assert structural.runs_commands(corpus), (
+        "the guard found nothing in the one module that does run commands, "
+        "so it would not have caught a renderer that started to"
+    )
 
 
 def test_refresh_reports_a_checkout_without_the_generators(tmp_path):
