@@ -22,6 +22,8 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from tests import structural
+from tests.structural import calls_of, imports_of
 from dossier import disk
 from dossier.cli import cli
 
@@ -51,24 +53,8 @@ def fake_corpus(root: Path, script_body: str = "import sys\nsys.exit(0)\n") -> P
 # --- dossier adds no second definition of anything -------------------------
 
 
-def imports_of(module) -> set[str]:
-    tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
-    found: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            found.update(alias.name.split(".")[0] for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            found.add(node.module.split(".")[0])
-    return found
-
-
-def calls_of(module) -> set[str]:
-    tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
-    return {
-        node.func.attr if isinstance(node.func, ast.Attribute) else node.func.id
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, (ast.Attribute, ast.Name))
-    }
+# The structural helpers live in tests/structural.py -- one definition rather
+# than one per test module, since three copies had already appeared.
 
 
 def test_dossier_measures_no_disk_fact_of_its_own() -> None:
@@ -116,7 +102,10 @@ def test_the_read_and_render_path_still_runs_no_commands() -> None:
     """
     from dossier import governance as gov
 
-    assert "subprocess" not in Path(gov.__file__).read_text(encoding="utf-8")
+    assert not structural.runs_commands(gov), (
+        "asserted structurally: this module's docstring names subprocess while "
+        "explaining the rule, so a text scan fails on the explanation"
+    )
 
 
 # --- a checkout that cannot run the tooling says so ------------------------
