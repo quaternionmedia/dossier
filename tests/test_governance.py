@@ -695,10 +695,62 @@ def test_refresh_runs_the_generators_in_order_and_reports_failure(tmp_path):
     outcomes = corpus.refresh(tmp_path)
 
     assert (tmp_path / "order.log").read_text().split() == ["governance", "harness"]
-    assert outcomes[0].ok is True
-    assert outcomes[1].ok is False
-    assert "deliberate failure" in outcomes[1].reason
-    assert "failed" in outcomes[1].summary
+    # outcomes[0] is the ref fetch; the generators follow it.
+    generators = [o for o in outcomes if o.document != "refs"]
+    assert generators[0].ok is True
+    assert generators[1].ok is False
+    assert "deliberate failure" in generators[1].reason
+    assert "failed" in generators[1].summary
+
+
+def test_refresh_fetches_before_it_measures(tmp_path):
+    """The generators read local remote-tracking refs, so a stale clone lies.
+
+    Observed for real: seven propagation PRs merged, documents regenerated a
+    minute later, six projects reported up to 102 commits behind a corpus they
+    were level with -- with a fresh generated_at on top.
+    """
+    from dossier import corpus
+
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "ci").mkdir()
+    order = tmp_path / "order.log"
+    recorder = (
+        "import pathlib\n"
+        "p = pathlib.Path('order.log')\n"
+        "p.touch()\n"
+        "p.write_text(p.read_text() + {name!r} + chr(10))\n"
+    )
+    for script in ("ci/governance_status.py", "ci/harness_status.py"):
+        (tmp_path / script).write_text(
+            recorder.format(name=script.split("/")[-1]), encoding="utf-8"
+        )
+
+    outcomes = corpus.refresh(tmp_path)
+
+    # The fetch is reported as its own outcome, and reported first.
+    assert outcomes[0].document == "refs"
+    assert [o.document for o in outcomes[1:]] == [
+        "governance-status.yaml",
+        "harness-status.json",
+    ]
+    # ...and it happened before any generator ran.
+    assert order.read_text().split() == ["governance_status.py", "harness_status.py"]
+
+
+def test_offline_says_the_refs_are_whatever_this_clone_last_saw(tmp_path):
+    """Offline is a real state, and it must not silently skip the fetch."""
+    from dossier import corpus
+
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "ci").mkdir()
+    for script in ("ci/governance_status.py", "ci/harness_status.py"):
+        (tmp_path / script).write_text("", encoding="utf-8")
+
+    fetch = corpus.refresh(tmp_path, offline=True)[0]
+    assert fetch.document == "refs"
+    assert not fetch.ran
+    assert "last saw" in fetch.reason
 
 
 @pytest.mark.asyncio
