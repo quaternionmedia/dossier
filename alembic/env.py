@@ -7,9 +7,23 @@ from sqlmodel import SQLModel
 
 from alembic import context
 
-# Import all models to ensure they're registered with SQLModel
+# Import all models to ensure they're registered with SQLModel.
+#
+# EVERY table model belongs in this list, and a missing one is not a missing
+# feature -- it is a destructive autogenerate. `target_metadata` below is
+# populated purely by import side-effect, so a model that is not imported here
+# is absent from the metadata, and autogenerate reads absent-from-metadata plus
+# present-in-database as "drop it". The governance tables were missing from
+# this list, which meant an autogenerate run would have emitted
+# `op.drop_table('governance_repository')` against a table holding the org's
+# governance history.
 from dossier.models import (
+    DiskSnapshot,
+    DiskTarget,
+    DiskVolume,
     DocumentSection,
+    GovernanceRepository,
+    GovernanceThread,
     Project,
     ProjectBranch,
     ProjectComponent,

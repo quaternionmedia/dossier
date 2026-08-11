@@ -3457,6 +3457,259 @@ def disk_reclaim(
         raise SystemExit(outcome.status or 1)
 
 
+def _size(count: Optional[int]) -> str:
+    """Bytes at a scale a person reads, and never rounded to nothing.
+
+    A 40MB cache rendered as `0.0GB` reads as empty, which is the same failure
+    as rendering an unknown as a zero.
+    """
+    if count is None:
+        return "unknown"
+    negative = count < 0
+    value = abs(count)
+    if value >= 10**9:
+        text = f"{value / 10**9:.1f}GB"
+    elif value >= 10**6:
+        text = f"{value / 10**6:.0f}MB"
+    elif value >= 10**3:
+        text = f"{value / 10**3:.0f}KB"
+    else:
+        text = f"{value}B"
+    return f"-{text}" if negative else text
+
+
+def _change(count: Optional[int]) -> str:
+    """A signed change, with the sign kept even at zero-ish sizes."""
+    if count is None:
+        return "unknown"
+    if count == 0:
+        return "no change"
+    return f"+{_size(count)}" if count > 0 else _size(count)
+
+
+@disk_group.command(name="load")
+@click.option(
+    "--corpus-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Corpus checkout to run. Found automatically when omitted.",
+)
+@click.option(
+    "--measure/--no-measure",
+    default=True,
+    help="Take a fresh reading first. On by default.",
+)
+@click.option(
+    "--search-root",
+    type=click.Path(path_type=Path),
+    multiple=True,
+    help="Where this stack's clones live. Repeatable.",
+)
+@click.option(
+    "--keep",
+    type=int,
+    default=None,
+    help="Snapshots to keep for this machine. Older ones are pruned.",
+)
+def disk_load(
+    corpus_dir: Optional[Path],
+    measure: bool,
+    search_root: tuple[Path, ...],
+    keep: Optional[int],
+) -> None:
+    """Read a disk document into the store as a new snapshot.
+
+    \b
+        dossier disk load                  # measure, then store
+        dossier disk load --no-measure     # store the reading already taken
+
+    Appends rather than replaces, which is the difference between this and
+    `governance load`. The question worth asking of a disk is what grew since
+    last time, and no single reading can answer it -- so every load keeps the
+    previous ones, and `dossier disk delta` compares them.
+
+    Old snapshots are pruned per machine, so a second machine sharing a store
+    cannot evict this one's history.
+    """
+    from dossier import disk as disk_tools
+    from dossier import disk_store
+
+    if measure:
+        root = _disk_corpus(corpus_dir)
+        click.echo("measure walking the policy's targets ...")
+        outcome = disk_tools.measure(root, search_roots=search_root)
+        if not outcome.ok:
+            click.echo(f"FAIL    {outcome.summary}", err=True)
+            raise SystemExit(1)
+        click.echo(f"ok      {outcome.stdout or disk_tools.document_path()}")
+
+    with get_session() as session:
+        report = disk_store.load_document(
+            session,
+            keep=keep if keep is not None else disk_store.DEFAULT_KEEP,
+        )
+
+    mark = "ok  " if report.loaded else "MISS"
+    click.echo(f"{mark} disk        {report.summary}")
+    if not report.loaded:
+        click.echo(
+            "\nNothing was stored, and nothing already stored was changed. "
+            "Take a reading first:\n    dossier disk load",
+            err=True,
+        )
+        raise SystemExit(1)
+    click.echo(f"     machine {report.machine}")
+    if report.pruned:
+        click.echo(f"     pruned {report.pruned} older snapshot(s)")
+
+
+@disk_group.command(name="delta")
+@click.option(
+    "--machine",
+    default=None,
+    help="Which machine's history to read. Defaults to this one.",
+)
+@click.option(
+    "--limit",
+    type=int,
+    default=12,
+    help="How many changed targets to print.",
+)
+def disk_delta(machine: Optional[str], limit: int) -> None:
+    """What changed between the two most recent readings.
+
+    \b
+        dossier disk delta
+
+    The question a single reading cannot answer. Volumes first -- the change
+    shown is in FREE space, so a negative number is the disk filling up --
+    then the targets that moved, largest growth first.
+
+    \b
+    A change is only ever printed where subtracting was honest. Four cases
+    print a word instead of a number, because the arithmetic would have
+    invented a fact:
+        unknown   nobody could measure one of the two readings
+        new       the target is not in the earlier snapshot
+        gone      the target is not in the later one
+        different the two readings describe different machines
+
+    One reading is not an error. It is a machine measured once, and the
+    honest report is that there is nothing to compare it with yet.
+    """
+    from dossier import disk_store
+
+    with get_session() as session:
+        delta = disk_store.latest_delta(session, machine=machine)
+
+        if not delta.available:
+            click.echo(f"no delta: {delta.reason}")
+            click.echo(
+                "\nThis is not a claim that nothing changed -- it is the "
+                "absence of a second measurement.\nRun `dossier disk load` "
+                "again later, and the comparison becomes available."
+            )
+            return
+
+        click.echo(
+            f"machine {delta.machine}   over {delta.hours:.0f}h   "
+            f"{delta.older.generated_at} -> {delta.newer.generated_at}"
+        )
+        click.echo()
+
+        click.echo("Volumes (change in FREE space; negative is filling up)")
+        header = f"  {'Volume':<12} {'Free now':>10} {'Change':>12}  State"
+        click.echo(header)
+        click.echo("  " + "-" * (len(header) - 2))
+        for volume in delta.volumes:
+            if volume.unknown:
+                click.echo(
+                    f"  {volume.path:<12} {'unknown':>10} {'unknown':>12}  "
+                    f"{volume.unknown}"
+                )
+                continue
+            click.echo(
+                f"  {volume.path:<12} {_size(volume.after_free):>10} "
+                f"{_change(volume.change):>12}  {volume.severity or '-'}"
+            )
+        click.echo()
+
+        moved = [t for t in delta.targets if t.status in ("grew", "shrank")]
+        moved.sort(key=lambda t: -(t.change or 0))
+        click.echo("Targets that moved")
+        if not moved:
+            click.echo("  nothing measurable changed size")
+        else:
+            header = f"  {'Target':<28} {'Now':>10} {'Change':>12}  Safety"
+            click.echo(header)
+            click.echo("  " + "-" * (len(header) - 2))
+            for target in moved[:limit]:
+                click.echo(
+                    f"  {_fit(target.name, 28):<28} {_size(target.after):>10} "
+                    f"{_change(target.change):>12}  {target.safety or '-'}"
+                )
+            if len(moved) > limit:
+                click.echo(f"  ... and {len(moved) - limit} more")
+
+        # Never folded into the table above. A target nobody could compare is
+        # not a target that did not change, and a row of dashes among real
+        # numbers is read as the second thing.
+        gaps = delta.unreadable
+        if gaps:
+            click.echo()
+            click.echo(f"No change could be established for {len(gaps)} target(s):")
+            for target in gaps:
+                click.echo(f"  {target.name:<28} {target.status:<8} {target.unknown}")
+
+
+@disk_group.command(name="dashboard")
+@click.option(
+    "--corpus-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Corpus checkout to run. Found automatically when omitted.",
+)
+@click.option(
+    "--load/--no-load",
+    "do_load",
+    default=True,
+    help="Measure and store a fresh reading first. On by default.",
+)
+@click.option(
+    "--no-tui",
+    is_flag=True,
+    default=False,
+    help="Print the delta instead of launching the dashboard.",
+)
+def disk_dashboard(
+    corpus_dir: Optional[Path], do_load: bool, no_tui: bool
+) -> None:
+    """Get the latest and open the dashboard, in one command.
+
+    \b
+    Measure -> store -> launch, on the Disk tab:
+        dossier disk dashboard
+        dossier disk dashboard --no-load       # open on what is stored
+        dossier disk dashboard --no-tui        # print instead
+
+    Unlike the governance dashboard this reads no network and writes into no
+    repository: a reading is a filesystem walk, and it lands in ~/.dossier.
+    """
+    ctx = click.get_current_context()
+
+    if do_load:
+        ctx.invoke(disk_load, corpus_dir=corpus_dir, measure=True)
+        click.echo()
+
+    if no_tui:
+        ctx.invoke(disk_delta)
+        return
+
+    from dossier.tui import DossierApp
+
+    DossierApp(initial_tab="tab-disk").run()
+
+
 @disk_group.command(name="cookbook")
 @click.option(
     "--markdown",
