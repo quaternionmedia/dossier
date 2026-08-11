@@ -23,6 +23,13 @@ dossier disk cookbook
 | `ci/disk_reclaim.py` | the corpus | acts, and only on what the policy names |
 | `~/.dossier/disk-status.json` | this machine, never committed | the measurement, with its own age and reading instructions inside it |
 | `disk_snapshot` / `disk_volume` / `disk_target` | dossier's store, migration `006_disk` | one row per reading, appended, so there is something to compare against |
+| `disk_reclaim` | dossier's store, migration `007_reclaim` | one row per run, holding the two readings it sits between |
+
+**A reclaim is a delta.** It is a reading, an action, and another reading — so what
+it did is the same shape as any change that merely happened, carries the same
+refusals, and composes with the rest. There is no second vocabulary for “what the
+cleanup achieved”, because a second vocabulary would need its own unknown handling
+and would get it wrong somewhere.
 
 The tables are **append-only**, which is the one place this domain departs from
 governance. A governance load replaces what it read, because the only interesting
@@ -109,6 +116,36 @@ dossier disk reclaim
 Always run this first. It is a dry run: it prints what it would remove and removes nothing.
 
 > Add --apply when the plan looks right. The default tier is `refetched` -- caches the owning tool downloads again by itself.
+
+### Reclaim from the dashboard, and watch it come back
+
+```sh
+dossier disk dashboard   then  x  then  X
+```
+
+On the Disk tab. `x` plans and removes nothing; `X` carries out the plan and re-measures, so the table redraws with what returned.
+
+> Two keys, not one with a confirmation dialog -- a dialog is one stray Enter from deleting a hundred gigabytes, and it is the part people learn to dismiss. `X` refuses without a plan from this session, and the dashboard reclaims at the refetched tier only. Widening belongs where somebody types the word.
+
+### What did I actually get back?
+
+```sh
+dossier disk reclaims
+```
+
+After any reclaim. Every run is stored as the pair of readings it sits between, so what it did is measured rather than claimed.
+
+> Two columns that are not the same number: `claimed` is what the reclaimer removed, `freed` is what the volume gave back. They diverge when something else was writing, or when the space was freed inside a container disk that does not shrink -- Docker's prune is exactly this, and the gap is the whole point of storing both.
+
+### What did the whole cleanup session free?
+
+```sh
+dossier disk reclaims --compose
+```
+
+After several runs. Chains them into one delta over the whole span.
+
+> Composed from the outermost readings, never by adding the runs up: an unknown is not zero, and a sum would launder a run nobody measured into a confident total. If the runs do not meet end to end it says so -- the figures stay right, but the span then holds changes no run caused.
 
 ### Free one specific thing
 

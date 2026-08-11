@@ -854,16 +854,55 @@ class DiskDeltaOut(BaseModel):
     snapshot, or none -- and `reason` says so. That is not an error, so it is
     not a 404: a machine measured once is a normal machine, and returning 200
     with an explicit reason lets a client render "not yet" rather than "broken".
+
+    `source` is `observed`, `reclaim` or `composed`. A change somebody caused
+    and one that merely happened are the same shape on purpose, so a client
+    that wants to tell them apart reads this field rather than a second
+    endpoint with a second set of rules.
+
+    `contiguous` is false when a composed span has a gap in it. The figures
+    stay correct -- they are recomputed from the endpoints -- but the span then
+    holds changes no link caused, so attribution does not survive it.
     """
 
     available: bool
     reason: Optional[str] = None
     machine: Optional[str] = None
     hours: Optional[float] = None
+    source: str = "observed"
+    reclaim_id: Optional[int] = None
+    contiguous: bool = True
     older_generated_at: Optional[datetime] = None
     newer_generated_at: Optional[datetime] = None
     volumes: list[DiskVolumeChangeOut] = []
     targets: list[DiskTargetChangeOut] = []
+
+
+class DiskReclaimOut(BaseModel):
+    """One reclaim run.
+
+    `claimed_bytes` and `freed_bytes` are different facts and both are served.
+    The first is what the reclaimer removed; the second is what the volume gave
+    back. They diverge for ordinary reasons, and a client shown only the first
+    would report space that is still gone.
+    """
+
+    id: int
+    machine: str
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+    allow: str
+    targets: Optional[str] = None
+    applied: bool
+    outcome: str
+    before_snapshot_id: Optional[int] = None
+    after_snapshot_id: Optional[int] = None
+    claimed_bytes: Optional[int] = None
+    claimed_paths: Optional[int] = None
+    freed_bytes: Optional[int] = None
+    freed_unknown: Optional[str] = None
+    exit_status: Optional[int] = None
+    reason: Optional[str] = None
 
 
 def _snapshot_out(row) -> DiskSnapshotOut:
@@ -980,11 +1019,18 @@ def get_disk_delta(
         else:
             delta = disk_store.latest_delta(session, machine=machine)
 
-        return DiskDeltaOut(
+        return _delta_out(delta)
+
+
+def _delta_out(delta) -> DiskDeltaOut:
+    return DiskDeltaOut(
             available=delta.available,
             reason=delta.reason,
             machine=delta.machine,
             hours=delta.hours,
+            source=delta.source,
+            reclaim_id=delta.reclaim_id,
+            contiguous=delta.contiguous,
             older_generated_at=delta.older.generated_at if delta.older else None,
             newer_generated_at=delta.newer.generated_at if delta.newer else None,
             volumes=[
@@ -1012,4 +1058,72 @@ def get_disk_delta(
                 for t in delta.targets
             ],
         )
+
+
+@app.get("/disk/reclaims", response_model=list[DiskReclaimOut])
+def list_disk_reclaims(
+    machine: Optional[str] = Query(None, description="Defaults to this machine"),
+    limit: int = Query(20, ge=1, le=200, description="How many, newest first"),
+) -> list[DiskReclaimOut]:
+    """Reclaim runs recorded on this machine, newest first.
+
+    Dry runs are included and are marked `applied: false` with
+    `outcome: planned`. A plan somebody considered and did not carry out is a
+    fact worth keeping -- it is the row a later reader wants when the disk
+    filled again and nobody remembers whether it was ever run.
+    """
+    from dossier import disk_store
+
+    with get_session() as session:
+        rows = disk_store.reclaims(
+            session, machine=machine or disk_store.this_machine(), limit=limit
+        )
+        return [DiskReclaimOut(**row.model_dump()) for row in rows]
+
+
+@app.get("/disk/reclaims/{reclaim_id}/delta", response_model=DiskDeltaOut)
+def get_disk_reclaim_delta(reclaim_id: int) -> DiskDeltaOut:
+    """What one reclaim run actually changed.
+
+    The same shape as any other delta, because it is one: a reclaim is a
+    reading, an action, and another reading. A dry run returns 200 with
+    `available: false` and a reason rather than an empty delta, because
+    "removed nothing by design" and "freed nothing" are different claims.
+    """
+    from dossier import disk_store
+    from dossier.models import DiskReclaim
+
+    with get_session() as session:
+        record = session.get(DiskReclaim, reclaim_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Reclaim run not found")
+        return _delta_out(disk_store.reclaim_delta(session, record))
+
+
+@app.get("/disk/reclaims/delta", response_model=DiskDeltaOut)
+def get_composed_reclaim_delta(
+    machine: Optional[str] = Query(None, description="Defaults to this machine"),
+    limit: int = Query(50, ge=1, le=500, description="How many runs to chain"),
+) -> DiskDeltaOut:
+    """Every applied run on this machine, composed into one delta.
+
+    Composed from the outermost readings, never by adding the runs up: an
+    unknown is not zero, so a sum would launder a run nobody measured into a
+    confident total. Check `contiguous` -- when it is false the span also holds
+    changes no run caused, and the total is right while the attribution is not.
+    """
+    from dossier import disk_store
+
+    with get_session() as session:
+        rows = [
+            row
+            for row in disk_store.reclaims(
+                session, machine=machine or disk_store.this_machine(), limit=limit
+            )
+            if row.applied
+        ]
+        composed = disk_store.compose(
+            session, *(disk_store.reclaim_delta(session, row) for row in rows)
+        )
+        return _delta_out(composed)
 

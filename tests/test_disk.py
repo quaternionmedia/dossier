@@ -370,10 +370,20 @@ def test_the_cookbook_command_prints_the_recipes(runner: CliRunner) -> None:
 
 
 def test_the_cookbook_command_regenerates_the_committed_page(runner: CliRunner) -> None:
-    """The command named in the drift message actually produces the page."""
+    """The command named in the drift message actually produces the page.
+
+    Compares **stdout**, not `result.output`, which merges stderr in. The page
+    is what a `> docs/disk.md` redirect captures, so stdout is the stream under
+    test; diagnostics on stderr are correct and must not fail this. Asserting
+    against the merged stream made this red as soon as a note was added to the
+    group callback, while the redirect it describes was still producing a
+    clean page.
+    """
     result = runner.invoke(cli, ["disk", "cookbook", "--markdown"])
     assert result.exit_code == 0
-    assert result.output == disk.cookbook_markdown()
+    assert result.stdout == disk.cookbook_markdown()
+    # And the page itself never carries a diagnostic, whatever else is emitted.
+    assert "note:" not in result.stdout
 
 
 def test_a_corpus_without_the_tooling_exits_and_explains(

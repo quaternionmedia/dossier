@@ -18,6 +18,7 @@ from alembic import context
 # `op.drop_table('governance_repository')` against a table holding the org's
 # governance history.
 from dossier.models import (
+    DiskReclaim,
     DiskSnapshot,
     DiskTarget,
     DiskVolume,

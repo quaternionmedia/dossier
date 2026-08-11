@@ -56,7 +56,7 @@ from typing import Optional
 
 from sqlmodel import Session, select
 
-from .models.disk import DiskSnapshot, DiskTarget, DiskVolume
+from .models.disk import DiskReclaim, DiskSnapshot, DiskTarget, DiskVolume
 
 #: Snapshots kept per machine by default. One load per working day is roughly
 #: five months of history, which is longer than any question anybody has asked
@@ -337,7 +337,14 @@ class VolumeChange:
 
 @dataclass
 class Delta:
-    """What changed between two readings of one machine."""
+    """What changed between two readings of one machine.
+
+    One type for two things that are the same thing. A change somebody watched
+    happen and a change somebody caused are both a pair of readings with an
+    interval between them, so a reclaim produces one of these and composes
+    with the rest. A second vocabulary for "what the cleanup did" would need
+    its own unknown handling, and would get it wrong somewhere.
+    """
 
     machine: Optional[str] = None
     older: Optional[DiskSnapshot] = None
@@ -346,6 +353,19 @@ class Delta:
     volumes: list[VolumeChange] = field(default_factory=list)
     targets: list[TargetChange] = field(default_factory=list)
     reason: Optional[str] = None
+
+    #: What produced this: `observed` for two readings nobody acted between,
+    #: `reclaim` for a pair a reclaim run sits inside, `composed` for a chain.
+    source: str = "observed"
+    reclaim_id: Optional[int] = None
+
+    #: False when a composed chain has a gap in it. The figures stay correct --
+    #: they are recomputed from the two endpoints -- but they then include
+    #: changes that happened in the gap, which no link in the chain caused.
+    #: Attribution and arithmetic are different claims, and only one of them
+    #: survives a gap.
+    contiguous: bool = True
+    parts: list["Delta"] = field(default_factory=list)
 
     @property
     def available(self) -> bool:
@@ -476,6 +496,124 @@ def delta_between(
         volumes=volumes,
         targets=targets,
     )
+
+
+def compose(session: Session, *deltas: Delta) -> Delta:
+    """Chain deltas end to end, into one delta over the whole span.
+
+    Recomputed from the two outermost snapshots rather than by adding the
+    parts up. Summing would be wrong wherever a link is unknown: an unknown
+    is not zero, so `unknown + 300` is not `300`, and a chain that added them
+    would launder a fact nobody established into a confident total. Reading
+    the endpoints asks the same question of the same store and gets an answer
+    with the same refusals attached.
+
+    A gap between two links does not make the result wrong, but it does make
+    it unattributable -- the span then contains changes no link caused -- so
+    `contiguous` is False and every view says so. Refusing outright would be
+    worse: "what did this cleanup session do" is a fair question even when
+    somebody took a reading in the middle.
+    """
+    usable = [d for d in deltas if d.available and d.older and d.newer]
+    if not usable:
+        return Delta(
+            source="composed",
+            reason="nothing to compose: no link carried two readings",
+        )
+
+    machines = {d.machine for d in usable}
+    if len(machines) > 1:
+        return Delta(
+            source="composed",
+            reason=(
+                "these deltas describe different machines "
+                f"({', '.join(sorted(str(m) for m in machines))}); chaining "
+                "them would describe a machine that does not exist"
+            ),
+        )
+
+    ordered = sorted(usable, key=lambda d: d.older.generated_at)
+    contiguous = all(
+        first.newer.id == second.older.id
+        for first, second in zip(ordered, ordered[1:])
+    )
+
+    combined = delta_between(session, ordered[0].older, ordered[-1].newer)
+    combined.source = "composed"
+    combined.contiguous = contiguous
+    combined.parts = ordered
+    return combined
+
+
+def freed_between(
+    session: Session, before_id: int, after_id: int
+) -> Optional[int]:
+    """How much free space came back across the machine's volumes, or None.
+
+    Summed over volumes rather than taken from one, because a reclaim frees
+    space wherever its targets happen to live and the operator asked about the
+    machine. Positive means space returned.
+
+    None whenever any volume present in both readings could not be read in
+    both. The sum would then be a floor wearing the clothes of a total, and a
+    floor labelled `freed` is the number somebody quotes back later.
+    """
+    before = {v.path: v for v in volumes_of(session, before_id)}
+    after = {v.path: v for v in volumes_of(session, after_id)}
+    shared = set(before) & set(after)
+    if not shared:
+        return None
+    if any(
+        before[path].free_bytes is None or after[path].free_bytes is None
+        for path in shared
+    ):
+        return None
+    return sum(after[path].free_bytes - before[path].free_bytes for path in shared)
+
+
+def reclaims(
+    session: Session, machine: Optional[str] = None, limit: int = 20
+) -> list[DiskReclaim]:
+    """Reclaim runs, newest first."""
+    statement = select(DiskReclaim).order_by(DiskReclaim.started_at.desc())
+    if machine is not None:
+        statement = statement.where(DiskReclaim.machine == machine)
+    return list(session.exec(statement.limit(limit)).all())
+
+
+def reclaim_delta(session: Session, record: DiskReclaim) -> Delta:
+    """The change a reclaim run caused, as a delta like any other.
+
+    A run with no second reading is not a run that freed nothing. A dry run
+    removed nothing by design; a run that died removed something nobody
+    measured. Both are reported as unavailable with the reason, because zero
+    is a claim and neither of them established it.
+    """
+    if record.before_snapshot_id is None or record.after_snapshot_id is None:
+        return Delta(
+            machine=record.machine,
+            source="reclaim",
+            reclaim_id=record.id,
+            reason=(
+                "a dry run: nothing was removed, so there is no second reading"
+                if not record.applied
+                else "this run has no second reading, so what it freed was "
+                "never measured"
+            ),
+        )
+    before = session.get(DiskSnapshot, record.before_snapshot_id)
+    after = session.get(DiskSnapshot, record.after_snapshot_id)
+    if before is None or after is None:
+        return Delta(
+            machine=record.machine,
+            source="reclaim",
+            reclaim_id=record.id,
+            reason="one of this run's readings has been pruned from the store",
+        )
+    built = delta_between(session, before, after)
+    built.source = "reclaim"
+    built.reclaim_id = record.id
+    return built
 
 
 def latest_delta(session: Session, machine: Optional[str] = None) -> Delta:

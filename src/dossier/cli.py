@@ -3440,18 +3440,72 @@ def disk_reclaim(
     against the filesystem now.
     """
     from dossier import disk as disk_tools
+    from dossier import disk_store
 
     root = _disk_corpus(corpus_dir)
-    outcome = disk_tools.reclaim(
-        root,
-        allow=allow,
-        apply=apply_,
-        targets=target,
-        until_free=until_free,
-        search_roots=search_root,
-    )
-    if outcome.stdout:
-        click.echo(outcome.stdout)
+
+    with get_session() as session:
+        record, outcome = disk_tools.reclaim_and_record(
+            session,
+            root,
+            allow=allow,
+            apply=apply_,
+            targets=target,
+            until_free=until_free,
+            search_roots=search_root,
+        )
+        if outcome.stdout:
+            click.echo(outcome.stdout)
+
+        click.echo()
+        click.echo(f"recorded run {record.id} [{record.outcome}]")
+
+        # Claimed and freed are printed together, always, and the gap between
+        # them is named rather than left for the reader to subtract. They
+        # diverge for ordinary reasons -- a concurrent write, or space freed
+        # inside a container disk that does not shrink -- and printing only the
+        # first would let this tool claim space that never came back.
+        click.echo(f"  claimed  {_size(record.claimed_bytes)}   (what the reclaimer removed)")
+        if record.applied:
+            if record.freed_bytes is None:
+                click.echo(
+                    f"  freed    unknown  ({record.freed_unknown or 'not measured'})"
+                )
+            elif record.freed_bytes < 0:
+                # Not "gave back -37KB". The volume finished the run with less
+                # space than it started, because something else was writing
+                # throughout -- which is a true and useful thing to say, and
+                # a negative number wearing the word `freed` is not.
+                click.echo(
+                    f"  freed    none — the volume ended "
+                    f"{_size(abs(record.freed_bytes))} smaller than it started."
+                    "\n           Something else was writing during the run; "
+                    "what this removed still went."
+                )
+            else:
+                click.echo(
+                    f"  freed    {_size(record.freed_bytes)}   "
+                    "(what the volume gave back)"
+                )
+                gap = (record.claimed_bytes or 0) - record.freed_bytes
+                if record.claimed_bytes and abs(gap) > 10**9:
+                    click.echo(
+                        f"  gap      {_size(gap)} — the two disagree. Space freed "
+                        "inside a container disk does not\n"
+                        "           shrink the host file, and anything else "
+                        "writing at the time counts too."
+                    )
+            delta = disk_store.reclaim_delta(session, record)
+            if delta.available:
+                shrank = [t for t in delta.targets if t.status == "shrank"]
+                for target_change in sorted(shrank, key=lambda t: t.change or 0)[:8]:
+                    click.echo(
+                        f"    {_fit(target_change.name, 26):<26} "
+                        f"{_change(target_change.change)}"
+                    )
+        else:
+            click.echo("  freed    nothing — this was a dry run")
+
     if not outcome.ok:
         click.echo(f"FAIL    {outcome.summary}", err=True)
         raise SystemExit(outcome.status or 1)
@@ -3660,6 +3714,107 @@ def disk_delta(machine: Optional[str], limit: int) -> None:
             click.echo(f"No change could be established for {len(gaps)} target(s):")
             for target in gaps:
                 click.echo(f"  {target.name:<28} {target.status:<8} {target.unknown}")
+
+
+@disk_group.command(name="reclaims")
+@click.option(
+    "--machine", default=None, help="Whose history. Defaults to this machine."
+)
+@click.option("--limit", type=int, default=15, help="How many, newest first.")
+@click.option(
+    "--compose",
+    "compose_all",
+    is_flag=True,
+    default=False,
+    help="Chain the listed runs into one delta over the whole span.",
+)
+def disk_reclaims(machine: Optional[str], limit: int, compose_all: bool) -> None:
+    """What has been reclaimed here, and what actually came back.
+
+    \b
+        dossier disk reclaims
+        dossier disk reclaims --compose      # the whole session as one delta
+
+    Every run is stored as the pair of readings it sits between, so what it
+    did is the same kind of fact as any other change and composes with them.
+
+    \b
+    Two columns that are not the same number, deliberately:
+        claimed   what the reclaimer removed
+        freed     what the volume gave back
+    They diverge for ordinary reasons -- something else writing at the time,
+    or space freed inside a container disk that does not shrink -- and a tool
+    that printed only the first would claim space that never returned.
+    """
+    from dossier import disk_store
+
+    with get_session() as session:
+        rows = disk_store.reclaims(
+            session, machine=machine or disk_store.this_machine(), limit=limit
+        )
+        if not rows:
+            click.echo("No reclaim run has been recorded on this machine.")
+            click.echo(
+                "That is not a claim that nothing was ever cleaned up -- it is "
+                "the absence of a record.\nRun `dossier disk reclaim --apply`."
+            )
+            return
+
+        header = (
+            f"{'#':>4}  {'when':<20} {'tier':<12} {'outcome':<9} "
+            f"{'claimed':>10} {'freed':>10}"
+        )
+        click.echo(header)
+        click.echo("-" * len(header))
+        for row in rows:
+            freed = (
+                "dry run" if not row.applied
+                else "unknown" if row.freed_bytes is None
+                else _size(row.freed_bytes)
+            )
+            click.echo(
+                f"{row.id:>4}  {row.started_at:%Y-%m-%d %H:%M:%S}  "
+                f"{row.allow:<12} {row.outcome:<9} "
+                f"{_size(row.claimed_bytes):>10} {freed:>10}"
+            )
+            if row.targets:
+                click.echo(f"      targets: {row.targets}")
+
+        if not compose_all:
+            return
+
+        # Composed from the endpoints, never by adding the rows up: an unknown
+        # is not zero, so a sum would launder a run nobody measured into a
+        # confident total.
+        deltas = [disk_store.reclaim_delta(session, row) for row in rows]
+        combined = disk_store.compose(session, *deltas)
+        click.echo()
+        if not combined.available:
+            click.echo(f"composed: {combined.reason}")
+            return
+        click.echo(
+            f"composed over {combined.hours:.0f}h, "
+            f"{combined.older.generated_at} -> {combined.newer.generated_at}"
+        )
+        if not combined.contiguous:
+            # Stated as the ordinary case it is, not as an anomaly. Each run
+            # takes its own reading before it starts, so consecutive runs never
+            # meet exactly -- the gap is the time between them. A warning that
+            # fires every time is one people stop reading, and the fact worth
+            # carrying is what the figure includes, not that something is off.
+            click.echo(
+                "  The runs are separated by the time between them, so this "
+                "span also holds\n  ordinary drift. The total is what the "
+                "volume did; not all of it is what the runs did."
+            )
+        for volume in combined.volumes:
+            if volume.unknown:
+                click.echo(f"  {volume.path:<10} unknown — {volume.unknown}")
+                continue
+            click.echo(
+                f"  {volume.path:<10} free {_size(volume.after_free)}  "
+                f"{_change(volume.change)}"
+            )
 
 
 @disk_group.command(name="dashboard")

@@ -98,6 +98,61 @@ class DiskSnapshot(SQLModel, table=True):
     reclaimable_destructive: Optional[int] = None
 
 
+class DiskReclaim(SQLModel, table=True):
+    """One reclaim run, recorded as the pair of readings it sits between.
+
+    A reclaim is not a separate kind of event from a measurement -- it is a
+    measurement, an action, and another measurement. Storing it as the two
+    snapshot ids means the change it caused is computed by exactly the same
+    arithmetic as any other change, carries the same refusals, and composes
+    with observed deltas rather than needing a second vocabulary.
+
+    **`claimed_bytes` and `freed_bytes` are different facts, and both are
+    kept.** The reclaimer reports what it removed; the volume reports what came
+    back. They diverge for ordinary reasons -- something else was writing at
+    the time, or the space was freed inside a container disk that does not
+    shrink -- and the policy already says so in prose about Docker's VHDX.
+    Recording only the first would let the tool claim 23GB it did not give
+    back; recording only the second would blame it for a concurrent download.
+    The gap between them is the interesting number, and it is only visible
+    because both are stored.
+    """
+
+    __tablename__ = "disk_reclaim"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    machine: str = Field(index=True)
+
+    started_at: datetime = Field(default_factory=utcnow, index=True)
+    finished_at: Optional[datetime] = None
+
+    # What was asked for. Kept verbatim so a row explains itself without the
+    # shell history that produced it.
+    allow: str = "refetched"
+    targets: Optional[str] = None  # comma-joined; null means every permitted
+    applied: bool = False
+
+    # The pair. `after_snapshot_id` is null for a dry run and for a run that
+    # died before its second reading -- which is not the same as a run that
+    # freed nothing, so the delta reports it as unavailable rather than zero.
+    before_snapshot_id: Optional[int] = Field(default=None, foreign_key="disk_snapshot.id")
+    after_snapshot_id: Optional[int] = Field(default=None, foreign_key="disk_snapshot.id")
+
+    claimed_bytes: Optional[int] = None
+    claimed_paths: Optional[int] = None
+    freed_bytes: Optional[int] = None
+    freed_unknown: Optional[str] = None
+
+    # `outcome` is one of: planned, applied, failed. `planned` is a dry run and
+    # is stored deliberately -- a plan that was never carried out is a fact
+    # about what somebody considered, and it is the row a later reader needs
+    # when the disk filled again and nobody remembers whether they ran it.
+    outcome: str = "planned"
+    exit_status: Optional[int] = None
+    reason: Optional[str] = None
+    output: Optional[str] = None
+
+
 class DiskVolume(SQLModel, table=True):
     """One filesystem, in one snapshot."""
 
