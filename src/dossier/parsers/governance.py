@@ -259,6 +259,11 @@ class HarnessRepository:
     slot_unknown: Optional[str] = None
     slot_open_prs: Optional[int] = None
     slot_violations: Optional[str] = None
+    release_state: Optional[str] = None
+    release_unknown: Optional[str] = None
+    release_latest: Optional[str] = None
+    release_annotated: Optional[bool] = None
+    release_unreleased_commits: Optional[int] = None
     threads: list[Thread] = dataclass_field(default_factory=list)
 
 
@@ -373,6 +378,7 @@ def load_harness(path: Path | str) -> HarnessDocument:
         name = str(entry["name"])
 
         slot_state, slot_unknown, slot_count, violations = _slots(entry)
+        release = field(entry, "release")
         missing = field(entry, "governance", "missing")
         repositories.append(
             HarnessRepository(
@@ -391,6 +397,15 @@ def load_harness(path: Path | str) -> HarnessDocument:
                 slot_unknown=slot_unknown,
                 slot_open_prs=slot_count,
                 slot_violations=violations,
+                release_state=(
+                    None if release.is_unknown else field(entry, "release", "state").or_none()
+                ),
+                release_unknown=release.unknown,
+                release_latest=field(entry, "release", "latest").or_none(),
+                release_annotated=field(entry, "release", "annotated").or_none(),
+                release_unreleased_commits=field(
+                    entry, "release", "unreleased_commits"
+                ).or_none(),
                 threads=_threads(name, entry.get("threads")),
             )
         )

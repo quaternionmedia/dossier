@@ -2983,7 +2983,7 @@ def governance_show() -> None:
 
     header = (
         f"{'REPOSITORY':<25} {'PHASE':<8} {'CORPUS':<12} {'SEED':<7} "
-        f"{'SLOT':<6} {'IN DOSSIER':<14} EVIDENCE"
+        f"{'SLOT':<6} {'RELEASE':<22} {'IN DOSSIER':<14} EVIDENCE"
     )
     click.echo(header)
     click.echo("-" * len(header))
@@ -3001,6 +3001,7 @@ def governance_show() -> None:
             f"{gov.drift_text(row):<12} "
             f"{gov.show_pair(row.seed_drift, row.seed_drift_unknown):<7} "
             f"{gov.show_pair(row.slot_state, row.slot_unknown):<6} "
+            f"{_fit(gov.release_text(row), 22):<22} "
             f"{_fit(synced.get(row.name), 14):<14} "
             f"{evidence}"
         )
@@ -3009,6 +3010,7 @@ def governance_show() -> None:
     click.echo("! drift   - behind the corpus, seed drift, or over the slot limit")
     click.echo("phase is a claim a human entered; evidence is what has landed")
     click.echo("in dossier - the project this store holds for it, if any")
+    click.echo("release   - main is readiness; a v tag is governance passed")
 
 
 @governance_group.command(name="threads")

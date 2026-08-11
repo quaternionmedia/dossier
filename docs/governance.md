@@ -183,6 +183,7 @@ project nobody has synced is exactly the one that stays invisible.
 | CORPUS | commits behind the corpus, or `current` |
 | SEED | whether the project's `adr/` seed matches the corpus's |
 | SLOT | `ok`, `over`, or `unknown` against one-open-PR-per-contributor |
+| RELEASE | what a `v` tag asserts, beside what the default branch carries past it |
 | EVIDENCE | what has actually landed on the project's default branch |
 
 The gap between PHASE and EVIDENCE is the point of putting them side by side.
@@ -201,6 +202,24 @@ Stages are `local`, `pushed`, `draft`, `ready` — **observable states, not
 progress**. Nothing here estimates completion: the corpus has no definition of
 done a tool could read, and a percentage would be the most confidently wrong
 thing this view could print.
+
+### `main` is readiness; a `v` tag is governance
+
+Merging asserts the work is ready to build on, and nothing more. A `v` tag
+asserts what the version-tags record requires: a human reviewed it, a human
+manually tested it against its real runtime, and its automated gate passed and
+is deterministic. The RELEASE column is the gap between them.
+
+| Reads | Means |
+|---|---|
+| `never tagged` | no `v` tag has ever existed; nothing has ever been asserted |
+| `v0.2.0` | tagged, annotated, and the branch carries nothing beyond it |
+| `v0.2.0 +37` | 37 commits of readiness waiting on governance |
+| `v0.0.1 lightweight` | the tag carries no annotation, so it names neither the reviewer nor the manual test — a claim with nothing behind it |
+| `unknown` | the tags could not be read, with the reason kept |
+
+`never tagged` and a bare version both have nothing outstanding and mean
+opposite things, so one is never rendered as the other.
 
 ### Three states that are deliberately not blank
 
