@@ -197,6 +197,36 @@ renderer may not run a command. `tests/test_governance.py` asserts the word
 `subprocess` appears in neither the parser, the read model, nor the
 presentation module.
 
+## Disk commands
+
+```sh
+uv run dossier disk check                 # is anything under its floor? writes nothing
+uv run dossier disk status                # what is eating the disk, largest first
+uv run dossier disk reclaim               # what could be freed -- a dry run
+uv run dossier disk cookbook              # the recipes, at the terminal
+```
+
+The same three rules as the governance view bind anything added here, for the
+same reason: **dossier measures no disk fact and authorises no deletion.** Every
+figure comes from the corpus's `ci/disk_status.py` and every target from its
+`ci/disk-policy.yaml` — a reviewed file, not a script. A figure this group wants
+and the document lacks is a change to the corpus generator.
+
+Two properties are worth not breaking, and `tests/test_disk.py` asserts both:
+
+- **The measurement is never committed, in either repository.** It describes one
+  machine at one moment. `dossier.disk.inside_a_repository` refuses a
+  destination under any `.git`, because the corpus guards its own repo and
+  dossier is a second one — a guard that stopped at the boundary would let the
+  document land in whichever repo was not checking.
+- **A dry run is the default on both sides.** `reclaim` passes `--apply` only
+  when asked, and nothing in dossier's configuration changes that. The
+  duplication of the corpus's own default is deliberate.
+
+`docs/disk.md` is **generated** from `dossier.disk.COOKBOOK`; regenerate it with
+`dossier disk cookbook --write docs/disk.md` (not a shell redirect — PowerShell
+writes a BOM). Hand-editing the page fails the suite.
+
 ## Development commands
 
 - `uv run dossier` — run CLI
