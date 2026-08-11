@@ -1,6 +1,7 @@
 """Data models for Dossier."""
 
 from .disk import (
+    DiskReclaim,
     DiskSnapshot,
     DiskTarget,
     DiskVolume,
@@ -28,6 +29,7 @@ from .schemas import (
 )
 
 __all__ = [
+    "DiskReclaim",
     "DiskSnapshot",
     "DiskTarget",
     "DiskVolume",

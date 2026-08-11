@@ -206,8 +206,15 @@ uv run dossier disk load                  # measure, and store it as a snapshot
 uv run dossier disk delta                 # what grew since the reading before
 uv run dossier disk dashboard             # load, then open the TUI on the Disk tab
 uv run dossier disk reclaim               # what could be freed -- a dry run
+uv run dossier disk reclaims --compose    # what past runs actually gave back
 uv run dossier disk cookbook              # the recipes, at the terminal
 ```
+
+On the Disk tab, **`x` plans a reclaim and `X` applies the plan** — two keys
+rather than one with a confirmation dialog, because a dialog is one stray Enter
+from deleting a hundred gigabytes and is the part people learn to dismiss. `X`
+refuses without a plan from this session, and the dashboard reclaims at the
+`refetched` tier only; widening belongs where somebody types the word.
 
 The store side arrives in migration `006_disk` (`disk_snapshot`, `disk_volume`,
 `disk_target`) and is served at `/disk/snapshots` and `/disk/delta`. On a
@@ -229,6 +236,20 @@ an unmeasured end, a target absent from the earlier snapshot (`new`), one
 absent from the later (`gone`), and two snapshots describing different
 machines. That last one is not hypothetical: docker went from unknown to
 23.6GB between two real readings 70 seconds apart.
+
+**A reclaim is a delta.** `007_reclaim` stores each run as the pair of readings
+it sits between, so what it did is computed by the same arithmetic as any
+observed change and composes with it — there is no second vocabulary for "what
+the cleanup achieved", which would need its own unknown handling and would get
+it wrong somewhere. Composition recomputes from the outermost readings rather
+than summing the parts, because an unknown is not zero.
+
+**`claimed` and `freed` are different facts and both are stored.** The
+reclaimer reports what it removed; the volume reports what came back. They
+diverge for ordinary reasons — something else writing, or space freed inside a
+container disk that does not shrink — and a run whose volume ended *smaller* is
+reported as that rather than as a negative `freed`. Both have happened here on
+real runs.
 
 The same three rules as the governance view bind anything added here, for the
 same reason: **dossier measures no disk fact and authorises no deletion.** Every

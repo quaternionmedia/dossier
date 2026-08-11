@@ -780,6 +780,13 @@ class DossierApp(App):
         Binding("escape", "clear_selection", "Clear Selection", show=False),
         Binding("tab", "focus_next", "Next", show=False),
         Binding("shift+tab", "focus_previous", "Previous", show=False),
+        # Reclaiming from the dashboard, in two keys that are not the same key.
+        # `x` only ever plans; `X` only works once a plan has been seen in this
+        # session, and both do nothing off the Disk tab. A single key with a
+        # confirmation dialog would be one stray Enter from deleting 100GB, and
+        # the dialog is the part people learn to dismiss.
+        Binding("x", "disk_plan", "Plan Reclaim", show=False),
+        Binding("X", "disk_apply", "Apply Reclaim", show=False),
     ]
     
     selected_project: reactive[Optional[Project]] = reactive(None)
@@ -2678,6 +2685,12 @@ class DossierApp(App):
             volumes = disk_store.volumes_of(session, latest.id)
             targets = disk_store.targets_of(session, latest.id)
             delta = disk_store.latest_delta(session, machine=latest.machine)
+            runs = disk_store.reclaims(session, machine=latest.machine, limit=20)
+            applied = [r for r in runs if r.applied]
+            session_delta = disk_store.compose(
+                session,
+                *(disk_store.reclaim_delta(session, r) for r in applied),
+            )
 
         age_hours = (utcnow().replace(tzinfo=None) - latest.generated_at).total_seconds() / 3600
         age_label.update(
@@ -2717,17 +2730,50 @@ class DossierApp(App):
             )
 
         if not delta.available:
-            delta_label.update(
+            change_line = (
                 f"[bold]No comparison available:[/] {delta.reason}.\n"
                 "That is not a claim that nothing changed -- it is the absence "
                 "of a second measurement."
             )
         else:
-            delta_label.update(
+            change_line = (
                 f"Change over [b]{delta.hours:.0f}h[/], against the reading of "
                 f"{delta.older.generated_at}. "
                 "[dim]Volume change is FREE space, so negative is filling up.[/]"
             )
+
+        # What this machine's reclaims add up to, composed from their endpoints
+        # rather than summed -- an unknown run is not a zero one. Shown beside
+        # the observed change so the reader can tell what they did from what
+        # merely happened.
+        if applied:
+            if session_delta.available:
+                recovered = sum(
+                    v.change for v in session_delta.volumes if v.change is not None
+                )
+                caveat = (
+                    "" if session_delta.contiguous
+                    else " [dim](spans the time between them too, so not all "
+                    "of it is what the runs did)[/]"
+                )
+                reclaimed = (
+                    f"[b]{len(applied)}[/] reclaim run(s) recorded; the volumes "
+                    f"gave back [b]{self._disk_size(recovered)}[/] across them"
+                    f"{caveat}"
+                )
+            else:
+                reclaimed = (
+                    f"[b]{len(applied)}[/] reclaim run(s) recorded, but what "
+                    f"they freed could not be composed: {session_delta.reason}"
+                )
+        else:
+            reclaimed = (
+                "[dim]No reclaim has been applied here.[/] "
+                "[b]x[/] plans one, [b]X[/] applies the plan "
+                f"([dim]{self.DISK_TIER} tier only; widen with the CLI[/])"
+            )
+
+        delta_label.update(f"{change_line}\n{reclaimed}")
 
         target_change = {t.name: t for t in delta.targets} if delta.available else {}
         # Largest first, and an unmeasured target sorts to the bottom rather
@@ -2759,6 +2805,157 @@ class DossierApp(App):
                 detail,
                 key=f"disk-target-{target.name}",
             )
+
+    # The tier the dashboard is allowed to reclaim at, and the only one. Every
+    # more expensive tier costs a rebuild or is irreversible, and widening it
+    # belongs where somebody types the word: `dossier disk reclaim --allow`.
+    # A dashboard that could empty the recycle bin on a keypress is a dashboard
+    # nobody should leave open.
+    DISK_TIER = "refetched"
+
+    def _disk_corpus_root(self):
+        """Which corpus checkout the reclaim runs in.
+
+        Its own method so a test can point it somewhere harmless. The
+        alternative is a suite that exercises the apply path against whatever
+        corpus the developer happens to have beside them, on their real disk,
+        deleting their real caches -- which is not a test anybody runs twice.
+        """
+        from dossier import governance as gov
+
+        override = getattr(self, "_disk_corpus_override", None)
+        if override is not None:
+            return override
+        return gov.resolve_corpus_dir(None)[0]
+
+    def _on_disk_tab(self) -> bool:
+        try:
+            return self.query_one("#project-tabs", TabbedContent).active == "tab-disk"
+        except Exception:
+            return False
+
+    def action_disk_plan(self) -> None:
+        """Dry-run a reclaim and show what it would remove. Deletes nothing."""
+        if not self._on_disk_tab():
+            return
+        self._reclaim_worker(apply=False)
+
+    def action_disk_apply(self) -> None:
+        """Carry out the plan that was just shown, and re-measure.
+
+        Refuses without a plan from this session. The point is not that
+        planning is a formality to get past -- it is that the numbers move,
+        and applying a plan nobody has seen is applying a plan against a disk
+        that may have changed since.
+        """
+        if not self._on_disk_tab():
+            return
+        if not getattr(self, "_disk_planned", None):
+            self.notify(
+                "Press x first to see what would be removed. Nothing is "
+                "applied that has not been planned in this session.",
+                severity="warning",
+                timeout=8,
+            )
+            return
+        self._reclaim_worker(apply=True)
+
+    @work(thread=True, exclusive=True, group="disk-reclaim")
+    def _reclaim_worker(self, apply: bool) -> None:
+        """Plan or apply, off the event loop, then redraw from the store.
+
+        Threaded because a reclaim walks a hundred gigabytes and an apply
+        deletes it: on the event loop the whole dashboard would sit frozen for
+        minutes, which reads as a crash and invites the impatient second
+        keypress this design exists to prevent.
+        """
+        from dossier import disk as disk_tools
+
+        root = self._disk_corpus_root()
+        blocked = disk_tools.can_measure(root)
+        if blocked:
+            self.call_from_thread(
+                self.notify,
+                f"Cannot reclaim: {blocked}",
+                severity="error",
+                timeout=12,
+            )
+            return
+
+        self.call_from_thread(
+            self.notify,
+            ("Applying" if apply else "Planning")
+            + f" a {self.DISK_TIER} reclaim against {root} ...",
+            timeout=6,
+        )
+
+        try:
+            with self.session_factory() as session:
+                record, outcome = disk_tools.reclaim_and_record(
+                    session, root, allow=self.DISK_TIER, apply=apply
+                )
+                message = self._reclaim_message(session, record, outcome)
+        except Exception as error:  # noqa: BLE001 - surfaced, never swallowed
+            self.call_from_thread(
+                self.notify, f"Reclaim failed: {error}", severity="error", timeout=15
+            )
+            return
+
+        # Armed by a plan, disarmed by an apply. A plan that has been carried
+        # out is not a licence for the next one.
+        self._disk_planned = None if apply else (record.claimed_bytes or 0)
+
+        self.call_from_thread(
+            self.notify,
+            message,
+            severity="information" if outcome.ok else "error",
+            timeout=20,
+        )
+        self.call_from_thread(self._load_disk_tab)
+
+    @classmethod
+    def _reclaim_message(cls, session, record, outcome) -> str:
+        """What to tell the operator, with claimed and freed side by side.
+
+        Never claimed alone. The reclaimer reports what it removed and the
+        volume reports what came back; on a container disk that does not
+        shrink those differ by the whole amount, and a dashboard that showed
+        only the first would announce 23GB that is still gone.
+        """
+        if not record.applied:
+            planned = cls._disk_size(record.claimed_bytes)
+            if not record.claimed_bytes:
+                return "Nothing to reclaim at the refetched tier."
+            return (
+                f"Plan: would remove {planned} across "
+                f"{record.claimed_paths or 0} paths. Press X to apply."
+            )
+
+        claimed = cls._disk_size(record.claimed_bytes)
+        if record.freed_bytes is None:
+            return (
+                f"Removed {claimed}. What came back could not be measured: "
+                f"{record.freed_unknown or 'no reading'}."
+            )
+        if record.freed_bytes < 0:
+            # A negative number wearing the word `freed` is worse than no
+            # number. The volume ended smaller because something else was
+            # writing; what this removed still went.
+            return (
+                f"Removed {claimed}, but the volume ended "
+                f"{cls._disk_size(abs(record.freed_bytes))} smaller than it "
+                "started — something else was writing during the run."
+            )
+        freed = cls._disk_size(record.freed_bytes)
+        gap = (record.claimed_bytes or 0) - record.freed_bytes
+        if record.claimed_bytes and abs(gap) > 10**9:
+            return (
+                f"Removed {claimed}; the volume gave back {freed}. The two "
+                "disagree by " + cls._disk_size(gap) + " — space freed inside "
+                "a container disk does not shrink the host file, and anything "
+                "else writing counted too."
+            )
+        return f"Removed {claimed}; the volume gave back {freed}."
 
     def _load_governance_tab(self) -> None:
         """Render what the corpus's generated documents say.

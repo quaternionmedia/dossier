@@ -428,6 +428,7 @@ def test_the_disk_tables_are_created_by_the_migration_chain(tmp_path: Path) -> N
     )
     assert result.returncode == 0, (result.stderr or result.stdout)[-2000:]
     assert "006_disk" in (result.stderr + result.stdout)
+    assert "007_reclaim" in (result.stderr + result.stdout)
 
     built = sqlite3.connect(tmp_path / "dossier.db")
     tables = {
@@ -435,7 +436,7 @@ def test_the_disk_tables_are_created_by_the_migration_chain(tmp_path: Path) -> N
         for row in built.execute("select name from sqlite_master where type='table'")
     }
     built.close()
-    assert {"disk_snapshot", "disk_volume", "disk_target"} <= tables
+    assert {"disk_snapshot", "disk_volume", "disk_target", "disk_reclaim"} <= tables
 
 
 def test_the_migration_can_be_undone(tmp_path: Path) -> None:
@@ -458,19 +459,30 @@ def test_the_migration_can_be_undone(tmp_path: Path) -> None:
             encoding="utf-8", errors="replace",
         )
 
-    assert alembic("upgrade", "head").returncode == 0
-    down = alembic("downgrade", "-1")
-    assert down.returncode == 0, (down.stderr or down.stdout)[-2000:]
+    def disk_tables() -> set[str]:
+        built = sqlite3.connect(tmp_path / "dossier.db")
+        found = {
+            row[0]
+            for row in built.execute(
+                "select name from sqlite_master where type='table' "
+                "and name like 'disk%'"
+            )
+        }
+        built.close()
+        return found
 
-    built = sqlite3.connect(tmp_path / "dossier.db")
-    tables = {
-        row[0]
-        for row in built.execute("select name from sqlite_master where type='table'")
-    }
-    built.close()
-    assert not ({"disk_snapshot", "disk_volume", "disk_target"} & tables)
-    # And it goes back up, so the rollback is not one-way.
     assert alembic("upgrade", "head").returncode == 0
+    assert {"disk_snapshot", "disk_volume", "disk_target", "disk_reclaim"} <= disk_tables()
+
+    # Down to the revision before the disk domain existed, so both 006 and 007
+    # are exercised rather than only whichever happens to be head today.
+    down = alembic("downgrade", "005_governance")
+    assert down.returncode == 0, (down.stderr or down.stdout)[-2000:]
+    assert disk_tables() == set()
+
+    # And back up, so the rollback is not one-way.
+    assert alembic("upgrade", "head").returncode == 0
+    assert {"disk_snapshot", "disk_reclaim"} <= disk_tables()
 
 
 def test_every_table_model_is_imported_by_alembic_env() -> None:

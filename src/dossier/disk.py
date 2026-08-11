@@ -275,6 +275,138 @@ def reclaim(
     return _run(corpus_dir, TOOLS["reclaim"], args)
 
 
+def parse_plan(text: str) -> tuple[Optional[int], Optional[int]]:
+    """(bytes, paths) from the reclaimer's own summary line.
+
+    Read from its output rather than recomputed, so this number is exactly the
+    one the reclaimer stands behind. A total assembled here would be a second
+    definition of what the run did, and the two would part company the first
+    time the policy grew an entry this parser did not expect.
+
+    The line is `Removed 22 paths, 104.5GB (104500000000 bytes)`. The exact
+    count is preferred over the rounded one wherever it is present: a 5KB
+    sweep rounds to `0.0GB`, and storing that as what the run removed would
+    record a zero for a run that removed something. Older output without the
+    parenthetical still parses, at GB precision.
+    """
+    import re
+
+    match = re.search(
+        r"(?:Would remove|Removed)\s+(\d+)\s+paths?,\s+([0-9.]+)GB"
+        r"(?:\s+\((\d+)\s+bytes\))?",
+        text,
+    )
+    if not match:
+        return None, None
+    exact = match.group(3)
+    size = int(exact) if exact is not None else int(float(match.group(2)) * 10**9)
+    return size, int(match.group(1))
+
+
+def reclaim_and_record(
+    session,
+    corpus_dir: Path | str,
+    allow: str = "refetched",
+    apply: bool = False,
+    targets: Sequence[str] = (),
+    until_free: Optional[float] = None,
+    search_roots: Sequence[Path] = (),
+    keep: Optional[int] = None,
+):
+    """Read, reclaim, read again, and store the run as the pair it sits between.
+
+    The orchestration lives here rather than in `disk_store` because it runs
+    commands, and it is called from the CLI and from an explicit keypress in
+    the TUI -- never from a render. A view that measured on its way to drawing
+    would take a reading nobody asked for, and would do it every repaint.
+
+    Two readings bracket the run, and the second is taken **even when the run
+    fails**. A reclaim that errored halfway has still removed something, and a
+    record with no second reading would report that as nothing.
+
+    Returns (the stored DiskReclaim, the ToolOutcome).
+    """
+    from . import disk_store
+
+    machine = disk_store.this_machine()
+    retention = keep if keep is not None else disk_store.DEFAULT_KEEP
+
+    def read_now():
+        """Measure, then store. Both, in that order, and never just the second.
+
+        Loading without measuring would bracket the run with whatever document
+        happened to be lying around -- possibly hours old -- and every change
+        since would be attributed to this run. `freed` has to be the difference
+        the run made, which means both readings are taken for it.
+        """
+        taken = measure(corpus_dir, search_roots=search_roots)
+        if not taken.ok:
+            return disk_store.LoadOutcome(
+                False, document_path(), f"the reading failed: {taken.summary}"
+            )
+        return disk_store.load_document(session, machine=machine, keep=retention)
+
+    record = disk_store.DiskReclaim(
+        machine=machine,
+        allow=allow,
+        targets=",".join(targets) or None,
+        applied=apply,
+        outcome="planned",
+    )
+
+    before = read_now()
+    record.before_snapshot_id = before.snapshot_id
+    if not before.loaded:
+        # No first reading means no way to say what the run changed. It still
+        # runs -- freeing space is the point and the operator asked -- but the
+        # record says outright that the effect was not measured, rather than
+        # storing a zero nobody established.
+        record.freed_unknown = f"no reading before the run: {before.reason}"
+
+    outcome = reclaim(
+        corpus_dir,
+        allow=allow,
+        apply=apply,
+        targets=targets,
+        until_free=until_free,
+        search_roots=search_roots,
+    )
+    record.exit_status = outcome.status
+    record.output = (outcome.stdout or "")[-4000:]
+    record.claimed_bytes, record.claimed_paths = parse_plan(outcome.stdout or "")
+
+    if not outcome.ok:
+        record.outcome = "failed"
+        record.reason = outcome.summary
+
+    if apply:
+        after = read_now()
+        record.after_snapshot_id = after.snapshot_id
+        if not after.loaded:
+            record.freed_unknown = f"no reading after the run: {after.reason}"
+        elif before.loaded:
+            record.freed_bytes = disk_store.freed_between(
+                session, before.snapshot_id, after.snapshot_id
+            )
+            if record.freed_bytes is None:
+                record.freed_unknown = (
+                    "the volume holding this stack could not be read in both "
+                    "snapshots, so what came back was not measured"
+                )
+        if outcome.ok:
+            record.outcome = "applied"
+    elif outcome.ok:
+        record.outcome = "planned"
+
+    from .models import utcnow
+
+    record.finished_at = utcnow()
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record, outcome
+
+
 # --- the cookbook, which is one source and two surfaces --------------------
 #
 # Recipes are data. `dossier disk cookbook` prints them at the terminal, where
@@ -352,6 +484,40 @@ COOKBOOK: tuple[Recipe, ...] = (
         "remove and removes nothing.",
         note="Add --apply when the plan looks right. The default tier is "
         "`refetched` -- caches the owning tool downloads again by itself.",
+    ),
+    Recipe(
+        task="Reclaim from the dashboard, and watch it come back",
+        command="dossier disk dashboard   then  x  then  X",
+        when="On the Disk tab. `x` plans and removes nothing; `X` carries out "
+        "the plan and re-measures, so the table redraws with what returned.",
+        note="Two keys, not one with a confirmation dialog -- a dialog is one "
+        "stray Enter from deleting a hundred gigabytes, and it is the part "
+        "people learn to dismiss. `X` refuses without a plan from this "
+        "session, and the dashboard reclaims at the refetched tier only. "
+        "Widening belongs where somebody types the word.",
+    ),
+    Recipe(
+        task="What did I actually get back?",
+        command="dossier disk reclaims",
+        when="After any reclaim. Every run is stored as the pair of readings "
+        "it sits between, so what it did is measured rather than claimed.",
+        note="Two columns that are not the same number: `claimed` is what the "
+        "reclaimer removed, `freed` is what the volume gave back. They "
+        "diverge when something else was writing, or when the space was "
+        "freed inside a container disk that does not shrink -- Docker's "
+        "prune is exactly this, and the gap is the whole point of storing "
+        "both.",
+    ),
+    Recipe(
+        task="What did the whole cleanup session free?",
+        command="dossier disk reclaims --compose",
+        when="After several runs. Chains them into one delta over the whole "
+        "span.",
+        note="Composed from the outermost readings, never by adding the runs "
+        "up: an unknown is not zero, and a sum would launder a run nobody "
+        "measured into a confident total. If the runs do not meet end to end "
+        "it says so -- the figures stay right, but the span then holds "
+        "changes no run caused.",
     ),
     Recipe(
         task="Free one specific thing",
@@ -474,6 +640,18 @@ def cookbook_markdown() -> str:
         "| `disk_snapshot` / `disk_volume` / `disk_target` | dossier's store, "
         "migration `006_disk` | one row per reading, appended, so there is "
         "something to compare against |",
+        "| `disk_reclaim` | dossier's store, migration `007_reclaim` | one row "
+        "per run, holding the two readings it sits between |",
+        "",
+        "**A reclaim is a delta.** It is a reading, an action, and another "
+        "reading — so what",
+        "it did is the same shape as any change that merely happened, carries "
+        "the same",
+        "refusals, and composes with the rest. There is no second vocabulary "
+        "for “what the",
+        "cleanup achieved”, because a second vocabulary would need its own "
+        "unknown handling",
+        "and would get it wrong somewhere.",
         "",
         "The tables are **append-only**, which is the one place this domain "
         "departs from",
