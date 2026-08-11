@@ -1,6 +1,7 @@
 """Click CLI for Dossier."""
 
 import os
+import textwrap
 from pathlib import Path
 from typing import Optional
 
@@ -3184,6 +3185,337 @@ def governance_dashboard(
     from dossier.tui import DossierApp
 
     DossierApp(initial_tab="tab-governance").run()
+
+
+# =============================================================================
+# Disk Commands - keeping the workstation off the floor
+# =============================================================================
+
+
+@cli.group(name="disk")
+def disk_group() -> None:
+    """Watch and reclaim disk space, through the corpus's own tooling.
+
+    dossier measures nothing here and decides nothing. Every figure comes from
+    the corpus's ci/disk_status.py, and every deletion is authorised by
+    ci/disk-policy.yaml there -- a reviewed file, not a script.
+
+    \b
+    Examples:
+        dossier disk check        Is anything under its floor? Writes nothing.
+        dossier disk status       What is eating the disk, largest first
+        dossier disk reclaim      What could be freed -- a dry run
+        dossier disk cookbook     The recipes, where the work happens
+    """
+    _warn_if_run_outside_dossier()
+
+
+def _disk_corpus(corpus_dir: Optional[Path]) -> Path:
+    """Resolve the corpus and print the choice, or explain and exit.
+
+    Resolution is `governance.resolve_corpus_dir` unchanged -- one definition of
+    "where is the corpus", shared with the governance commands. What differs is
+    what this group needs once it gets there, so the suitability check is
+    `disk.can_measure` and its reason is printed rather than swallowed.
+    """
+    from dossier import disk as disk_tools
+    from dossier import governance as gov
+
+    root, why = gov.resolve_corpus_dir(corpus_dir)
+    click.echo(f"corpus  {root}  ({why})")
+
+    blocked = disk_tools.can_measure(root)
+    if blocked:
+        click.echo(f"\nThis checkout cannot run the disk tooling: {blocked}", err=True)
+        if corpus_dir is None:
+            click.echo(
+                "\nNothing carrying ci/ was found in the current directory, in "
+                "governance/qm, or in ../qm. A project's vendored copy is\n"
+                "pinned to a branch cut from the corpus's main, and the disk "
+                "tooling is not on main yet, so that path is empty by\n"
+                "construction rather than by accident. Point at a corpus "
+                "checkout that has it:\n"
+                "    dossier disk status --corpus-dir <corpus>",
+                err=True,
+            )
+        raise SystemExit(1)
+    return root
+
+
+@disk_group.command(name="check")
+@click.option(
+    "--corpus-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Corpus checkout to run. Found automatically when omitted: the "
+    "current directory, then governance/qm, then ../qm.",
+)
+def disk_check(corpus_dir: Optional[Path]) -> None:
+    """Is any volume under its floor? Fast, and writes nothing.
+
+    \b
+    The cheap call -- put it in front of anything that writes a lot:
+        dossier disk check && make build
+
+    \b
+    The exit status is the corpus tool's, unmodified:
+        2   a volume is critical
+        1   a volume is low, or could not be read
+        0   every volume measured is above both thresholds
+
+    A volume nobody could measure exits 1 rather than 0, because an unreadable
+    volume is not a volume with room on it.
+    """
+    from dossier import disk as disk_tools
+
+    root = _disk_corpus(corpus_dir)
+    outcome = disk_tools.check(root)
+    if outcome.stdout:
+        click.echo(outcome.stdout)
+    if not outcome.ran or outcome.status is None:
+        click.echo(f"FAIL    {outcome.summary}", err=True)
+        raise SystemExit(1)
+    raise SystemExit(outcome.status)
+
+
+@disk_group.command(name="status")
+@click.option(
+    "--corpus-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Corpus checkout to run. Found automatically when omitted.",
+)
+@click.option(
+    "--measure/--no-measure",
+    default=True,
+    help="Take a fresh measurement first. On by default; it is a filesystem "
+    "walk, not a network call. --no-measure reads the document already there.",
+)
+@click.option(
+    "--search-root",
+    type=click.Path(path_type=Path),
+    multiple=True,
+    help="Where this stack's clones live, for the sweeps that cross projects. "
+    "Repeatable. Defaults to the corpus tool's own choice.",
+)
+@click.option(
+    "--html",
+    "as_html",
+    is_flag=True,
+    default=False,
+    help="Write a self-contained page beside the document and print its path.",
+)
+def disk_status(
+    corpus_dir: Optional[Path],
+    measure: bool,
+    search_root: tuple[Path, ...],
+    as_html: bool,
+) -> None:
+    """Measure the disk and print what is eating it, largest first.
+
+    \b
+        dossier disk status
+        dossier disk status --no-measure          # read what is on disk
+        dossier disk status --html                # a page instead of a table
+
+    \b
+    The document lands in ~/.dossier/disk-status.json -- outside every
+    repository, deliberately. Free space, cache sizes and paths under a home
+    directory are one machine at one moment, so it is never committed
+    anywhere, and this command refuses a destination inside a git repository
+    rather than trusting anyone to remember.
+
+    Every figure carries its own age and the corpus's staleness budget. A
+    target that could not be measured is reported as unknown with its reason,
+    never as a target with nothing in it.
+    """
+    from dossier import disk as disk_tools
+
+    root = _disk_corpus(corpus_dir)
+    document = disk_tools.document_path()
+
+    if measure:
+        click.echo("measure walking the policy's targets ...")
+        outcome = disk_tools.measure(root, search_roots=search_root)
+        if not outcome.ok:
+            click.echo(f"FAIL    {outcome.summary}", err=True)
+            if outcome.stdout:
+                click.echo(outcome.stdout, err=True)
+            raise SystemExit(1)
+        click.echo(f"ok      {outcome.stdout or document}")
+        click.echo()
+
+    if as_html:
+        page = document.with_suffix(".html")
+        outcome = disk_tools.render(root, fmt="html", out=page)
+        if not outcome.ok:
+            click.echo(f"FAIL    {outcome.summary}", err=True)
+            raise SystemExit(1)
+        click.echo(f"page    {page}")
+        return
+
+    outcome = disk_tools.render(root, fmt="md")
+    if not outcome.ok:
+        click.echo(f"FAIL    {outcome.summary}", err=True)
+        if not measure:
+            click.echo(
+                "\nNothing has been measured on this machine yet. Drop "
+                "--no-measure to take a reading first.",
+                err=True,
+            )
+        raise SystemExit(1)
+    click.echo(outcome.stdout)
+
+
+@disk_group.command(name="reclaim")
+@click.option(
+    "--corpus-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Corpus checkout to run. Found automatically when omitted.",
+)
+@click.option(
+    "--apply",
+    "apply_",
+    is_flag=True,
+    default=False,
+    help="Actually delete. Without it nothing is removed and the plan is "
+    "printed. There is no setting that changes this default.",
+)
+@click.option(
+    "--allow",
+    type=click.Choice(("refetched", "rebuilt", "destructive")),
+    default="refetched",
+    help="The most expensive tier permitted. Permits every cheaper tier too.",
+)
+@click.option(
+    "--target",
+    multiple=True,
+    help="Run only this policy entry, by name. Repeatable. Names come from "
+    "`dossier disk status`.",
+)
+@click.option(
+    "--until-free",
+    type=float,
+    metavar="GB",
+    help="Stop once the volume has this many GB free, rather than clearing "
+    "every permitted target.",
+)
+@click.option(
+    "--search-root",
+    type=click.Path(path_type=Path),
+    multiple=True,
+    help="Where this stack's clones live. Repeatable.",
+)
+def disk_reclaim(
+    corpus_dir: Optional[Path],
+    apply_: bool,
+    allow: str,
+    target: tuple[str, ...],
+    until_free: Optional[float],
+    search_root: tuple[Path, ...],
+) -> None:
+    """Free space, and print what it would take before it takes it.
+
+    \b
+        dossier disk reclaim                        # a dry run, always
+        dossier disk reclaim --apply
+        dossier disk reclaim --target uv-cache --apply
+        dossier disk reclaim --allow rebuilt --apply
+
+    \b
+    Safety is the cost of getting the bytes back, not a guess at risk:
+        refetched     the owning tool downloads it again, unprompted
+        rebuilt       a command you run: an install, a build, a download
+        destructive   nothing comes back
+
+    \b
+    The tiers are a ratchet. --allow rebuilt permits refetched as well, so
+    there is no invocation that empties the recycle bin while sparing a
+    download cache -- which is the shape every cleanup script grows into, one
+    urgent afternoon at a time.
+
+    The reclaimer does not read the measurement document. That document has a
+    staleness budget and deletion has none, so it resolves the same policy
+    against the filesystem now.
+    """
+    from dossier import disk as disk_tools
+
+    root = _disk_corpus(corpus_dir)
+    outcome = disk_tools.reclaim(
+        root,
+        allow=allow,
+        apply=apply_,
+        targets=target,
+        until_free=until_free,
+        search_roots=search_root,
+    )
+    if outcome.stdout:
+        click.echo(outcome.stdout)
+    if not outcome.ok:
+        click.echo(f"FAIL    {outcome.summary}", err=True)
+        raise SystemExit(outcome.status or 1)
+
+
+@disk_group.command(name="cookbook")
+@click.option(
+    "--markdown",
+    "as_markdown",
+    is_flag=True,
+    default=False,
+    help="Emit the docs page instead of the terminal view. Both are generated "
+    "from the same recipes, so they cannot drift.",
+)
+@click.option(
+    "--write",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Write the docs page here, as UTF-8 with LF endings and no byte order "
+    "mark. Use this rather than a shell redirect.",
+)
+def disk_cookbook(as_markdown: bool, write: Optional[Path]) -> None:
+    """The recipes, printed where the work happens.
+
+    \b
+        dossier disk cookbook
+        dossier disk cookbook --write docs/disk.md
+
+    docs/disk.md is generated from exactly these recipes, and tests/test_disk.py
+    regenerates it and compares. A hand edit to that page fails the suite, which
+    is the only reason it can be trusted after a flag changes.
+
+    \b
+    --write rather than `--markdown > docs/disk.md`, because PowerShell's
+    redirect writes UTF-8 with a byte order mark. The page then differs from
+    what this command produces on every other platform, and the drift test
+    fails for a reason that has nothing to do with the recipes.
+    """
+    from dossier import disk as disk_tools
+
+    if write is not None:
+        write.write_text(disk_tools.cookbook_markdown(), encoding="utf-8", newline="\n")
+        click.echo(f"wrote {write}")
+        return
+
+    if as_markdown:
+        click.echo(disk_tools.cookbook_markdown(), nl=False)
+        return
+
+    click.echo(click.style("Disk - a cookbook", bold=True))
+    click.echo(
+        "Every command runs the corpus's own tooling. dossier measures nothing."
+    )
+    for recipe in disk_tools.COOKBOOK:
+        click.echo()
+        click.echo(click.style(recipe.task, fg="cyan"))
+        click.echo(f"    {recipe.command}")
+        for line in textwrap.wrap(recipe.when, width=74):
+            click.echo(f"    {line}")
+        if recipe.note:
+            for line in textwrap.wrap(recipe.note, width=72):
+                click.echo(f"      {line}")
+    click.echo()
+    click.echo("Full page: docs/disk.md")
 
 
 def _fit(text: Optional[str], width: int) -> str:

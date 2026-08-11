@@ -9,6 +9,7 @@
 | [Quickstart](quickstart.md) | Get running in 5 minutes |
 | [Dashboard Guide](dashboard.md) | Complete TUI dashboard reference |
 | [Governance Dashboard](governance.md) | Where every QM project stands, and what is in flight — which repo to run it in, and the prep it needs |
+| [Disk Cookbook](disk.md) | Recipes for keeping the workstation off the floor — what is eating the disk, and what is safe to reclaim |
 | [Settings](settings.md) | Theme selection and app info |
 | [Overview](overview.md) | Core concepts and use cases |
 | [Workflows](workflows.md) | Copy-paste ready examples |
