@@ -202,9 +202,33 @@ presentation module.
 ```sh
 uv run dossier disk check                 # is anything under its floor? writes nothing
 uv run dossier disk status                # what is eating the disk, largest first
+uv run dossier disk load                  # measure, and store it as a snapshot
+uv run dossier disk delta                 # what grew since the reading before
+uv run dossier disk dashboard             # load, then open the TUI on the Disk tab
 uv run dossier disk reclaim               # what could be freed -- a dry run
 uv run dossier disk cookbook              # the recipes, at the terminal
 ```
+
+The store side arrives in migration `006_disk` (`disk_snapshot`, `disk_volume`,
+`disk_target`) and is served at `/disk/snapshots` and `/disk/delta`. On a
+database any command has already touched, `db upgrade` aborts with *table
+already exists* because `init_db` ran `create_all` first — `dossier db stamp
+head`, the same wrinkle and fix as `005_governance`.
+
+**These tables are append-only, and that is the one place this domain departs
+from governance.** A governance load replaces what it read; the question worth
+asking of a disk is what *grew*, and no single reading answers it. Snapshots
+are pruned per machine so a second host sharing a store cannot evict this
+one's history.
+
+**A delta against an unknown is unknown, not zero.** This is where the
+`{"unknown": "<reason>"}` convention is easiest to lose: subtracting a measured
+40GB from a target nobody could read yields `-40GB`, a confident and specific
+claim that 40GB was reclaimed. Four subtractions are refused and say which —
+an unmeasured end, a target absent from the earlier snapshot (`new`), one
+absent from the later (`gone`), and two snapshots describing different
+machines. That last one is not hypothetical: docker went from unknown to
+23.6GB between two real readings 70 seconds apart.
 
 The same three rules as the governance view bind anything added here, for the
 same reason: **dossier measures no disk fact and authorises no deletion.** Every

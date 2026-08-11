@@ -884,6 +884,12 @@ class DossierApp(App):
                             yield DataTable(id="governance-table")
                             yield Static("", id="governance-threads-age")
                             yield DataTable(id="governance-threads-table")
+                    with TabPane("Disk", id="tab-disk"):
+                        with Vertical():
+                            yield Static("", id="disk-age")
+                            yield DataTable(id="disk-volumes-table")
+                            yield Static("", id="disk-delta-age")
+                            yield DataTable(id="disk-targets-table")
                     with TabPane("Components", id="tab-components"):
                         with Vertical():
                             yield DataTable(id="components-table")
@@ -936,6 +942,29 @@ class DossierApp(App):
         threads_table.add_column("Idle", width=9)
         threads_table.add_column("PR", width=6)
         threads_table.cursor_type = "row"
+
+        # Disk: machine-wide, not per-project, and two tables in one tab for
+        # the same reason governance has two -- the reader asking "what is
+        # eating the disk" is asking "and did it just start" in the same
+        # breath. Volumes carry the change in FREE space, so a negative number
+        # is the disk filling up; that is the direction worth noticing and the
+        # column is titled to say so.
+        volumes_table = self.query_one("#disk-volumes-table", DataTable)
+        volumes_table.add_column("Volume", width=14)
+        volumes_table.add_column("Free", width=11)
+        volumes_table.add_column("of total", width=11)
+        volumes_table.add_column("Free change", width=13)
+        volumes_table.add_column("State", width=10)
+        volumes_table.add_column("Why", width=52)
+        volumes_table.cursor_type = "row"
+
+        targets_table = self.query_one("#disk-targets-table", DataTable)
+        targets_table.add_column("Target", width=26)
+        targets_table.add_column("Size", width=11)
+        targets_table.add_column("Change", width=13)
+        targets_table.add_column("Safety", width=12)
+        targets_table.add_column("Largest path / why not measured", width=60)
+        targets_table.cursor_type = "row"
 
         # Setup branches table columns (with custom widths)
         branches_table = self.query_one("#branches-table", DataTable)
@@ -2218,6 +2247,13 @@ class DossierApp(App):
             # reads as "nothing is wrong".
             self._load_governance_tab()
             return
+        if event.pane.id == "tab-disk":
+            # Same bypass, same reason: disk is machine-wide. It belongs to no
+            # project, so the guard below would leave it blank until somebody
+            # happened to select one -- and a blank disk table reads as a
+            # machine with nothing on it.
+            self._load_disk_tab()
+            return
         if hasattr(self, "_current_project_id"):
             # Use pane.id (the TabPane ID like "tab-docs") not tab.id (which is "--content-tab-tab-docs")
             self._load_tab_data(event.pane.id)
@@ -2231,6 +2267,10 @@ class DossierApp(App):
             return  # Already loaded
         
         self._tabs_loaded.add(tab_id)
+
+        if tab_id == "tab-disk":
+            self._load_disk_tab()
+            return
 
         if tab_id == "tab-governance":
             self._load_governance_tab()
@@ -2562,6 +2602,164 @@ class DossierApp(App):
                         key=f"release-{release.id}",
                     )
     
+    @staticmethod
+    def _disk_size(count) -> str:
+        """Bytes at a readable scale, never rounded to nothing.
+
+        A 40MB cache shown as `0.0GB` reads as empty, which is the same lie as
+        showing an unmeasured target as zero.
+        """
+        if count is None:
+            return "unknown"
+        negative = count < 0
+        value = abs(count)
+        if value >= 10**9:
+            text = f"{value / 10**9:.1f}GB"
+        elif value >= 10**6:
+            text = f"{value / 10**6:.0f}MB"
+        elif value >= 10**3:
+            text = f"{value / 10**3:.0f}KB"
+        else:
+            text = f"{value}B"
+        return f"-{text}" if negative else text
+
+    @classmethod
+    def _disk_change_cell(cls, change, status: str) -> str:
+        """The change, coloured by direction, or the word for why there is none.
+
+        Growth is red and shrinkage green because this table is read by
+        somebody who is short of space: on a full disk, a cache that grew is
+        the problem and one that shrank is the relief. `new`, `gone` and
+        `unknown` are yellow and carry no number, because each is a case where
+        subtracting would have invented a fact.
+        """
+        if change is None:
+            return f"[yellow]{status}[/]"
+        if change > 0:
+            return f"[red]+{cls._disk_size(change)}[/]"
+        if change < 0:
+            return f"[green]{cls._disk_size(change)}[/]"
+        return "[dim]no change[/]"
+
+    def _load_disk_tab(self) -> None:
+        """Render the machine's last disk reading, and what changed since the one before.
+
+        Machine-wide, so it takes no project. The states that have to stay
+        distinct are the same four as governance, for the same reason:
+
+        * nothing loaded -- say so, and say the command that fixes it
+        * stale -- show the age prominently, never silently
+        * unknown -- its own word, never blank and never zero
+        * only one reading -- "nothing to compare with" is not "nothing changed"
+        """
+        from dossier import disk_store
+        from dossier.models import utcnow
+
+        age_label = self.query_one("#disk-age", Static)
+        volumes_table = self.query_one("#disk-volumes-table", DataTable)
+        delta_label = self.query_one("#disk-delta-age", Static)
+        targets_table = self.query_one("#disk-targets-table", DataTable)
+        volumes_table.clear()
+        targets_table.clear()
+
+        with self.session_factory() as session:
+            rows = disk_store.snapshots(session, limit=1)
+            if not rows:
+                age_label.update(
+                    "[bold]No disk reading has been stored.[/]\n"
+                    "This is not a claim that there is space -- it is the "
+                    "absence of any measurement.\nRun [b]dossier disk load[/] "
+                    "to take one and store it."
+                )
+                delta_label.update("")
+                return
+
+            latest = rows[0]
+            volumes = disk_store.volumes_of(session, latest.id)
+            targets = disk_store.targets_of(session, latest.id)
+            delta = disk_store.latest_delta(session, machine=latest.machine)
+
+        age_hours = (utcnow().replace(tzinfo=None) - latest.generated_at).total_seconds() / 3600
+        age_label.update(
+            f"{self._age_markup('disk-status.json', age_hours, latest.staleness_budget_hours)}"
+            f"   [dim]machine[/] {latest.machine}"
+        )
+
+        volume_change = {v.path: v for v in delta.volumes} if delta.available else {}
+        for volume in volumes:
+            change = volume_change.get(volume.path)
+            if volume.usage_unknown:
+                volumes_table.add_row(
+                    volume.path,
+                    "[yellow]unknown[/]",
+                    "[yellow]unknown[/]",
+                    "[yellow]unknown[/]",
+                    "[yellow]unknown[/]",
+                    volume.usage_unknown,
+                    key=f"disk-volume-{volume.path}",
+                )
+                continue
+            severity = volume.severity or "unknown"
+            colour = {
+                "critical": "red", "warn": "yellow", "ok": "green"
+            }.get(severity, "yellow")
+            volumes_table.add_row(
+                volume.path,
+                self._disk_size(volume.free_bytes),
+                f"{volume.free_ratio:.1%}" if volume.free_ratio is not None else "unknown",
+                self._disk_change_cell(
+                    change.change if change else None,
+                    change.unknown and "unknown" or "-" if change else "-",
+                ),
+                f"[{colour}]{severity}[/]",
+                (volume.thresholds_fired or "").replace("\n", "; "),
+                key=f"disk-volume-{volume.path}",
+            )
+
+        if not delta.available:
+            delta_label.update(
+                f"[bold]No comparison available:[/] {delta.reason}.\n"
+                "That is not a claim that nothing changed -- it is the absence "
+                "of a second measurement."
+            )
+        else:
+            delta_label.update(
+                f"Change over [b]{delta.hours:.0f}h[/], against the reading of "
+                f"{delta.older.generated_at}. "
+                "[dim]Volume change is FREE space, so negative is filling up.[/]"
+            )
+
+        target_change = {t.name: t for t in delta.targets} if delta.available else {}
+        # Largest first, and an unmeasured target sorts to the bottom rather
+        # than to the top: `None` treated as a huge number would put every
+        # unreadable cache above the real ones.
+        for target in sorted(targets, key=lambda t: -(t.bytes or 0)):
+            change = target_change.get(target.name)
+            if target.bytes_unknown:
+                targets_table.add_row(
+                    target.name,
+                    "[yellow]unknown[/]",
+                    "[yellow]unknown[/]",
+                    target.safety or "-",
+                    f"[yellow]{target.bytes_unknown}[/]",
+                    key=f"disk-target-{target.name}",
+                )
+                continue
+            detail = target.largest_path or "-"
+            if target.unreadable:
+                detail = f"[yellow]{target.unreadable} paths unreadable - a floor[/] {detail}"
+            targets_table.add_row(
+                target.name,
+                self._disk_size(target.bytes),
+                self._disk_change_cell(
+                    change.change if change else None,
+                    change.status if change else "-",
+                ),
+                target.safety or "-",
+                detail,
+                key=f"disk-target-{target.name}",
+            )
+
     def _load_governance_tab(self) -> None:
         """Render what the corpus's generated documents say.
 

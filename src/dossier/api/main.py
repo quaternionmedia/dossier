@@ -3,6 +3,7 @@
 import os
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
@@ -750,5 +751,265 @@ def list_all_components(
                     relationship_type=comp.relationship_type,
                     order=comp.order,
                 ))
-        
+
         return results
+
+
+# ============================================================================
+# Disk endpoints - what the corpus measured, and what changed since
+# ============================================================================
+#
+# Every figure served here came from the corpus's ci/disk_status.py and was
+# stored verbatim. This API computes one thing: the difference between two
+# readings it already holds, which is arithmetic on stored facts rather than a
+# second measurement.
+#
+# The responses are shaped so an unmeasured fact cannot be mistaken for zero.
+# `bytes` is nullable and travels with `bytes_unknown`; `change` is nullable
+# and travels with `status` and `unknown`. A client that reads only `bytes`
+# gets null and has to decide what to do, which is the point -- a zero would
+# have let it decide nothing.
+
+
+class DiskTargetOut(BaseModel):
+    """One reclaimable target, as measured."""
+
+    name: str
+    title: Optional[str] = None
+    safety: Optional[str] = None
+    owner: Optional[str] = None
+    bytes: Optional[int] = None
+    bytes_unknown: Optional[str] = None
+    unreadable: Optional[int] = None
+    largest_path: Optional[str] = None
+
+
+class DiskVolumeOut(BaseModel):
+    """One filesystem, as measured."""
+
+    path: str
+    total_bytes: Optional[int] = None
+    free_bytes: Optional[int] = None
+    free_ratio: Optional[float] = None
+    severity: Optional[str] = None
+    usage_unknown: Optional[str] = None
+    thresholds_fired: Optional[str] = None
+
+
+class DiskSnapshotOut(BaseModel):
+    """One reading of one machine, at one moment."""
+
+    id: int
+    machine: str
+    generated_at: datetime
+    staleness_budget_hours: Optional[float] = None
+    volumes_critical: Optional[int] = None
+    volumes_warn: Optional[int] = None
+    targets_measured: Optional[int] = None
+    targets_unknown: Optional[int] = None
+    reclaimable_refetched: Optional[int] = None
+    reclaimable_rebuilt: Optional[int] = None
+    reclaimable_destructive: Optional[int] = None
+
+
+class DiskSnapshotDetail(DiskSnapshotOut):
+    volumes: list[DiskVolumeOut] = []
+    targets: list[DiskTargetOut] = []
+
+
+class DiskTargetChangeOut(BaseModel):
+    """One target across two readings.
+
+    `change` is null whenever the subtraction would have invented a fact --
+    an unmeasured end, or a target that is only in one of the two snapshots.
+    `status` and `unknown` say which, in words.
+    """
+
+    name: str
+    title: Optional[str] = None
+    safety: Optional[str] = None
+    before: Optional[int] = None
+    after: Optional[int] = None
+    change: Optional[int] = None
+    status: str
+    unknown: Optional[str] = None
+
+
+class DiskVolumeChangeOut(BaseModel):
+    """One volume across two readings. `change` is the change in FREE bytes,
+    so a negative number is the disk filling up."""
+
+    path: str
+    before_free: Optional[int] = None
+    after_free: Optional[int] = None
+    change: Optional[int] = None
+    severity: Optional[str] = None
+    unknown: Optional[str] = None
+
+
+class DiskDeltaOut(BaseModel):
+    """What changed between two readings of one machine.
+
+    `available` is false when there is nothing honest to compare -- one
+    snapshot, or none -- and `reason` says so. That is not an error, so it is
+    not a 404: a machine measured once is a normal machine, and returning 200
+    with an explicit reason lets a client render "not yet" rather than "broken".
+    """
+
+    available: bool
+    reason: Optional[str] = None
+    machine: Optional[str] = None
+    hours: Optional[float] = None
+    older_generated_at: Optional[datetime] = None
+    newer_generated_at: Optional[datetime] = None
+    volumes: list[DiskVolumeChangeOut] = []
+    targets: list[DiskTargetChangeOut] = []
+
+
+def _snapshot_out(row) -> DiskSnapshotOut:
+    return DiskSnapshotOut(
+        id=row.id,
+        machine=row.machine,
+        generated_at=row.generated_at,
+        staleness_budget_hours=row.staleness_budget_hours,
+        volumes_critical=row.volumes_critical,
+        volumes_warn=row.volumes_warn,
+        targets_measured=row.targets_measured,
+        targets_unknown=row.targets_unknown,
+        reclaimable_refetched=row.reclaimable_refetched,
+        reclaimable_rebuilt=row.reclaimable_rebuilt,
+        reclaimable_destructive=row.reclaimable_destructive,
+    )
+
+
+@app.get("/disk/snapshots", response_model=list[DiskSnapshotOut])
+def list_disk_snapshots(
+    machine: Optional[str] = Query(None, description="Limit to one machine"),
+    limit: int = Query(20, ge=1, le=500, description="How many, newest first"),
+) -> list[DiskSnapshotOut]:
+    """List disk readings, newest first.
+
+    Ordered by the document's `generated_at`, never by when it was loaded: a
+    reading loaded today from last week's document describes last week.
+    """
+    from dossier import disk_store
+
+    with get_session() as session:
+        rows = disk_store.snapshots(session, machine=machine, limit=limit)
+        return [_snapshot_out(row) for row in rows]
+
+
+@app.get("/disk/snapshots/{snapshot_id}", response_model=DiskSnapshotDetail)
+def get_disk_snapshot(snapshot_id: int) -> DiskSnapshotDetail:
+    """One reading in full, with its volumes and targets."""
+    from dossier import disk_store
+    from dossier.models import DiskSnapshot
+
+    with get_session() as session:
+        row = session.get(DiskSnapshot, snapshot_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Disk snapshot not found")
+        detail = DiskSnapshotDetail(**_snapshot_out(row).model_dump())
+        detail.volumes = [
+            DiskVolumeOut(
+                path=v.path,
+                total_bytes=v.total_bytes,
+                free_bytes=v.free_bytes,
+                free_ratio=v.free_ratio,
+                severity=v.severity,
+                usage_unknown=v.usage_unknown,
+                thresholds_fired=v.thresholds_fired,
+            )
+            for v in disk_store.volumes_of(session, snapshot_id)
+        ]
+        detail.targets = sorted(
+            (
+                DiskTargetOut(
+                    name=t.name,
+                    title=t.title,
+                    safety=t.safety,
+                    owner=t.owner,
+                    bytes=t.bytes,
+                    bytes_unknown=t.bytes_unknown,
+                    unreadable=t.unreadable,
+                    largest_path=t.largest_path,
+                )
+                for t in disk_store.targets_of(session, snapshot_id)
+            ),
+            key=lambda t: -(t.bytes or 0),
+        )
+        return detail
+
+
+@app.get("/disk/delta", response_model=DiskDeltaOut)
+def get_disk_delta(
+    machine: Optional[str] = Query(None, description="Defaults to this machine"),
+    older: Optional[int] = Query(None, description="Snapshot id to compare from"),
+    newer: Optional[int] = Query(None, description="Snapshot id to compare to"),
+) -> DiskDeltaOut:
+    """What changed between two readings.
+
+    With no ids, the two most recent readings of the machine. With both, those
+    two -- and a pair describing different machines is refused, because a
+    difference between two machines is not a change that happened on either.
+
+    Only one reading, or none, returns 200 with `available: false` and a
+    reason. A machine measured once is a normal machine, not a failure.
+    """
+    from dossier import disk_store
+    from dossier.models import DiskSnapshot
+
+    with get_session() as session:
+        if older is not None or newer is not None:
+            if older is None or newer is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Pass both older and newer, or neither",
+                )
+            first = session.get(DiskSnapshot, older)
+            second = session.get(DiskSnapshot, newer)
+            missing = [
+                str(i) for i, row in ((older, first), (newer, second)) if row is None
+            ]
+            if missing:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Disk snapshot(s) not found: {', '.join(missing)}",
+                )
+            delta = disk_store.delta_between(session, first, second)
+        else:
+            delta = disk_store.latest_delta(session, machine=machine)
+
+        return DiskDeltaOut(
+            available=delta.available,
+            reason=delta.reason,
+            machine=delta.machine,
+            hours=delta.hours,
+            older_generated_at=delta.older.generated_at if delta.older else None,
+            newer_generated_at=delta.newer.generated_at if delta.newer else None,
+            volumes=[
+                DiskVolumeChangeOut(
+                    path=v.path,
+                    before_free=v.before_free,
+                    after_free=v.after_free,
+                    change=v.change,
+                    severity=v.severity,
+                    unknown=v.unknown,
+                )
+                for v in delta.volumes
+            ],
+            targets=[
+                DiskTargetChangeOut(
+                    name=t.name,
+                    title=t.title,
+                    safety=t.safety,
+                    before=t.before,
+                    after=t.after,
+                    change=t.change,
+                    status=t.status,
+                    unknown=t.unknown,
+                )
+                for t in delta.targets
+            ],
+        )
+

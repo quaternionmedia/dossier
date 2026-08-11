@@ -22,6 +22,17 @@ dossier disk cookbook
 | `ci/disk_dashboard.py` | the corpus | renders the document; runs no commands |
 | `ci/disk_reclaim.py` | the corpus | acts, and only on what the policy names |
 | `~/.dossier/disk-status.json` | this machine, never committed | the measurement, with its own age and reading instructions inside it |
+| `disk_snapshot` / `disk_volume` / `disk_target` | dossier's store, migration `006_disk` | one row per reading, appended, so there is something to compare against |
+
+The tables are **append-only**, which is the one place this domain departs from
+governance. A governance load replaces what it read, because the only interesting
+governance fact is the current one. The question worth asking of a disk is what
+*grew*, and no single reading can answer it.
+
+Each snapshot carries the machine it describes. A store is a file somebody can
+copy, which is a weaker boundary than the repository the generator refuses to
+write into, so the scope travels in the row — and a delta across two machines is
+refused rather than averaged into a trend that happened on neither.
 
 **Safety is the cost of recovery, not a guess at risk.** Three tiers: `refetched`
 (the owning tool downloads it again, unprompted), `rebuilt` (a command you run),
@@ -58,6 +69,36 @@ dossier disk status --html
 ```
 
 When you want to hand somebody the picture, or read the thresholds and tiers with their explanations attached.
+
+### What grew since last time?
+
+```sh
+dossier disk delta
+```
+
+The question a single reading cannot answer, and the one that matters when the problem keeps coming back.
+
+> Only prints a number where subtracting was honest. A target nobody could measure at one end, or one that is in only one of the two readings, gets a word -- unknown, new, gone -- because the arithmetic would otherwise invent a change nobody observed.
+
+### Keep a history rather than a reading
+
+```sh
+dossier disk load
+```
+
+Measures, then stores the result as a snapshot. Run it whenever you would have run `status`; the deltas come for free.
+
+> Appends rather than replaces, which is the difference between this and `governance load`. Old snapshots are pruned per machine, so a second machine sharing a store cannot evict this one's history.
+
+### See all of it in the dashboard
+
+```sh
+dossier disk dashboard
+```
+
+Measure, store and open the TUI on the Disk tab, in one command. --no-load opens on what is already stored.
+
+> The tab is machine-wide, so it renders with no project selected. Volume change is FREE space: a negative number is the disk filling up.
 
 ### Free the space that costs nothing
 
@@ -116,6 +157,16 @@ dossier disk status --corpus-dir ../qm
 When the vendored governance/qm is the checkout that was found.
 
 > Expected, not broken. A project's vendored corpus is pinned to a branch cut from the corpus's main, and the tooling is not on main yet, so that path is empty by construction. Point at a corpus checkout that carries ci/. The default starts working on its own once the corpus change lands and this project's pin is bumped past it.
+
+### db upgrade says the table already exists
+
+```sh
+dossier db stamp head
+```
+
+After pulling the disk tables for the first time, on a store that any dossier command has already touched.
+
+> Expected. Every command calls init_db, which runs create_all and builds missing tables before your subcommand runs -- so the tables exist by the time you could migrate. Stamping records the revision without re-running DDL that has already been applied. Same wrinkle, and the same fix, as the governance tables in 005.
 
 ### A Windows console raises UnicodeEncodeError
 
