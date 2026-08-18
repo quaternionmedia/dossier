@@ -87,6 +87,68 @@ def dashboard() -> None:
 
 
 @cli.group()
+def deltas() -> None:
+    """Deltas: units of work, including ones another system emitted."""
+    pass
+
+
+@deltas.command("ingest")
+@click.argument("payload", type=click.Path(exists=True, path_type=Path))
+@click.option("--write", is_flag=True,
+              help="apply the plan; without it nothing is written")
+def deltas_ingest(payload: Path, write: bool) -> None:
+    """Ingest delta payloads another system emitted.
+
+    What crosses is a schema, not an import: the payload's `delta` key holds
+    this project's own column names. Reports by default -- a sync that wrote on
+    sight is one nobody dares run against real data.
+    """
+    from sqlmodel import select
+
+    from dossier.ingest import WRITABLE, load, plan, render
+    from dossier.models import Project, ProjectDelta
+
+    payloads = load(payload)
+    init_db()
+    with get_session() as session:
+        def lookup_project(full_name: str):
+            return session.exec(
+                select(Project).where(Project.full_name == full_name)
+            ).first() or session.exec(
+                select(Project).where(Project.name == full_name)
+            ).first()
+
+        def lookup_delta(project_id: int, name: str):
+            return session.exec(
+                select(ProjectDelta)
+                .where(ProjectDelta.project_id == project_id)
+                .where(ProjectDelta.name == name)
+            ).first()
+
+        verdicts = plan(payloads, lookup_project, lookup_delta)
+
+        if write:
+            by_name = {v.name: v for v in verdicts}
+            for item in payloads:
+                row = item.get("delta") or {}
+                verdict = by_name.get(str(row.get("name") or ""))
+                if verdict is None or verdict.action not in ("create", "update"):
+                    continue
+                project = lookup_project(item["project"])
+                fields = {k: row[k] for k in WRITABLE if k in row}
+                if verdict.action == "create":
+                    session.add(ProjectDelta(project_id=project.id, **fields))
+                else:
+                    existing = lookup_delta(project.id, fields["name"])
+                    for key, value in fields.items():
+                        setattr(existing, key, value)
+                    session.add(existing)
+            session.commit()
+
+        click.echo(render(verdicts, write))
+
+
+@cli.group()
 def projects() -> None:
     """Manage registered projects.
     
