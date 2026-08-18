@@ -135,13 +135,11 @@ reason, so the gap is a stated boundary rather than a green run.
 
 ## Measuring the interaction, which rad already defines
 
-**A correction to an earlier draft of this page, which had it wrong.** It said a
-keystroke count was not rad's metric and that claiming otherwise would corrupt
-it. rad's own metrics record says the opposite: one **input** is *"one pointer
-down…up envelope"* **or** *"one keystroke"*, and IPA is measured at **L3 —
-committed intents** — precisely so it is *"comparable across platforms by
-construction"*. There is already a keyboard budget. A terminal meters IPA
-natively; nothing needed inventing.
+rad's metrics record defines one **input** as *"one pointer down…up envelope"*
+**or** *"one keystroke"*, and measures IPA at **L3 — committed intents** —
+precisely so it is *"comparable across platforms by construction"*. There is
+already a keyboard budget. **A terminal meters IPA natively**, and a parallel
+measure would be a second definition of a number rad already defines.
 
 **IPA = inputs from idle to committed intent**, and its inverse, actions per
 input, is the second figure tracked. Both are reported.
@@ -159,7 +157,7 @@ reported, not enforced as a build failure**, while the palette is still
 settling. It is visible pressure rather than a gate; making it a gate is a later
 decision and should be taken deliberately.
 
-## Settled since the first draft
+## Settled
 
 - **The ring replaces tab navigation.** Stage 3 is a replacement, not a
   coexistence. The tabs' underlying views remain as views; what goes is
