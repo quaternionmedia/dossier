@@ -511,8 +511,97 @@ class TestRingLayout:
         assert role_tokens("no-such-theme") == role_tokens(DEFAULT_THEME)
 
     def test_the_contrast_theme_uses_one_foreground(self):
-        """Its whole point is >= 7:1 with no decorative colour."""
+        """Its whole point is >= 7:1 with no decorative colour.
+
+        Ground roles are excluded, and that is not a loophole: a panel needs a
+        background, and in `contrast` that background is black precisely so the
+        white foregrounds clear 7:1 against it."""
         from dossier.rad.tokens import roles as role_tokens
 
-        values = set(vars(role_tokens("contrast")).values())
-        assert values <= {"#ffffff", "#f0f0f0"}
+        resolved = vars(role_tokens("contrast"))
+        grounds = {"panel_bg"}
+        foregrounds = {k: v for k, v in resolved.items() if k not in grounds}
+        assert set(foregrounds.values()) <= {"#ffffff", "#f0f0f0"}
+        assert resolved["panel_bg"] == "#000000"
+
+    def test_the_panel_has_a_ground_of_its_own_in_every_theme(self):
+        """The screen is transparent so the dashboard shows through. A panel
+        without its own background would put the ring's text on top of the
+        dashboard's, which is unreadable however good the colours are."""
+        from dossier.rad.tokens import roles as role_tokens, themes
+
+        for theme in themes():
+            resolved = role_tokens(theme)
+            assert resolved.panel_bg.startswith("#")
+            assert resolved.panel_bg != resolved.wedge_label, (
+                f"{theme}: the panel ground and its label are the same colour")
+
+
+class TestRingLeavesTheDataVisible:
+    """The ring is a pop-over, not a takeover.
+
+    A `ModalScreen` covers the app by default, which hides the very data the
+    menu is about to act on -- a menu whose options refer to a selection you can
+    no longer see is worse than one costing an extra keystroke.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_dashboard_still_renders_behind_the_ring(self):
+        from sqlmodel import Session, SQLModel, create_engine
+
+        from dossier.tui import DossierApp
+
+        engine = create_engine("sqlite://")
+        SQLModel.metadata.create_all(engine)
+        app = DossierApp(session_factory=lambda: Session(engine))
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            before = app.screen
+            await pilot.press("m")
+            await pilot.pause()
+            await pilot.pause()
+
+            assert type(app.screen).__name__ == "RingScreen"
+            # The screen underneath is still mounted and still the dashboard --
+            # the ring is stacked on it rather than replacing it.
+            assert app.screen_stack[-2] is before
+            assert app.screen.styles.background.a == 0, (
+                "the ring's screen paints a ground and hides the dashboard")
+
+    @pytest.mark.asyncio
+    async def test_the_panel_itself_is_opaque(self):
+        """The screen is transparent; the panel must not be, or the ring's text
+        sits on top of the dashboard's."""
+        from sqlmodel import Session, SQLModel, create_engine
+
+        from dossier.tui import DossierApp
+
+        engine = create_engine("sqlite://")
+        SQLModel.metadata.create_all(engine)
+        app = DossierApp(session_factory=lambda: Session(engine))
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("m")
+            await pilot.pause()
+            await pilot.pause()
+            ring = app.screen.query_one("#rad-ring")
+            assert ring.styles.background.a == 1, "the panel is see-through"
+
+    @pytest.mark.asyncio
+    async def test_the_ring_is_only_as_big_as_it_needs_to_be(self):
+        """Sized to its content, not to the terminal."""
+        from sqlmodel import Session, SQLModel, create_engine
+
+        from dossier.tui import DossierApp
+
+        engine = create_engine("sqlite://")
+        SQLModel.metadata.create_all(engine)
+        app = DossierApp(session_factory=lambda: Session(engine))
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("m")
+            await pilot.pause()
+            await pilot.pause()
+            ring = app.screen.query_one("#rad-ring")
+            assert ring.size.width < 120, "the panel spans the terminal"
+            assert ring.size.height < 40, "the panel is as tall as the terminal"

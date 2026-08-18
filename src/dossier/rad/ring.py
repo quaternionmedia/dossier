@@ -223,11 +223,20 @@ class RingScreen(ModalScreen):
 
     BINDINGS = []  # handled in on_key, so the session meters every key
 
-    # Sized to the ring, not the screen: a pop-over that filled the terminal
-    # would not read as a pop-over.
+    # THE SCREEN PAINTS NOTHING. A `ModalScreen` covers the app by default,
+    # which hides the data the menu is about to act on -- and a menu whose
+    # options refer to a selection you can no longer see is worse than a menu
+    # that costs an extra keystroke. Transparent here, so the dashboard renders
+    # behind; only the panel below has a ground of its own.
+    #
+    # It stays a modal rather than becoming an overlay widget, because the
+    # modal is what makes the key handling honest: the ring holds focus while
+    # open, so every keystroke is unambiguously an input to the menu and the
+    # IPA figure is not quietly wrong.
     DEFAULT_CSS = """
     RingScreen {
         align: center middle;
+        background: transparent;
     }
     #rad-ring {
         width: auto;
@@ -236,7 +245,7 @@ class RingScreen(ModalScreen):
     }
     #rad-status {
         width: auto;
-        padding: 0 3 1 3;
+        padding: 0 3;
     }
     """
 
@@ -261,6 +270,13 @@ class RingScreen(ModalScreen):
                 yield self._status
 
     def on_mount(self) -> None:
+        # Colours are set here rather than in the CSS above, because the CSS is
+        # a class attribute and the tokens are a theme chosen per instance --
+        # a literal in that stylesheet would paint outside the token layer.
+        for widget in (self._ring, self._status):
+            widget.styles.background = self._roles.panel_bg
+        self._ring.styles.border = ("round", self._roles.panel_border)
+
         view = self._session.open_at(self._open_context)
         if view is None:
             # A resolver with nothing to offer must not leave an empty ring for

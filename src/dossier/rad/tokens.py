@@ -78,6 +78,8 @@ class Roles:
     submenu_mark: str
     hint: str
     cost: str
+    panel_bg: str
+    panel_border: str
 
 
 def roles(theme: str = DEFAULT_THEME) -> Roles:
@@ -97,6 +99,12 @@ def roles(theme: str = DEFAULT_THEME) -> Roles:
         submenu_mark=p["calm"],
         hint=p["ink_dim"],
         cost=p["gold"],
+        # The pop-over's own ground. It cannot be transparent: the ring floats
+        # over a dashboard, and text over text is unreadable however pretty the
+        # colours are. `surface` is the palette entry that exists for exactly
+        # this -- something raised off the background.
+        panel_bg=p["surface"],
+        panel_border=p["accent"],
     )
 
 
