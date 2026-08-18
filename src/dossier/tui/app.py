@@ -100,6 +100,9 @@ def extract_file_path(source_file: str | None) -> str | None:
     return source_file
 
 
+from dossier.tui.overview_panel import OverviewPanel
+
+
 class ContentViewerScreen(ModalScreen):
     """Modal screen for viewing markdown content with navigation."""
     
@@ -906,6 +909,11 @@ class DossierApp(App):
 
             with Vertical(id="main-content"):
                 with TabbedContent(id="project-tabs"):
+                    # First, and org-wide rather than per-project: a reader
+                    # arriving cold gets the shape of the organisation before
+                    # being asked to pick a repository out of 141.
+                    with TabPane("Overview", id="tab-overview"):
+                        yield OverviewPanel(self.session_factory, id="org-overview")
                     with TabPane("Dossier", id="tab-dossier"):
                         with Horizontal(id="dossier-layout"):
                             yield VerticalScroll(Markdown("", id="dossier-view"), id="dossier-scroll")
@@ -997,6 +1005,7 @@ class DossierApp(App):
 
     # Actions the ring can commit that map onto a view this app already has.
     RAD_VIEWS = {
+        "view.overview": "tab-overview",
         "view.deltas": "tab-deltas",
         "view.governance": "tab-governance",
         "view.disk": "tab-disk",

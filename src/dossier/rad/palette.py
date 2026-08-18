@@ -31,6 +31,11 @@ def resolve(context: Any = None) -> tuple[Wedge, ...]:
     """
     return (
         Wedge(GO, "Go", children=(
+            # First, so it is the cheapest wedge in the ring to reach: the
+            # highlight lands here on entering Go, making the org overview
+            # open, enter, enter. Ordering inside a verb is the host's only
+            # lever on cost once the child count is fixed.
+            Wedge("go.overview", "Overview", action="view.overview"),
             Wedge("go.deltas", "Deltas", action="view.deltas"),
             Wedge("go.governance", "Governance", action="view.governance"),
             Wedge("go.disk", "Disk", action="view.disk"),
