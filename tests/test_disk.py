@@ -152,7 +152,12 @@ def test_the_real_corpus_beside_this_one_carries_the_tooling() -> None:
 
 
 def test_the_document_lives_outside_every_repository() -> None:
-    assert disk.document_path().parent == Path.home() / ".dossier"
+    # The claim is the one in the name. Pinning the literal `~/.dossier` made
+    # this fail the moment the state directory became overridable for tests --
+    # asserting the implementation rather than the property it exists for.
+    from dossier.config import dossier_home
+
+    assert disk.document_path().parent == dossier_home()
     assert disk.inside_a_repository(disk.document_path()) is None
 
 

@@ -18,6 +18,24 @@ DEFAULT_SYNC_DELAY = 1.0
 DEFAULT_EXPORT_FORMAT = "yaml"  # yaml, json
 
 
+def dossier_home() -> Path:
+    """The directory dossier keeps its state in.
+
+    `DOSSIER_HOME` overrides it. The override exists because the test suite
+    drives the real app, and the app saves state on exit -- so running the
+    tests rewrote the operator's own dashboard: last project, active tab, and
+    a filter that then matched nothing and emptied their sidebar.
+
+    Every module that writes state goes through here. Two of them resolved the
+    path themselves and were missed by the first fix, which is exactly the kind
+    of hole a guard cannot find on its own.
+    """
+    import os
+
+    override = os.environ.get("DOSSIER_HOME")
+    return Path(override) if override else Path.home() / ".dossier"
+
+
 @dataclass
 class ViewState:
     """Persistent view state for the TUI dashboard."""
@@ -70,11 +88,7 @@ class DossierConfig:
         that then matched nothing and emptied their sidebar. A test that can
         reach `~` is a test that can break the thing it is checking.
         """
-        import os
-
-        home = os.environ.get("DOSSIER_HOME")
-        base = Path(home) if home else Path.home() / ".dossier"
-        return base / "config.json"
+        return dossier_home() / "config.json"
     
     @classmethod
     def load(cls) -> "DossierConfig":

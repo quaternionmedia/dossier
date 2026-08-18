@@ -265,6 +265,11 @@ def sync_github_repo(request: GitHubSyncRequest) -> GitHubSyncResponse:
                 existing.github_repo = repo.name
                 existing.github_stars = repo.stars
                 existing.github_language = repo.language
+                # A second path that creates projects is a second definition of
+                # what a project is. Without the flag here, a fork synced
+                # through the API counted as the organisation's own work.
+                existing.is_fork = repo.is_fork
+                existing.is_archived = repo.is_archived
                 existing.last_synced_at = utcnow()
                 existing.updated_at = utcnow()
                 project = existing
@@ -287,6 +292,8 @@ def sync_github_repo(request: GitHubSyncRequest) -> GitHubSyncResponse:
                     github_repo=repo.name,
                     github_stars=repo.stars,
                     github_language=repo.language,
+                    is_fork=repo.is_fork,
+                    is_archived=repo.is_archived,
                     last_synced_at=utcnow(),
                 )
                 session.add(project)

@@ -8194,7 +8194,9 @@ Set `GITHUB_TOKEN` environment variable for:
         )
         
         # Get database path and stats
-        db_path = Path.home() / ".dossier" / "dossier.db"
+        from dossier.config import dossier_home
+
+        db_path = dossier_home() / "dossier.db"
         db_size = "N/A"
         if db_path.exists():
             size_bytes = db_path.stat().st_size
