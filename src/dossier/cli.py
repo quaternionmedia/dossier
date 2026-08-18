@@ -1,6 +1,7 @@
 """Click CLI for Dossier."""
 
 import os
+import sys
 import textwrap
 from pathlib import Path
 from typing import Optional
@@ -40,6 +41,29 @@ def get_session() -> Session:
     return Session(engine)
 
 
+def _make_output_encodable() -> None:
+    """Stop a glyph in a progress message aborting the command that printed it.
+
+    A Windows console is cp1252 by default, and this CLI prints emoji. The
+    failure mode is the bad one: `sync-org` raised UnicodeEncodeError on its
+    first status line, and `projects remove` raised on the line it printed
+    *after* committing the deletion -- so the command reported a crash for work
+    that had already happened. Setting the stream encoding once at the entry
+    point fixes every message, including ones not written yet; replacing the
+    glyphs one at a time fixes only the ones somebody remembered.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                # A stream that will not be reconfigured (a pipe under some
+                # runners) is left as it is: `errors` cannot be set on it
+                # either, so there is nothing further to try.
+                pass
+
+
 @tui()
 @click.group()
 @click.version_option(version="0.1.0", prog_name="dossier")
@@ -54,6 +78,7 @@ def cli() -> None:
         dossier projects list     List all projects
         dossier github sync URL   Sync a GitHub repo
     """
+    _make_output_encodable()
     init_db()
 
 
@@ -239,7 +264,7 @@ def projects_add(
         )
         session.add(project)
         session.commit()
-        click.echo(f"✓ Added project: {name}")
+        click.echo(f"OK Added project: {name}")
 
 
 @projects.command("remove")
@@ -292,7 +317,7 @@ def projects_remove(name: str, yes: bool, keep_docs: bool) -> None:
         session.delete(project)
         session.commit()
         
-        click.echo(f"✓ Removed project: {name}")
+        click.echo(f"OK Removed project: {name}")
         if doc_count and not keep_docs:
             click.echo(f"  Deleted {doc_count} documentation sections")
 
@@ -409,7 +434,7 @@ def projects_rename(old_name: str, new_name: str) -> None:
         project.name = new_name
         session.add(project)
         session.commit()
-        click.echo(f"✓ Renamed '{old_name}' to '{new_name}'")
+        click.echo(f"OK Renamed '{old_name}' to '{new_name}'")
 
 
 # =============================================================================
@@ -796,7 +821,7 @@ def github_sync(
             
             session.commit()
             
-            click.echo(f"\n✓ Synced: {repo.full_name}")
+            click.echo(f"\nOK Synced: {repo.full_name}")
             click.echo(f"  Project: {project_name}")
             click.echo(f"  Description: {repo.description or 'N/A'}")
             click.echo(f"  Stars: {repo.stars}")
@@ -1193,7 +1218,7 @@ def _sync_repos_batch(
                                 session.add(link)
                         
                         session.commit()
-                        click.echo(click.style(f" ✓ ({len(sections)} sections)", fg="green"))
+                        click.echo(click.style(f" OK ({len(sections)} sections)", fg="green"))
                         synced += 1
                         
                     except Exception as e:
@@ -1620,7 +1645,7 @@ def dev_reset(yes: bool) -> None:
     SQLModel.metadata.drop_all(engine)
     SQLModel.metadata.create_all(engine)
     
-    click.echo(click.style("✓ Database reset to fresh state", fg="green"))
+    click.echo(click.style("OK Database reset to fresh state", fg="green"))
     
     if db_path.exists():
         size = db_path.stat().st_size
@@ -1694,7 +1719,7 @@ def dev_clear(
         
         session.commit()
     
-    click.echo(click.style("✓ Cleared:", fg="green"))
+    click.echo(click.style("OK Cleared:", fg="green"))
     for name, count in counts.items():
         click.echo(f"  {name}: {count} deleted")
 
@@ -1761,7 +1786,7 @@ def dev_vacuum() -> None:
     size_after = db_path.stat().st_size if db_path.exists() else 0
     saved = size_before - size_after
     
-    click.echo(click.style("✓ Database vacuumed", fg="green"))
+    click.echo(click.style("OK Database vacuumed", fg="green"))
     click.echo(f"  Before: {size_before:,} bytes")
     click.echo(f"  After:  {size_after:,} bytes")
     if saved > 0:
@@ -1896,7 +1921,7 @@ def dev_seed(example: bool) -> None:
                 session.add(section)
             
             session.commit()
-            click.echo(click.style("✓ Created example project with 4 doc sections", fg="green"))
+            click.echo(click.style("OK Created example project with 4 doc sections", fg="green"))
         else:
             click.echo("Use --example to create sample data")
 
@@ -2054,7 +2079,7 @@ def dev_purge(pattern: str, yes: bool, dry_run: bool) -> None:
             session.delete(project)
         
         session.commit()
-        click.echo(click.style(f"\n✓ Purged {len(matches)} projects", fg="green"))
+        click.echo(click.style(f"\nOK Purged {len(matches)} projects", fg="green"))
 
 
 # =============================================================================
@@ -2098,7 +2123,7 @@ def db_upgrade(revision: str) -> None:
     
     try:
         command.upgrade(alembic_cfg, revision)
-        click.echo(click.style("✓ Database upgraded successfully", fg="green"))
+        click.echo(click.style("OK Database upgraded successfully", fg="green"))
     except Exception as e:
         click.echo(click.style(f"✗ Migration failed: {e}", fg="red"))
         raise click.Abort()
@@ -2124,7 +2149,7 @@ def db_downgrade(revision: str) -> None:
     
     try:
         command.downgrade(alembic_cfg, revision)
-        click.echo(click.style("✓ Database downgraded successfully", fg="green"))
+        click.echo(click.style("OK Database downgraded successfully", fg="green"))
     except Exception as e:
         click.echo(click.style(f"✗ Migration failed: {e}", fg="red"))
         raise click.Abort()
@@ -2173,7 +2198,7 @@ def db_revision(message: str, autogenerate: bool) -> None:
     
     try:
         command.revision(alembic_cfg, message=message, autogenerate=autogenerate)
-        click.echo(click.style("✓ Migration created successfully", fg="green"))
+        click.echo(click.style("OK Migration created successfully", fg="green"))
     except Exception as e:
         click.echo(click.style(f"✗ Failed to create migration: {e}", fg="red"))
         raise click.Abort()
@@ -2198,7 +2223,7 @@ def db_stamp(revision: str) -> None:
     
     try:
         command.stamp(alembic_cfg, revision)
-        click.echo(click.style("✓ Database stamped successfully", fg="green"))
+        click.echo(click.style("OK Database stamped successfully", fg="green"))
     except Exception as e:
         click.echo(click.style(f"✗ Failed to stamp: {e}", fg="red"))
         raise click.Abort()
@@ -2298,7 +2323,7 @@ def graph_build(
             max_prs=max_prs,
         )
         
-        click.echo(f"\n✓ Graph built successfully!")
+        click.echo(f"\nOK Graph built successfully!")
         click.echo(f"  Projects: {stats.projects_created} created, {stats.projects_found} existing")
         click.echo(f"  Links: {stats.links_created} created, {stats.links_found} existing")
         
@@ -2377,7 +2402,7 @@ def graph_build_all(
             max_prs=max_prs,
         )
         
-        click.echo(f"\n✓ All graphs built successfully!")
+        click.echo(f"\nOK All graphs built successfully!")
         click.echo(f"  Projects: {total_stats.projects_created} created, {total_stats.projects_found} existing")
         click.echo(f"  Links: {total_stats.links_created} created, {total_stats.links_found} existing")
         
@@ -2537,7 +2562,7 @@ def export_dossier(
         )
         output_path.write_text(yaml_content, encoding="utf-8")
         
-        click.echo(click.style(f"✓ Exported to {output_path}", fg="green"))
+        click.echo(click.style(f"OK Exported to {output_path}", fg="green"))
         
         # Show summary
         click.echo(f"\n📄 {project.name}")
@@ -2604,9 +2629,9 @@ def export_all(output_dir: str, format: str, synced_only: bool) -> None:
                 content = json.dumps(dossier, indent=2, default=str)
             
             file_path.write_text(content, encoding="utf-8")
-            click.echo(f"  ✓ {file_path.name}")
+            click.echo(f"  OK {file_path.name}")
         
-        click.echo(click.style(f"\n✓ Exported {len(projects)} projects", fg="green"))
+        click.echo(click.style(f"\nOK Exported {len(projects)} projects", fg="green"))
 
 
 @export_group.command("show")
@@ -2773,7 +2798,7 @@ def init_dossier(project_name: Optional[str], output: Optional[str]) -> None:
     )
     output_path.write_text(yaml_content, encoding="utf-8")
     
-    click.echo(click.style(f"✓ Created {output_path}", fg="green"))
+    click.echo(click.style(f"OK Created {output_path}", fg="green"))
     click.echo(f"\nEdit the file to fill in project details:")
     click.echo(f"  {output_path}")
 
@@ -4019,3 +4044,108 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# `backup` joins the existing `db` group defined above -- a second
+# `@cli.group() def db()` silently replaced it, taking `db current`,
+# `db history` and every other alembic route with it.
+@db.command("backup")
+@click.option("--to", "destination", type=click.Path(path_type=Path), default=None,
+              help="Where to write it (default: beside the database, timestamped)")
+def db_backup(destination: Optional[Path]) -> None:
+    """Copy the database through SQLite's online backup API."""
+    from dossier.maintenance import backup, timestamped_name
+
+    source = Path("dossier.db")
+    if not source.exists():
+        click.echo(f"Error: {source} does not exist.", err=True)
+        raise SystemExit(1)
+    target = Path(destination) if destination else timestamped_name(source)
+    backup(source, target)
+    click.echo(f"Backed up {source} -> {target} ({target.stat().st_size:,} bytes)")
+
+
+@projects.command("purge")
+@click.option("--keep-owner", required=True,
+              help="The only owner whose projects are kept")
+@click.option("--apply", is_flag=True,
+              help="Actually delete. Without this the plan is printed and nothing changes.")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation")
+def projects_purge(keep_owner: str, apply: bool, yes: bool) -> None:
+    """Remove every project not owned by KEEP-OWNER, and all of its rows.
+
+    Prints the plan and exits unless --apply is given. A dry run walks exactly
+    the same rows as a real one, so the plan is what the deletion does.
+    """
+    from dossier.maintenance import purge_other_owners
+
+    with get_session() as session:
+        plan = purge_other_owners(session, keep_owner, apply=False)
+        if not plan.projects:
+            click.echo(f"Nothing to purge: every project is owned by {keep_owner}.")
+            return
+
+        click.echo(f"Would remove {len(plan.projects)} project(s) not owned by "
+                   f"{keep_owner}, and {plan.total_rows - len(plan.projects)} related row(s):")
+        for table, count in sorted(plan.rows_by_table.items()):
+            click.echo(f"  {table:24} {count:>6}")
+        click.echo("  " + ", ".join(plan.projects[:12])
+                   + (" ..." if len(plan.projects) > 12 else ""))
+
+        if not apply:
+            click.echo("\nDry run. Re-run with --apply to delete. "
+                       "Back up first: dossier db backup")
+            return
+        if not yes:
+            click.confirm(f"Delete {plan.total_rows} rows?", abort=True)
+
+        done = purge_other_owners(session, keep_owner, apply=True)
+        click.echo(f"Removed {len(done.projects)} project(s) and "
+                   f"{done.total_rows - len(done.projects)} related row(s).")
+
+
+@deltas.command("prune")
+@click.option("--apply", is_flag=True, help="Actually delete. Without this nothing changes.")
+def deltas_prune(apply: bool) -> None:
+    """Remove deltas carrying no evidence of work.
+
+    A stub has no description, no branch, no issue and no pull request -- a row
+    somebody started and left, or one an old test wrote.
+    """
+    from dossier.maintenance import prune_stub_deltas
+
+    with get_session() as session:
+        names = prune_stub_deltas(session, apply=False)
+        if not names:
+            click.echo("No stub deltas.")
+            return
+        click.echo(f"{len(names)} stub delta(s): {', '.join(names)}")
+        if not apply:
+            click.echo("Dry run. Re-run with --apply to delete.")
+            return
+        prune_stub_deltas(session, apply=True)
+        click.echo(f"Removed {len(names)} stub delta(s).")
+
+
+@deltas.command("from-prs")
+@click.option("--apply", is_flag=True, help="Actually write. Without this nothing changes.")
+def deltas_from_prs(apply: bool) -> None:
+    """Derive a delta from every open pull request.
+
+    Identity is the project plus the PR number, so re-running updates rather
+    than duplicating. A draft PR lands in implementation and a ready one in
+    review, because draft means incomplete and nothing else.
+    """
+    from dossier.maintenance import deltas_from_pull_requests
+
+    with get_session() as session:
+        names = deltas_from_pull_requests(session, apply=False)
+        if not names:
+            click.echo("No open pull requests to derive from.")
+            return
+        click.echo(f"{len(names)} delta(s) from open pull requests.")
+        if not apply:
+            click.echo("Dry run. Re-run with --apply to write.")
+            return
+        deltas_from_pull_requests(session, apply=True)
+        click.echo(f"Wrote {len(names)} delta(s).")

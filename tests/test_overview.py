@@ -265,3 +265,26 @@ class _NoCloseSession:
 
     def __exit__(self, *exc):
         return False
+
+
+def test_the_sync_horizon_reads_as_english(session):
+    """"today ago" is a figure a reader mistrusts for the wrong reason."""
+    assert ov.build(session, now=NOW).generated_from == "most recent sync 2d ago"
+    same_day = ov.build(session, now=NOW + timedelta(hours=1))
+    assert "ago" not in same_day.generated_from or "today ago" not in same_day.generated_from
+
+
+def test_scoping_to_an_owner_excludes_everything_else(session):
+    """Unscoped, this view reported 104,576 stars for an org that has 54."""
+    from dossier.models.schemas import Project as P
+
+    session.add(P(name="third/party", github_owner="Textualize", github_stars=50_000,
+                  description="a dependency", github_language="Python",
+                  last_synced_at=NOW))
+    session.commit()
+
+    everything = figures(ov.build(session, now=NOW))
+    scoped = figures(ov.build(session, now=NOW, owner="qm"))
+    assert everything["stars"] == "50,015"
+    assert scoped["stars"] == "15", "a third party's repo is not the org's stars"
+    assert scoped["repositories"] == "3", "the fixture repos carry their owner in full_name"

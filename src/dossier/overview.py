@@ -97,6 +97,39 @@ class OrgOverview:
         return None
 
 
+def owner_of(project: Any) -> str | None:
+    """Who owns a project row, from the column or from `owner/repo`.
+
+    One definition, used by both the overview's scoping and the purge. Two
+    definitions of ownership would let a row be counted in the org's figures
+    and deleted as somebody else's in the same afternoon.
+    """
+    if project.github_owner:
+        return project.github_owner
+    if project.full_name and "/" in project.full_name:
+        return project.full_name.split("/", 1)[0]
+    return None
+
+
+def scope_ids(session: Any, owner: str | None) -> list[int] | None:
+    """Project ids belonging to `owner`, or None for everything in the dossier.
+
+    WHY THIS EXISTS. A dossier holds more than one organisation: a dependency
+    synced for its own sake is a `Project` row like any other. Unscoped, this
+    view reported 104,576 stars for an organisation that has 54, because a
+    third party's repositories were in the denominator. An org overview that
+    sums whatever happens to be in the database is not an org overview.
+    """
+    if owner is None:
+        return None
+    return [p.id for p in session.exec(select(Project)).all() if owner_of(p) == owner]
+
+
+def _in_scope(stmt: Any, column: Any, ids: list[int] | None) -> Any:
+    """Restrict a statement to the scope, if there is one."""
+    return stmt if ids is None else stmt.where(column.in_(ids))
+
+
 def _one(session: Any, statement: Any, default: Any = 0) -> Any:
     result = session.exec(statement).one_or_none()
     if result is None:
@@ -104,10 +137,13 @@ def _one(session: Any, statement: Any, default: Any = 0) -> Any:
     return result if not isinstance(result, tuple) else result[0]
 
 
-def _count(session: Any, model: Any, *where: Any) -> int:
+def _count(session: Any, model: Any, *where: Any, ids: list[int] | None = None,
+           column: Any = None) -> int:
     stmt = select(func.count()).select_from(model)
     for clause in where:
         stmt = stmt.where(clause)
+    if column is not None:
+        stmt = _in_scope(stmt, column, ids)
     return int(_one(session, stmt) or 0)
 
 
@@ -144,15 +180,24 @@ def _trim(text: str | None, width: int) -> str:
 # --- the sections -----------------------------------------------------------
 
 
-def _masthead(session: Any, now: datetime) -> tuple[Cell, ...]:
-    repos = _count(session, Project)
-    synced = _count(session, Project, Project.last_synced_at.isnot(None))
-    stars = int(_one(session, select(func.sum(Project.github_stars))) or 0)
-    langs = int(_one(session, select(func.count(func.distinct(ProjectLanguage.language)))) or 0)
-    people = int(_one(session, select(func.count(func.distinct(ProjectContributor.username)))) or 0)
-    open_prs = _count(session, ProjectPullRequest, ProjectPullRequest.state == "open")
-    open_issues = _count(session, ProjectIssue, ProjectIssue.state == "open")
-    on_deck = _count(session, ProjectDelta, ProjectDelta.phase.notin_(CLOSED_PHASES))
+def _masthead(session: Any, now: datetime, ids: list[int] | None) -> tuple[Cell, ...]:
+    repos = _count(session, Project, ids=ids, column=Project.id)
+    synced = _count(session, Project, Project.last_synced_at.isnot(None),
+                    ids=ids, column=Project.id)
+    stars = int(_one(session, _in_scope(
+        select(func.sum(Project.github_stars)), Project.id, ids)) or 0)
+    langs = int(_one(session, _in_scope(
+        select(func.count(func.distinct(ProjectLanguage.language))),
+        ProjectLanguage.project_id, ids)) or 0)
+    people = int(_one(session, _in_scope(
+        select(func.count(func.distinct(ProjectContributor.username))),
+        ProjectContributor.project_id, ids)) or 0)
+    open_prs = _count(session, ProjectPullRequest, ProjectPullRequest.state == "open",
+                      ids=ids, column=ProjectPullRequest.project_id)
+    open_issues = _count(session, ProjectIssue, ProjectIssue.state == "open",
+                         ids=ids, column=ProjectIssue.project_id)
+    on_deck = _count(session, ProjectDelta, ProjectDelta.phase.notin_(CLOSED_PHASES),
+                     ids=ids, column=ProjectDelta.project_id)
 
     return (
         Cell("repositories", str(repos), f"{synced} synced, {_pct(synced, repos)}"),
@@ -160,11 +205,16 @@ def _masthead(session: Any, now: datetime) -> tuple[Cell, ...]:
         Cell("stars", f"{stars:,}", "as last synced"),
         Cell("languages", str(langs), "distinct, across synced repos"),
         Cell("contributors", str(people), "distinct logins"),
-        Cell("open PRs", str(open_prs), f"{_count(session, ProjectPullRequest)} tracked"),
-        Cell("open issues", str(open_issues), f"{_count(session, ProjectIssue)} tracked"),
-        Cell("branches", str(_count(session, ProjectBranch)), "all repos"),
-        Cell("releases", str(_count(session, ProjectRelease)), "tags seen"),
-        Cell("deltas on deck", str(on_deck), f"{_count(session, ProjectDelta)} total"),
+        Cell("open PRs", str(open_prs),
+             f"{_count(session, ProjectPullRequest, ids=ids, column=ProjectPullRequest.project_id)} tracked"),
+        Cell("open issues", str(open_issues),
+             f"{_count(session, ProjectIssue, ids=ids, column=ProjectIssue.project_id)} tracked"),
+        Cell("branches", str(_count(session, ProjectBranch, ids=ids,
+                                    column=ProjectBranch.project_id)), "in scope"),
+        Cell("releases", str(_count(session, ProjectRelease, ids=ids,
+                                    column=ProjectRelease.project_id)), "tags seen"),
+        Cell("deltas on deck", str(on_deck),
+             f"{_count(session, ProjectDelta, ids=ids, column=ProjectDelta.project_id)} total"),
         Cell("under governance", str(_count(session, GovernanceRepository)), "repos in the roster"),
     )
 
@@ -200,10 +250,10 @@ def _governance(session: Any, now: datetime) -> Section:
     )
 
 
-def _deltas(session: Any, now: datetime) -> Section:
-    counts = dict(session.exec(
-        select(ProjectDelta.phase, func.count()).group_by(ProjectDelta.phase)
-    ).all())
+def _deltas(session: Any, now: datetime, ids: list[int] | None) -> Section:
+    counts = dict(session.exec(_in_scope(
+        select(ProjectDelta.phase, func.count()).group_by(ProjectDelta.phase),
+        ProjectDelta.project_id, ids)).all())
     named = {getattr(p, "value", str(p)): n for p, n in counts.items()}
     rows = tuple(
         (phase.value, str(named.get(phase.value, 0)),
@@ -219,7 +269,7 @@ def _deltas(session: Any, now: datetime) -> Section:
     )
 
 
-def _on_deck(session: Any, now: datetime, limit: int) -> Section:
+def _on_deck(session: Any, now: datetime, limit: int, ids: list[int] | None) -> Section:
     stmt = (
         select(ProjectDelta, Project.name)
         .join(Project, Project.id == ProjectDelta.project_id)
@@ -227,6 +277,7 @@ def _on_deck(session: Any, now: datetime, limit: int) -> Section:
         .order_by(ProjectDelta.updated_at.desc())
         .limit(limit)
     )
+    stmt = _in_scope(stmt, ProjectDelta.project_id, ids)
     rows = []
     for delta, project in session.exec(stmt):
         rows.append((
@@ -247,26 +298,28 @@ def _on_deck(session: Any, now: datetime, limit: int) -> Section:
     )
 
 
-def _activity(session: Any, now: datetime, limit: int) -> Section:
-    prs = dict(session.exec(
+def _activity(session: Any, now: datetime, limit: int, ids: list[int] | None) -> Section:
+    prs = dict(session.exec(_in_scope(
         select(ProjectPullRequest.project_id, func.count())
         .where(ProjectPullRequest.state == "open")
-        .group_by(ProjectPullRequest.project_id)
-    ).all())
-    issues = dict(session.exec(
+        .group_by(ProjectPullRequest.project_id),
+        ProjectPullRequest.project_id, ids)).all())
+    issues = dict(session.exec(_in_scope(
         select(ProjectIssue.project_id, func.count())
         .where(ProjectIssue.state == "open")
-        .group_by(ProjectIssue.project_id)
-    ).all())
-    branches = dict(session.exec(
-        select(ProjectBranch.project_id, func.count()).group_by(ProjectBranch.project_id)
-    ).all())
-    releases = dict(session.exec(
-        select(ProjectRelease.project_id, func.count()).group_by(ProjectRelease.project_id)
-    ).all())
+        .group_by(ProjectIssue.project_id),
+        ProjectIssue.project_id, ids)).all())
+    branches = dict(session.exec(_in_scope(
+        select(ProjectBranch.project_id, func.count()).group_by(ProjectBranch.project_id),
+        ProjectBranch.project_id, ids)).all())
+    releases = dict(session.exec(_in_scope(
+        select(ProjectRelease.project_id, func.count()).group_by(ProjectRelease.project_id),
+        ProjectRelease.project_id, ids)).all())
 
     scored = []
-    for project in session.exec(select(Project).where(Project.last_synced_at.isnot(None))):
+    in_scope = _in_scope(select(Project).where(Project.last_synced_at.isnot(None)),
+                         Project.id, ids)
+    for project in session.exec(in_scope):
         open_pr, open_issue = prs.get(project.id, 0), issues.get(project.id, 0)
         score = open_pr * 3 + open_issue + branches.get(project.id, 0) * 0.5
         if score:
@@ -295,13 +348,12 @@ def _activity(session: Any, now: datetime, limit: int) -> Section:
     )
 
 
-def _languages(session: Any, limit: int) -> Section:
-    seen = list(session.exec(
+def _languages(session: Any, limit: int, ids: list[int] | None) -> Section:
+    seen = list(session.exec(_in_scope(
         select(ProjectLanguage.language, func.count(), func.sum(ProjectLanguage.bytes_count))
         .group_by(ProjectLanguage.language)
         .order_by(func.sum(ProjectLanguage.bytes_count).desc())
-        .limit(limit)
-    ))
+        .limit(limit), ProjectLanguage.project_id, ids)))
     total = sum(int(b or 0) for _, _, b in seen) or 1
     rows = tuple(
         (_trim(name, 18), str(repo_count), f"{int(b or 0) / 1_000_000:.1f}MB",
@@ -318,14 +370,14 @@ def _languages(session: Any, limit: int) -> Section:
     )
 
 
-def _dependencies(session: Any, limit: int) -> Section:
+def _dependencies(session: Any, limit: int, ids: list[int] | None) -> Section:
     rows = tuple(
         (_trim(name, 28), str(repos), "#" * min(int(repos), 24))
-        for name, repos in session.exec(
+        for name, repos in session.exec(_in_scope(
             select(ProjectDependency.name, func.count(func.distinct(ProjectDependency.project_id)))
             .group_by(ProjectDependency.name)
             .order_by(func.count(func.distinct(ProjectDependency.project_id)).desc())
-            .limit(limit)
+            .limit(limit), ProjectDependency.project_id, ids)
         )
     )
     return Section(
@@ -337,16 +389,16 @@ def _dependencies(session: Any, limit: int) -> Section:
     )
 
 
-def _people(session: Any, limit: int) -> Section:
+def _people(session: Any, limit: int, ids: list[int] | None) -> Section:
     rows = tuple(
         (_trim(login, 24), str(repos), f"{int(commits or 0):,}")
-        for login, repos, commits in session.exec(
+        for login, repos, commits in session.exec(_in_scope(
             select(ProjectContributor.username,
                    func.count(func.distinct(ProjectContributor.project_id)),
                    func.sum(ProjectContributor.contributions))
             .group_by(ProjectContributor.username)
             .order_by(func.count(func.distinct(ProjectContributor.project_id)).desc())
-            .limit(limit)
+            .limit(limit), ProjectContributor.project_id, ids)
         )
     )
     return Section(
@@ -358,9 +410,9 @@ def _people(session: Any, limit: int) -> Section:
     )
 
 
-def _attention(session: Any, now: datetime, limit: int) -> Section:
+def _attention(session: Any, now: datetime, limit: int, ids: list[int] | None) -> Section:
     ranked = []
-    for project in session.exec(select(Project)):
+    for project in session.exec(_in_scope(select(Project), Project.id, ids)):
         age = _age_days(project.last_synced_at, now)
         reasons = []
         if age is None:
@@ -390,29 +442,44 @@ def _attention(session: Any, now: datetime, limit: int) -> Section:
     )
 
 
-def build(session: Any, limit: int = 12, now: datetime | None = None) -> OrgOverview:
+def _horizon_phrase(days: float | None) -> str:
+    """How old the whole picture is, read as English.
+
+    `_ago` returns "today" for anything under a day, and appending "ago" to it
+    produced "most recent sync today ago" -- a figure a reader would mistrust
+    for a reason that has nothing to do with the number.
+    """
+    age = _ago(days)
+    return f"most recent sync {age}" if age == "today" else f"most recent sync {age} ago"
+
+
+def build(session: Any, limit: int = 12, now: datetime | None = None,
+          owner: str | None = None) -> OrgOverview:
     """Everything the overview shows, from one session.
 
     `now` is injectable so a test can assert an age rather than assert around
     one: a clock read inside this function would make every age untestable.
     """
     now = now or datetime.now(timezone.utc)
-    horizon = _one(session, select(func.max(Project.last_synced_at)), default=None)
+    ids = scope_ids(session, owner)
+    horizon = _one(session, _in_scope(
+        select(func.max(Project.last_synced_at)), Project.id, ids), default=None)
     return OrgOverview(
-        masthead=_masthead(session, now),
+        masthead=_masthead(session, now, ids),
         sections=(
             _governance(session, now),
-            _on_deck(session, now, limit),
-            _deltas(session, now),
-            _activity(session, now, limit),
-            _languages(session, limit),
-            _dependencies(session, limit),
-            _people(session, limit),
-            _attention(session, now, limit),
+            _on_deck(session, now, limit, ids),
+            _deltas(session, now, ids),
+            _activity(session, now, limit, ids),
+            _languages(session, limit, ids),
+            _dependencies(session, limit, ids),
+            _people(session, limit, ids),
+            _attention(session, now, limit, ids),
         ),
-        generated_from=(
-            f"most recent sync {_ago(_age_days(horizon, now))} ago"
-            if horizon else "nothing synced yet"
+        generated_from=_horizon_phrase(_age_days(horizon, now)) if horizon
+        else "nothing synced yet",
+        scope=(
+            f"{_count(session, Project, ids=ids, column=Project.id)} repositories "
+            + (f"owned by {owner}" if owner else "in this dossier")
         ),
-        scope=f"{_count(session, Project)} repositories in this dossier",
     )
