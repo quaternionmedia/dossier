@@ -238,6 +238,15 @@ class RingScreen(ModalScreen):
         align: center middle;
         background: transparent;
     }
+    /* The layout containers fill the screen. Transparent on the screen alone
+       is not enough -- `Middle` and `Center` inherit an opaque ground and
+       paint it edge to edge, which hides the dashboard just as completely as
+       an opaque screen did. The panel below re-opts into a ground. */
+    RingScreen Middle, RingScreen Center {
+        background: transparent;
+        height: auto;
+        width: auto;
+    }
     #rad-ring {
         width: auto;
         height: auto;

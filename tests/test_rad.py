@@ -537,6 +537,21 @@ class TestRingLayout:
                 f"{theme}: the panel ground and its label are the same colour")
 
 
+def _drawn_words(app) -> set[str]:
+    """The text actually rendered, read out of an exported screenshot.
+
+    THIS IS THE ASSERTION THAT MATTERS, and the first version of these tests did
+    not make it. They checked `styles.background.a == 0` -- the mechanism -- and
+    passed while the dashboard was completely hidden, because the layout
+    containers inside the screen were painting their own ground. Checking the
+    style is checking that the lever was pulled; this checks that something
+    moved.
+    """
+    import re
+
+    return set(re.findall(r">([^<>]{3,})<", app.export_screenshot()))
+
+
 class TestRingLeavesTheDataVisible:
     """The ring is a pop-over, not a takeover.
 
@@ -544,6 +559,31 @@ class TestRingLeavesTheDataVisible:
     menu is about to act on -- a menu whose options refer to a selection you can
     no longer see is worse than one costing an extra keystroke.
     """
+
+    @pytest.mark.asyncio
+    async def test_the_dashboards_text_is_still_drawn_behind_the_ring(self):
+        """Most of the dashboard survives. Not all: the panel is opaque and
+        covers what is directly under it, which is the point of a panel."""
+        from sqlmodel import Session, SQLModel, create_engine
+
+        from dossier.tui import DossierApp
+
+        engine = create_engine("sqlite://")
+        SQLModel.metadata.create_all(engine)
+        app = DossierApp(session_factory=lambda: Session(engine))
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            before = _drawn_words(app)
+            await pilot.press("m")
+            await pilot.pause()
+            await pilot.pause()
+            after = _drawn_words(app)
+
+            assert any("Go" in w for w in after), "the ring is not drawn"
+            survived = before & after
+            assert len(survived) > len(before) * 0.7, (
+                f"only {len(survived)} of {len(before)} dashboard words survived; "
+                f"the ring is covering the data it acts on")
 
     @pytest.mark.asyncio
     async def test_the_dashboard_still_renders_behind_the_ring(self):
@@ -562,11 +602,7 @@ class TestRingLeavesTheDataVisible:
             await pilot.pause()
 
             assert type(app.screen).__name__ == "RingScreen"
-            # The screen underneath is still mounted and still the dashboard --
-            # the ring is stacked on it rather than replacing it.
             assert app.screen_stack[-2] is before
-            assert app.screen.styles.background.a == 0, (
-                "the ring's screen paints a ground and hides the dashboard")
 
     @pytest.mark.asyncio
     async def test_the_panel_itself_is_opaque(self):
