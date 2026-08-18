@@ -4,6 +4,11 @@ Revision ID: 005_delta_tables
 Revises: 004_full_name
 Create Date: 2026-01-19
 
+RE-PARENTED ONTO `008_release`. Written against `004_full_name` on a branch
+that forked before the governance, disk and release migrations, it left the
+chain with two heads the moment it merged: `alembic upgrade head` then
+refuses to pick, and nothing errors until somebody upgrades. The file was
+renamed from `005_` so the number stops claiming a place it does not hold.
 """
 
 from typing import Sequence, Union
@@ -14,8 +19,8 @@ import sqlmodel
 
 
 # revision identifiers, used by Alembic.
-revision: str = "005_delta_tables"
-down_revision: Union[str, None] = "004_full_name"
+revision: str = "009_delta_tables"
+down_revision: Union[str, None] = "008_release"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

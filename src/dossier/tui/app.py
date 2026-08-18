@@ -899,7 +899,7 @@ class DossierApp(App):
                         yield Button("Star", id="btn-filter-starred", variant="default")
 
             with Vertical(id="main-content"):
-                with TabbedContent(id="main-tabs"):
+                with TabbedContent(id="project-tabs"):
                     with TabPane("Dossier", id="tab-dossier"):
                         with Horizontal(id="dossier-layout"):
                             yield VerticalScroll(Markdown("", id="dossier-view"), id="dossier-scroll")
@@ -2476,7 +2476,7 @@ class DossierApp(App):
         if not tab_id:
             return
         try:
-            main_tabs = self.query_one("#main-tabs", TabbedContent)
+            main_tabs = self.query_one("#project-tabs", TabbedContent)
         except Exception:
             return
         if tab_id in MAIN_TABS:
@@ -2493,7 +2493,7 @@ class DossierApp(App):
     def _get_active_tab_id(self) -> Optional[str]:
         """Return the active tab id across main and project tabs."""
         try:
-            main_tabs = self.query_one("#main-tabs", TabbedContent)
+            main_tabs = self.query_one("#project-tabs", TabbedContent)
         except Exception:
             return None
         if main_tabs.active == "tab-projects":
@@ -2536,7 +2536,7 @@ class DossierApp(App):
         if active_tab and active_tab != "tab-dossier":
             self._load_tab_data(active_tab)
 
-    @on(TabbedContent.TabActivated, "#main-tabs")
+    @on(TabbedContent.TabActivated, "#project-tabs")
     def on_main_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         """Lazy load tab data when a main tab is activated."""
         if not hasattr(self, "_current_project_id"):
