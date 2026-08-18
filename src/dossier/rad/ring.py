@@ -1,21 +1,35 @@
 """The ring, drawn in a terminal. One, centered, pop-over.
 
 WHAT THIS OWNS AND WHAT IT DOES NOT. Rendering only. Geometry comes from
-`RingView.angle_of`, the state machine from `RadSession` -- a widget that
-computed its own angles would be a second geometry, and the two would drift the
-first time one was fixed. This file holds no menu content either: content is the
-host's, supplied through `resolve`.
+`RingView.angle_of`, the state machine from `RadSession`, and colour from
+`tokens.roles` — a widget that computed its own angles would be a second
+geometry, and one that named a colour would paint outside the token layer that
+`rad/adr/DRAFT-rad-theme-tokens.md` §1 says nothing paints outside. Content is
+the host's, supplied through `resolve`.
 
 WHY A MODAL SCREEN. rad's terminal form is one centered pop-over rather than a
 menu per node: a terminal has no pointer to open a ring *under*, and several
 rings at once would need a focus model the platform does not give us. A modal
-screen is also what makes the key handling honest -- the ring has focus while it
-is open, so a keystroke is unambiguously an input to the menu.
+screen also makes the key handling honest — the ring holds focus while open, so
+a keystroke is unambiguously an input to the menu.
 
-WHAT IT CANNOT DO. Look like the web ring. Cells are not pixels and a character
-is about twice as tall as it is wide, so the circle is drawn on a corrected
-aspect and still reads as an oval at small sizes. That is cosmetic and stated
-rather than hidden; the interaction is the contract, not the shape.
+LAYOUT, AND THE TWO THINGS A TERMINAL FORCES.
+
+  * A cell is about twice as tall as it is wide, so a ring drawn on equal steps
+    reads as a vertical slit. Horizontal distance is doubled.
+  * A label centred on its own point runs back through the hub at the 3 and 9
+    o'clock positions — exactly where the label is widest and the ring is
+    narrowest. So labels are pushed *outward* from their angle: right-hand
+    labels start at the point, left-hand labels end at it, and only the top and
+    bottom are centred on it.
+
+The hub carries where you are, with a rule under it, so the middle reads as a
+hub rather than as another label that happens to be central.
+
+WHAT IT CANNOT DO. Look like the web ring. There are no arcs, no fills and no
+sub-cell positions, so wedge *shape* is not expressible — position, weight and
+colour carry the meaning instead. Stated rather than hidden: the interaction and
+the token layer are the contract; the shape is not.
 """
 
 from __future__ import annotations
@@ -29,73 +43,165 @@ from textual.screen import ModalScreen
 from textual.widgets import Static
 
 from dossier.rad.session import RadSession, RingView
+from dossier.rad.tokens import DEFAULT_THEME, Roles, roles
 
-# A character cell is roughly twice as tall as it is wide, so horizontal steps
-# are doubled to keep the ring from reading as a vertical slit.
+# A cell is roughly twice as tall as it is wide.
 ASPECT = 2.0
 RADIUS_ROWS = 4
-GRID_ROWS = RADIUS_ROWS * 2 + 3
-GRID_COLS = int(RADIUS_ROWS * ASPECT * 2) + 22
+GRID_ROWS = RADIUS_ROWS * 2 + 2
+GRID_COLS = 48
+
+# A submenu is marked with a glyph rather than a word, so a label's length says
+# something about the label and not about its arity.
+#
+# EVERY GLYPH HERE IS ENCODABLE IN CP1252, and that is a constraint rather than
+# a preference: this repository has already lost a demo to a folder emoji a
+# Windows console could not encode, and a ring that raises
+# UnicodeEncodeError is not a prettier ring. U+203A and U+00B7 are in cp1252;
+# U+276F and the arrow glyphs are not.
+SUBMENU = "›"
+SELECT_L, SELECT_R = "[", "]"
+
+
+def _place(grid: list[list[str]], row: int, col: int, text: str) -> None:
+    """Write text into the grid, clipped rather than wrapped or raising."""
+    if not 0 <= row < len(grid):
+        return
+    start = max(0, min(col, GRID_COLS - len(text)))
+    for offset, char in enumerate(text):
+        if 0 <= start + offset < GRID_COLS:
+            grid[row][start + offset] = char
 
 
 class Ring(Static):
-    """The ring itself: labels placed at their angles, one highlighted.
+    """The ring: labels at their angles, one selected, colour by role token.
 
-    `last_render` keeps the text this widget most recently drew. Textual's
-    accessor for a `Static`'s content has changed across versions, and a test
-    that reached for the wrong one failed in a way that read like the menu
-    never opening. The widget knowing what it drew is cheaper than guessing
-    which attribute the framework calls it this month.
+    `last_render` keeps the plain text most recently drawn. Textual's accessor
+    for a `Static`'s content has changed across versions, and a test reaching
+    for the wrong one failed in a way that read like the menu never opening.
     """
 
     last_render: str = ""
 
-    def render_view(self, view: RingView) -> str:
-        grid = [[" "] * GRID_COLS for _ in range(GRID_ROWS)]
-        centre_row, centre_col = GRID_ROWS // 2, GRID_COLS // 2
+    def __init__(self, theme: str = DEFAULT_THEME, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.roles: Roles = roles(theme)
 
+    def render_view(self, view: RingView) -> str:
+        """Rich markup for the ring. Every colour is a role token."""
+        grid = [[" "] * GRID_COLS for _ in range(GRID_ROWS)]
+        centre_row, centre_col = RADIUS_ROWS, GRID_COLS // 2
+        count = max(len(view.wedges), 1)
+        selected_index = view.highlighted % count
+
+        here = view.path[-1] if view.path else "rad"
+        _place(grid, centre_row, centre_col - len(here) // 2, here)
+        rule = "-" * (len(here) + 2)
+        _place(grid, centre_row + 1, centre_col - len(rule) // 2, rule)
+
+        painted: list[tuple[int, str, bool, bool]] = []
         for index, wedge in enumerate(view.wedges):
             angle = view.angle_of(index)
-            row = centre_row + round(RADIUS_ROWS * math.sin(angle))
-            col = centre_col + round(RADIUS_ROWS * ASPECT * math.cos(angle))
+            dx, dy = math.cos(angle), math.sin(angle)
+            row = centre_row + round(RADIUS_ROWS * dy)
+            # The hub's rule owns its row. A wedge landing there sits against
+            # the rule and reads as part of it -- which happens for any ring
+            # whose item count puts a wedge one row below centre.
+            if row == centre_row + 1:
+                row += 1
+            selected = index == selected_index
+            label = wedge.label + (SUBMENU if wedge.is_submenu else "")
+            body = f"{SELECT_L}{label}{SELECT_R}" if selected else f" {label} "
 
-            selected = index == view.highlighted % len(view.wedges)
-            label = f"[{wedge.label}]" if selected else f" {wedge.label} "
-            if wedge.is_submenu:
-                label = label.rstrip() + ">" if selected else label.rstrip() + ">"
+            reach = round(RADIUS_ROWS * ASPECT * dx)
+            if dx > 0.3:
+                col = centre_col + reach
+            elif dx < -0.3:
+                col = centre_col + reach - len(body)
+            else:
+                col = centre_col + reach - len(body) // 2
 
-            start = max(0, min(col - len(label) // 2, GRID_COLS - len(label)))
-            for offset, char in enumerate(label):
-                if 0 <= row < GRID_ROWS:
-                    grid[row][start + offset] = char
+            _place(grid, row, col, body)
+            painted.append((row, body.strip(), selected, wedge.is_submenu))
 
-        # The centre says where you are, because a ring one level down looks
-        # exactly like the top level otherwise.
-        here = " / ".join(view.path) if view.path else "rad"
-        centre = f"({here})"
-        start = max(0, centre_col - len(centre) // 2)
-        for offset, char in enumerate(centre):
-            if start + offset < GRID_COLS:
-                grid[centre_row][start + offset] = char
+        plain = "\n".join("".join(row).rstrip() for row in grid)
+        self.last_render = plain
+        return self._colourise(plain, painted, centre_row)
 
-        return "\n".join("".join(row).rstrip() for row in grid)
+    def _colourise(self, plain: str, painted, centre_row: int) -> str:
+        """Wrap each placed label in its role token, leaving the grid alone.
+
+        Per line rather than per cell: markup around every cell would multiply
+        the string for no visible gain, and a terminal renders it identically.
+        """
+        lines = plain.split("\n")
+        out: list[str] = []
+        for row_index, line in enumerate(lines):
+            marks = [m for m in painted if m[0] == row_index]
+            text = line
+
+            for _, body, selected, is_submenu in marks:
+                if not body or body not in text:
+                    continue
+                token = (self.roles.focus_ring if selected
+                         else (self.roles.submenu_mark if is_submenu
+                               else self.roles.wedge_label))
+                weight = "bold " if selected else ""
+                text = text.replace(body, f"[{weight}{token}]{body}[/]", 1)
+
+            if not marks:
+                stripped = line.strip()
+                if stripped.startswith("-"):
+                    text = line.replace(stripped, f"[{self.roles.hub_stroke}]{stripped}[/]", 1)
+                elif stripped:
+                    text = line.replace(stripped, f"[{self.roles.hub_label}]{stripped}[/]", 1)
+            elif row_index == centre_row:
+                # The hub shares its row with the 3 and 9 o'clock labels, so it
+                # is painted after them and only where it actually sits.
+                pass
+
+            out.append(text)
+        return "\n".join(out)
 
 
 class RingScreen(ModalScreen):
     """The pop-over. Arrows rotate, Enter commits, Escape backs out.
 
-    Every key is routed through the session so that it is metered exactly once.
-    A widget that handled a key itself would be an input rad never charged for,
+    Every key is routed through the session so it is metered exactly once. A
+    widget that handled a key itself would be an input rad never charged for,
     and the IPA figure would then be quietly too low.
     """
 
-    BINDINGS = []  # keys are handled in on_key so the session meters every one
+    BINDINGS = []  # handled in on_key, so the session meters every key
 
-    def __init__(self, session: RadSession, context: Any = None) -> None:
+    # Sized to the ring, not the screen: a pop-over that filled the terminal
+    # would not read as a pop-over.
+    DEFAULT_CSS = """
+    RingScreen {
+        align: center middle;
+    }
+    #rad-ring {
+        width: auto;
+        height: auto;
+        padding: 1 3 0 3;
+    }
+    #rad-status {
+        width: auto;
+        padding: 0 3 1 3;
+    }
+    """
+
+    def __init__(self, session: RadSession, context: Any = None,
+                 theme: str = DEFAULT_THEME) -> None:
+        # NOT `self._context`. `MessagePump`, which every Textual screen
+        # inherits, already has a `_context`; assigning over it replaces a
+        # method with a value and the app then dies inside the message pump
+        # with "'NoneType' object is not callable" -- nowhere near this line.
         super().__init__()
         self._session = session
         self._open_context = context
-        self._ring = Ring(id="rad-ring")
+        self._roles = roles(theme)
+        self._ring = Ring(theme=theme, id="rad-ring")
         self._status = Static("", id="rad-status")
 
     def compose(self) -> ComposeResult:
@@ -115,15 +221,16 @@ class RingScreen(ModalScreen):
         self._redraw(view)
 
     def _redraw(self, view: RingView) -> None:
-        drawn = self._ring.render_view(view)
-        self._ring.last_render = drawn
-        self._ring.update(drawn)
+        self._ring.update(self._ring.render_view(view))
         current = view.current
-        hint = "Enter opens" if current and current.is_submenu else "Enter commits"
+        act = "open" if current and current.is_submenu else "commit"
+        label = current.label if current else "-"
+        cost = self._session.meter.inputs_since_open
         self._status.update(
-            f"{current.label if current else '-'}   |   "
-            f"arrows rotate  ·  {hint}  ·  Esc backs out   |   "
-            f"inputs this action: {self._session.meter.inputs_since_open}"
+            f"[bold {self._roles.wedge_label_selected}]{label}[/]"
+            f"[{self._roles.hint}]  ·  arrows rotate  ·  "
+            f"enter {act}  ·  esc back  ·  [/]"
+            f"[{self._roles.cost}]{cost} in[/]"
         )
 
     def on_key(self, event) -> None:
@@ -146,7 +253,7 @@ class RingScreen(ModalScreen):
                 self.dismiss(None)
                 return
         else:
-            # Unrecognised: charged at L0 and not at L1, which is what keeps the
+            # Unrecognised: charged at L0 and not at L1, which keeps the
             # abstraction ledger honest about keys the menu ignored.
             self._session.meter.raw(recognized=False)
             return

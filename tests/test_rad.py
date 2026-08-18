@@ -412,3 +412,99 @@ class TestRingInTheApp:
             assert report["actions"] == 2
             assert report["ipa"] == 3
             assert report["reconciles"] is True
+
+
+# --- layout and the token layer ----------------------------------------------
+
+
+class TestRingLayout:
+    """Aesthetics that can be asserted: fit, no collisions, tokens only.
+
+    A ring is a visual thing and most of it is judgement, but three properties
+    are not: it must fit, nothing may overlap the hub, and no colour may be a
+    literal. Those are the ones that break silently.
+    """
+
+    def _drawn(self, wedge_count: int = 4) -> str:
+        from dossier.rad.ring import Ring
+        from dossier.rad.session import RadSession, Wedge
+
+        wedges = tuple(
+            Wedge(f"w{i}", f"Item {i}", action=f"a{i}") for i in range(wedge_count)
+        )
+        s = RadSession(resolve=lambda ctx: wedges)
+        view = s.open_at(None)
+        ring = Ring()
+        ring.render_view(view)
+        return ring.last_render
+
+    def test_the_ring_fits_its_grid(self):
+        from dossier.rad.ring import GRID_COLS, GRID_ROWS
+
+        for count in (2, 3, 4, 5, 6, 8):
+            drawn = self._drawn(count)
+            lines = drawn.split("\n")
+            assert len(lines) <= GRID_ROWS, f"{count} wedges overflowed vertically"
+            assert max(len(l) for l in lines) <= GRID_COLS, f"{count} overflowed wide"
+
+    def test_no_wedge_lands_on_the_hubs_rule(self):
+        """A wedge on the rule row reads as part of the rule."""
+        for count in (2, 3, 4, 5, 6, 8):
+            lines = self._drawn(count).split("\n")
+            rule_rows = [i for i, l in enumerate(lines) if l.strip().startswith("-")]
+            for row in rule_rows:
+                assert lines[row].strip().strip("-") == "", (
+                    f"{count} wedges: something shares the rule row: {lines[row]!r}")
+
+    def test_the_hub_names_where_you_are(self):
+        assert "rad" in self._drawn()
+
+    def test_the_selected_wedge_is_marked_in_the_plain_text(self):
+        """Colour carries selection, and colour alone would be invisible to a
+        reader who cannot see it -- so the mark is in the text as well."""
+        assert "[Item 0]" in self._drawn()
+
+    def test_every_glyph_survives_a_cp1252_console(self):
+        """This repository has already lost a demo to a folder emoji a Windows
+        console could not encode. A ring that raises UnicodeEncodeError is not
+        a prettier ring."""
+        for count in (2, 3, 4, 6, 8):
+            self._drawn(count).encode("cp1252")
+
+    def test_the_markup_names_only_role_tokens(self):
+        """rad's theme record: nothing paints outside the token layer. Every
+        colour in the markup must be a value some role resolves to."""
+        import re
+
+        from dossier.rad.ring import Ring
+        from dossier.rad.session import RadSession
+        from dossier.rad.tokens import roles as role_tokens
+
+        s = RadSession(resolve=resolve)
+        view = s.open_at(None)
+        markup = Ring().render_view(view)
+        allowed = set(vars(role_tokens()).values())
+        used = set(re.findall(r"\[(?:bold )?(#[0-9a-fA-F]{6})\]", markup))
+        assert used, "nothing was coloured at all"
+        assert used <= allowed, f"colours outside the role layer: {used - allowed}"
+
+    def test_every_theme_resolves_every_role(self):
+        from dossier.rad.tokens import Roles, roles as role_tokens, themes
+
+        for theme in themes():
+            resolved = role_tokens(theme)
+            assert isinstance(resolved, Roles)
+            for name, value in vars(resolved).items():
+                assert value.startswith("#"), f"{theme}.{name} is not a colour"
+
+    def test_an_unknown_theme_falls_back_rather_than_raising(self):
+        from dossier.rad.tokens import DEFAULT_THEME, roles as role_tokens
+
+        assert role_tokens("no-such-theme") == role_tokens(DEFAULT_THEME)
+
+    def test_the_contrast_theme_uses_one_foreground(self):
+        """Its whole point is >= 7:1 with no decorative colour."""
+        from dossier.rad.tokens import roles as role_tokens
+
+        values = set(vars(role_tokens("contrast")).values())
+        assert values <= {"#ffffff", "#f0f0f0"}
