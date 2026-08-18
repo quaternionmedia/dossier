@@ -1,0 +1,51 @@
+name: Tests
+
+# WHY THIS EXISTS. Until it did, nothing ran this repository's test suite on a
+# runner. Six checks reported on every pull request -- record lint, licences,
+# REUSE, submodule refs, a secret scan -- and not one of them executed a test.
+# A green pull request meant "the governance checks passed", and a reader
+# reasonably took it to mean the code worked.
+#
+# The suite covers the CLI, the API, the parsers, the governance views, the
+# disk tooling and the TUI -- the last driven headlessly through Textual's
+# Pilot, which is the only form of it a runner can execute.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# One run per branch. A second push supersedes the first on a pull request,
+# because nobody reads the result of a run whose commit has been replaced. On
+# main the run IS the record that the commit was checked, so it is never
+# cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install through the lock
+        run: uv sync --all-extras
+
+      - name: Run the suite
+        # The TUI tests need a terminal size to lay out against. Textual's
+        # headless driver supplies its own, but anything shelling out to a
+        # real terminal on a runner has none -- COLUMNS/LINES make that
+        # deterministic rather than dependent on the runner image.
+        env:
+          COLUMNS: "120"
+          LINES: "40"
+        run: uv run pytest -q
