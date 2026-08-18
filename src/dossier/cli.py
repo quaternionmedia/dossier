@@ -649,6 +649,8 @@ def github_sync(
                 existing.github_owner = repo.owner
                 existing.github_repo = repo.name
                 existing.github_stars = repo.stars
+                existing.is_fork = repo.is_fork
+                existing.is_archived = repo.is_archived
                 existing.github_language = repo.language
                 existing.last_synced_at = utcnow()
                 existing.updated_at = utcnow()
@@ -672,6 +674,8 @@ def github_sync(
                     github_owner=repo.owner,
                     github_repo=repo.name,
                     github_stars=repo.stars,
+                    is_fork=repo.is_fork,
+                    is_archived=repo.is_archived,
                     github_language=repo.language,
                     last_synced_at=utcnow(),
                 )
@@ -1006,6 +1010,8 @@ def _sync_repos_batch(
                             existing.github_owner = repo.owner
                             existing.github_repo = repo.name
                             existing.github_stars = repo.stars
+                            existing.is_fork = repo.is_fork
+                            existing.is_archived = repo.is_archived
                             existing.github_language = repo.language
                             existing.last_synced_at = utcnow()
                             existing.updated_at = utcnow()
@@ -1028,6 +1034,8 @@ def _sync_repos_batch(
                                 github_owner=repo.owner,
                                 github_repo=repo.name,
                                 github_stars=repo.stars,
+                                is_fork=repo.is_fork,
+                                is_archived=repo.is_archived,
                                 github_language=repo.language,
                                 last_synced_at=utcnow(),
                             )

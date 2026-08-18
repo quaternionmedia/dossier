@@ -111,7 +111,8 @@ def owner_of(project: Any) -> str | None:
     return None
 
 
-def scope_ids(session: Any, owner: str | None) -> list[int] | None:
+def scope_ids(session: Any, owner: str | None,
+              include_forks: bool = False) -> list[int] | None:
     """Project ids belonging to `owner`, or None for everything in the dossier.
 
     WHY THIS EXISTS. A dossier holds more than one organisation: a dependency
@@ -122,7 +123,10 @@ def scope_ids(session: Any, owner: str | None) -> list[int] | None:
     """
     if owner is None:
         return None
-    return [p.id for p in session.exec(select(Project)).all() if owner_of(p) == owner]
+    return [
+        p.id for p in session.exec(select(Project)).all()
+        if owner_of(p) == owner and (include_forks or not p.is_fork)
+    ]
 
 
 def _in_scope(stmt: Any, column: Any, ids: list[int] | None) -> Any:
@@ -454,14 +458,14 @@ def _horizon_phrase(days: float | None) -> str:
 
 
 def build(session: Any, limit: int = 12, now: datetime | None = None,
-          owner: str | None = None) -> OrgOverview:
+          owner: str | None = None, include_forks: bool = False) -> OrgOverview:
     """Everything the overview shows, from one session.
 
     `now` is injectable so a test can assert an age rather than assert around
     one: a clock read inside this function would make every age untestable.
     """
     now = now or datetime.now(timezone.utc)
-    ids = scope_ids(session, owner)
+    ids = scope_ids(session, owner, include_forks=include_forks)
     horizon = _one(session, _in_scope(
         select(func.max(Project.last_synced_at)), Project.id, ids), default=None)
     return OrgOverview(
@@ -481,5 +485,6 @@ def build(session: Any, limit: int = 12, now: datetime | None = None,
         scope=(
             f"{_count(session, Project, ids=ids, column=Project.id)} repositories "
             + (f"owned by {owner}" if owner else "in this dossier")
+            + ("" if include_forks or not owner else ", forks excluded")
         ),
     )

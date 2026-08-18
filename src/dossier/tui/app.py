@@ -100,6 +100,7 @@ def extract_file_path(source_file: str | None) -> str | None:
     return source_file
 
 
+from dossier.tui.delta_board import DeltaBoard
 from dossier.tui.overview_panel import OverviewPanel
 
 
@@ -853,7 +854,10 @@ class DossierApp(App):
             vs = self._config.view_state
             self.filter_synced = vs.filter_synced
             self.filter_language = vs.filter_language
-            self.filter_entity = vs.filter_entity
+            # `filter_entity` matched project rows whose names were addresses.
+            # That shape is gone, so a restored value would filter to nothing
+            # with no control on screen to clear it.
+            self.filter_entity = None
             self.filter_starred = vs.filter_starred
             self.sort_by = vs.sort_by
 
@@ -876,19 +880,17 @@ class DossierApp(App):
         
         with Horizontal(id="main-layout"):
             with Vertical(id="sidebar"):
+                # The work board first: deltas are the unit of work, and the
+                # project tree below is how you reach a repository that has no
+                # delta open. The board reads `project_delta`; the sidebar's
+                # old entity filter matched project rows whose *names* were
+                # addresses, which is a shape `ingest.py` refuses to create.
+                with Container(id="delta-board-container"):
+                    yield DeltaBoard(self.session_factory, id="delta-board")
                 with Container(id="project-list-container"):
                     yield Tree("Projects", id="project-tree")
                 with Vertical(id="sidebar-controls"):
                     with Horizontal(id="filter-bar-2"):
-                        yield Select(
-                            [("All Types", "all"), ("Repos", "repo"), ("Branches", "branch"),
-                             ("Issues", "issue"), ("PRs", "pr"), ("Versions", "ver"),
-                             ("Docs", "doc"), ("Deltas", "delta"), ("Users", "user"),
-                             ("Languages", "lang"), ("Packages", "pkg")],
-                            value="all",
-                            id="select-entity-type",
-                            allow_blank=False,
-                        )
                         yield Select(
                             [("Any Language", "")],  # Will be populated on mount
                             value="",
@@ -2421,6 +2423,28 @@ class DossierApp(App):
             
             # Select the new project
             self.selected_project = project
+
+    @on(Tree.NodeSelected, "#delta-board")
+    def on_delta_board_selected(self, event: Tree.NodeSelected) -> None:
+        """Selecting a delta selects the project it belongs to.
+
+        Every per-project tab reads `selected_project`. A board that set only
+        the delta would leave the rest of the screen describing whatever was
+        selected before -- stale content that looks current.
+        """
+        data = event.node.data
+        if not data or data.get("type") != "delta":
+            return
+        project_id = data.get("project_id")
+        if project_id is None:
+            return
+        with self.session_factory() as session:
+            project = session.get(Project, project_id)
+            if project is None:
+                return
+            session.expunge(project)
+        self.selected_project = project
+        self.show_project_details(project)
 
     @on(Tree.NodeSelected, "#project-tree")
     def on_project_tree_selected(self, event: Tree.NodeSelected) -> None:
@@ -5875,13 +5899,6 @@ class DossierApp(App):
         search_input = self.query_one("#search-input", Input)
         self.load_projects(search=search_input.value)
     
-    @on(Select.Changed, "#select-entity-type")
-    def on_entity_type_changed(self, event: Select.Changed) -> None:
-        """Handle entity type filter change."""
-        self.filter_entity = event.value if event.value != "all" else None
-        search_input = self.query_one("#search-input", Input)
-        self.load_projects(search=search_input.value)
-    
     @on(Select.Changed, "#select-language")
     def on_language_changed(self, event: Select.Changed) -> None:
         """Handle language filter change."""
@@ -5924,13 +5941,6 @@ class DossierApp(App):
         """Update all filter UI elements to match current filter state."""
         self._update_filter_buttons()
         
-        # Update entity type select
-        try:
-            select_entity = self.query_one("#select-entity-type", Select)
-            select_entity.value = self.filter_entity if self.filter_entity else "all"
-        except Exception:
-            pass
-        
         # Update language select  
         try:
             select_lang = self.query_one("#select-language", Select)
@@ -5948,10 +5958,35 @@ class DossierApp(App):
         except Exception:
             pass
 
+    def _filter_matches_anything(self) -> bool:
+        """Whether the current filters select at least one project."""
+        filters = []
+        if self.filter_synced is True:
+            filters.append(Project.last_synced_at.isnot(None))
+        elif self.filter_synced is False:
+            filters.append(Project.last_synced_at.is_(None))
+        if not filters:
+            return True
+        from sqlalchemy import func
+
+        with self.session_factory() as session:
+            stmt = select(func.count()).select_from(Project)
+            for clause in filters:
+                stmt = stmt.where(clause)
+            return bool(session.exec(stmt).one())
+
     def _restore_view_state(self) -> None:
         """Restore view state from config on app mount."""
         vs = self._config.view_state
-        
+
+        # A restored filter that now matches nothing empties the sidebar with
+        # no visible reason: the saved state said "unsynced" and every project
+        # had since been synced, so the list was blank and the control that
+        # explained it was two panels away. A filter is worth restoring only
+        # while it still selects something.
+        if vs and vs.filter_synced is not None and not self._filter_matches_anything():
+            self.filter_synced = None
+
         # Load projects first
         self.load_projects(auto_select=False)
         
