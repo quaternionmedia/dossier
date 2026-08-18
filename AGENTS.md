@@ -69,6 +69,35 @@ do not settle either in passing while editing licensing files.
 <!-- Project-specific setup commands, test commands, and conventions belong
      below this line; this seed only carries the governance-discovery part. -->
 
+## The tag is the human gate, and nothing else is
+
+**There are exactly two human gates in this organisation.** Ratification, for
+what the constitution says, and **the version tag, for what this project
+ships**. A pull request is neither -- it is an audit record. Per
+`governance/qm/records/DRAFT-version-tags-are-claims.md`:
+
+- **A version tag is a human act, never an automated or an assistant one.**
+  Assistants prepare releases; a human cuts the tag.
+- **A `v*` tag asserts three things** at the tagged commit: a human
+  **reviewed** the change set; a human **manually tested** it against its real
+  runtime; and its **deterministic automated validation passed**.
+- **Only deterministic tests count as that validation.** A test that retries,
+  depends on timing, or skips when a fixture is absent contributes nothing.
+  **A skipped test is an absent test that has announced itself** -- better than
+  silence, and still not evidence. **A skip blocks a tag here** until it is
+  resolved or the tag's `Not-covered` names it.
+- **Everything untagged carries no release claim.** `main`, a pull request and
+  a local build are drafts. They may be perfectly good; they assert nothing.
+
+`.github/workflows/tag-claims.yml` checks what a pushed tag *says* -- that it is
+annotated and carries `Reviewed-by`, `Manually-tested`, `Automated-gate` and
+`Not-covered`. **It cannot check that any of it happened.** It reads an
+annotation a human wrote, after the tag already exists. The gate is the person.
+
+This language is **inherited, not authored here**: it arrives through
+`governance/qm`'s seed and is refreshed by propagation, so every project says
+the same thing rather than each drifting its own way.
+
 ## What dossier is
 
 A documentation standardization tool that auto-parses project documentation
