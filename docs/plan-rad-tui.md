@@ -25,9 +25,11 @@ rotate the highlight, Enter commits, Escape backs out; pointer never required* �
 and the drag-through submenu has a keyboard equivalent in the contract.
 
 **So a Textual ring is not a reduced rad. It is rad's keyboard path, rendered as
-a ring.** What a terminal cannot express is the pointer-specific half: commit by
-crossing the outer rim under a finger, and input-cost measurements that assume a
-pointer. Those are named rather than skipped — see *Conformance* below.
+a ring.** What a terminal cannot express is commit by crossing the outer rim
+under a finger, and the pointer half of the input taxonomy. It *can* meter the
+cost — see *Measuring the interaction* below, where rad turns out to count a
+keystroke as an input already. Cases a terminal cannot express are named rather
+than skipped — see *Conformance*.
 
 ## The division of ownership, which is rad's and not ours to redraw
 
@@ -97,8 +99,12 @@ backs out, and every commit produces an intent.
 
 The 14 tabs become content returned by `resolve(context)`. The command palette
 is the naming route, the ring the navigating one. **The data layer is untouched
-— this is navigation, not deletion**, and the tabs' underlying views keep
-working while the ring is learned.
+— this is navigation, not deletion**: every view the tabs reached is still
+reachable, through `Go` rather than through a tab strip.
+
+**This is a replacement.** Tab navigation goes; the views stay. That removes a
+discoverable surface, and the command palette is the mitigation — one that is
+not yet proven, and is listed below as unsettled for that reason.
 
 ### 4. Cross-open
 
@@ -127,15 +133,49 @@ is an absent test that has announced itself, and by standing direction a skip
 blocks a tag. The pointer-specific cases will be listed explicitly, with the
 reason, so the gap is a stated boundary rather than a green run.
 
-## What this plan does not settle
+## Measuring the interaction, which rad already defines
 
-- **Whether the ring replaces the tabs or coexists with them permanently.**
-  Stage 3 keeps both working; which one is eventually removed is a decision for
-  after somebody has used it.
-- **Input-cost accounting in a terminal.** rad measures interaction efficiency
-  in pointer terms. A keystroke count is not the same measure, and claiming it
-  is would corrupt the metric rad already defines.
-- **Whether qmcp's dashboard becomes a TUI.** It is a CLI view today. `Reach`
-  works regardless; a ring in qmcp is stage 2's extraction, not its premise.
-- **The clock.** rad quantizes commits against a beat grid, optionally MIDI.
-  Whether a dashboard wants quantized commits at all is unasked and unanswered.
+**A correction to an earlier draft of this page, which had it wrong.** It said a
+keystroke count was not rad's metric and that claiming otherwise would corrupt
+it. rad's own metrics record says the opposite: one **input** is *"one pointer
+down…up envelope"* **or** *"one keystroke"*, and IPA is measured at **L3 —
+committed intents** — precisely so it is *"comparable across platforms by
+construction"*. There is already a keyboard budget. A terminal meters IPA
+natively; nothing needed inventing.
+
+**IPA = inputs from idle to committed intent**, and its inverse, actions per
+input, is the second figure tracked. Both are reported.
+
+**All five levels are metered and reconciled at L3**, as rad requires: L0 raw
+terminal key events, L1 recognized keys, L2 state-machine transitions, L3
+committed intents. Metering only the top would give a correct IPA and forfeit
+the reconciliation that makes the number trustworthy — and figures that cannot
+sit beside the web implementation's are figures nobody can act on.
+
+**The keyboard budget is `≤ 1 + ⌈N/2⌉ + 1`.** rad calls a verb over budget a
+*resolver design error* — restructure the menu, do not relax the number — which
+constrains how many children each of Go/Do/Show/Reach may carry. **Measured and
+reported, not enforced as a build failure**, while the palette is still
+settling. It is visible pressure rather than a gate; making it a gate is a later
+decision and should be taken deliberately.
+
+## Settled since the first draft
+
+- **The ring replaces tab navigation.** Stage 3 is a replacement, not a
+  coexistence. The tabs' underlying views remain as views; what goes is
+  navigating by tab.
+- **qmcp's dashboard stays a CLI.** No ring there. `Reach` works across the two
+  regardless, because it commits an address rather than a screen.
+- **The clock is stubbed.** The intent envelope carries its timing fields from
+  the start so that quantized commit is a later implementation rather than a
+  schema version, and nothing schedules against a beat grid yet. Stubbing it now
+  is cheaper than retrofitting it; pretending it works would be worse than
+  either.
+
+## What this plan still does not settle
+
+- **Whether the IPA budget becomes a gate.** Reported now; enforcing it is a
+  decision for when the palette has stopped moving.
+- **What the ring costs a reader who never learns it.** Replacing tab navigation
+  removes a discoverable surface. The command palette is the mitigation and is
+  not yet proven to be one.
