@@ -87,10 +87,13 @@ class DeltaBoard(Tree):
             deltas = list(session.exec(
                 select(ProjectDelta).order_by(ProjectDelta.updated_at.desc())
             ).all())
-            names = {
-                p.id: (p.full_name or p.name)
-                for p in session.exec(select(Project)).all()
-            }
+            # A fork's deltas are upstream's work. They are excluded here as
+            # well as at derivation, because a database synced before that rule
+            # existed still holds them.
+            projects = list(session.exec(select(Project)).all())
+            names = {p.id: (p.full_name or p.name) for p in projects}
+            forks = {p.id for p in projects if p.is_fork}
+            deltas = [d for d in deltas if d.project_id not in forks]
             for delta in deltas:
                 session.expunge(delta)
 

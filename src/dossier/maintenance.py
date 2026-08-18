@@ -158,6 +158,25 @@ def is_stub(delta: Any) -> bool:
     ))
 
 
+def prune_fork_deltas(session: Any, apply: bool = False) -> list[str]:
+    """Remove deltas belonging to forks. Returns their names.
+
+    Separate from the stub prune because the reason is different: these carry
+    every sign of real work, and the work is upstream's.
+    """
+    forks = {p.id for p in session.exec(select(Project)).all() if p.is_fork}
+    doomed = [
+        d for d in session.exec(select(ProjectDelta)).all()
+        if d.project_id in forks
+    ]
+    names = sorted(d.name for d in doomed)
+    if apply and doomed:
+        for delta in doomed:
+            session.delete(delta)
+        session.commit()
+    return names
+
+
 def prune_stub_deltas(session: Any, apply: bool = False) -> list[str]:
     """Remove every delta carrying no evidence of work. Returns their names."""
     doomed = [d for d in session.exec(select(ProjectDelta)).all() if is_stub(d)]
@@ -191,9 +210,18 @@ def deltas_from_pull_requests(session: Any, apply: bool = False) -> list[str]:
         if d.pr_number
     }
     touched: list[str] = []
-    open_prs = session.exec(
-        select(ProjectPullRequest).where(ProjectPullRequest.state == "open")
-    ).all()
+    # A fork's open pull requests are upstream's work -- dependabot bumps on a
+    # vendored copy are not this organisation's units of work, and on a board
+    # they read exactly like they are.
+    forks = {
+        p.id for p in session.exec(select(Project)).all() if p.is_fork
+    }
+    open_prs = [
+        pr for pr in session.exec(
+            select(ProjectPullRequest).where(ProjectPullRequest.state == "open")
+        ).all()
+        if pr.project_id not in forks
+    ]
 
     for pr in open_prs:
         name = f"pr-{pr.pr_number}"

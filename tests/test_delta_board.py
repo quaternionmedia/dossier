@@ -180,3 +180,58 @@ async def test_the_owner_group_node_carries_its_owner(session):
         owners = [node.data.get("owner") for node in tree.root.children
                   if node.data and node.data.get("type") == "group"]
     assert "org" in owners
+
+
+def test_forks_are_excluded_even_without_an_owner(session):
+    """The question is what the organisation built, and dropping the owner
+    argument must not quietly change the subject."""
+    unscoped = {c.label: c.value for c in ov.build(session, now=NOW).masthead}
+    assert unscoped["repositories"] == "1"
+    assert unscoped["contributors"] == "1"
+    assert "forks excluded" in ov.build(session, now=NOW).scope
+
+
+def test_a_forks_open_pull_requests_are_not_org_work(session):
+    from dossier.maintenance import deltas_from_pull_requests
+    from dossier.models.schemas import Project as P, ProjectPullRequest
+    from sqlmodel import select
+
+    fork = session.exec(select(P).where(P.is_fork == True)).first()  # noqa: E712
+    session.add(ProjectPullRequest(project_id=fork.id, pr_number=99,
+                                   title="Bump certifi", state="open"))
+    session.commit()
+    assert "pr-99" not in deltas_from_pull_requests(session)
+
+
+def test_fork_deltas_already_stored_are_prunable(session):
+    """A database synced before the rule existed still holds them."""
+    from dossier.maintenance import prune_fork_deltas
+    from dossier.models.schemas import Project as P, ProjectDelta as D
+    from sqlmodel import select
+
+    fork = session.exec(select(P).where(P.is_fork == True)).first()  # noqa: E712
+    session.add(D(project_id=fork.id, name="upstream-work", title="Theirs",
+                  description="x"))
+    session.commit()
+    assert prune_fork_deltas(session, apply=True) == ["upstream-work"]
+    assert prune_fork_deltas(session) == []
+
+
+@pytest.mark.asyncio
+async def test_the_board_does_not_show_a_forks_deltas(session):
+    from dossier.models.schemas import Project as P, ProjectDelta as D
+    from dossier.tui.app import DossierApp
+    from sqlmodel import select
+
+    fork = session.exec(select(P).where(P.is_fork == True)).first()  # noqa: E712
+    session.add(D(project_id=fork.id, name="theirs", title="Upstream thing",
+                  phase=DeltaPhase.REVIEW, description="x"))
+    session.commit()
+
+    app = DossierApp(session_factory=lambda: _Borrowed(session))
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        board = app.query_one(DeltaBoard)
+        labels = [str(leaf.label) for node in board.root.children
+                  for leaf in node.children]
+    assert not any("Upstream thing" in label for label in labels)

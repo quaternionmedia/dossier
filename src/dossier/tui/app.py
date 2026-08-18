@@ -101,6 +101,7 @@ def extract_file_path(source_file: str | None) -> str | None:
 
 
 from dossier.tui.delta_board import DeltaBoard
+from dossier.tui.intersections_panel import IntersectionsPanel
 
 # The prefix `load_projects` puts on an owner group node.
 ORG_GROUP_PREFIX = "🏢"
@@ -540,9 +541,17 @@ class StatsWidget(Static):
         
         with self.session_factory() as session:
             # Use COUNT(*) for efficiency instead of loading all records
-            project_count = session.exec(select(func.count()).select_from(Project)).one()
+            # Forks are excluded: the header is a statement about the
+            # organisation, and a vendored copy of somebody else's project is
+            # not part of what it built.
+            project_count = session.exec(
+                select(func.count()).select_from(Project)
+                .where(Project.is_fork == False)  # noqa: E712
+            ).one()
             synced_count = session.exec(
-                select(func.count()).select_from(Project).where(Project.last_synced_at.isnot(None))
+                select(func.count()).select_from(Project)
+                .where(Project.is_fork == False)  # noqa: E712
+                .where(Project.last_synced_at.isnot(None))
             ).one()
             doc_count = session.exec(select(func.count()).select_from(DocumentSection)).one()
             
@@ -956,6 +965,9 @@ class DossierApp(App):
                             yield DataTable(id="disk-targets-table")
                     with TabPane("Components", id="tab-components"):
                         with Vertical():
+                            # What can be observed, above what was declared.
+                            yield IntersectionsPanel(self.session_factory,
+                                                     id="intersections")
                             yield DataTable(id="components-table")
                             with Horizontal(id="component-buttons"):
                                 yield Button("Add Component", id="btn-add-component", variant="primary")
@@ -2620,6 +2632,14 @@ class DossierApp(App):
         # Store current project ID for lazy loading
         self._current_project_id = project.id
         self._current_project = project
+
+        # The intersections panel is cheap and always correct for the current
+        # selection; leaving it on the previous project would show one repo's
+        # relationships under another repo's name.
+        try:
+            self.query_one(IntersectionsPanel).show_for(project)
+        except Exception:
+            pass
         
         # Update detail panel
         detail_panel = self.query_one("#project-detail", ProjectDetailPanel)

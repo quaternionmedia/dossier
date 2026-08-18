@@ -121,11 +121,12 @@ def scope_ids(session: Any, owner: str | None,
     third party's repositories were in the denominator. An org overview that
     sums whatever happens to be in the database is not an org overview.
     """
-    if owner is None:
+    if owner is None and include_forks:
         return None
     return [
         p.id for p in session.exec(select(Project)).all()
-        if owner_of(p) == owner and (include_forks or not p.is_fork)
+        if (owner is None or owner_of(p) == owner)
+        and (include_forks or not p.is_fork)
     ]
 
 
@@ -485,6 +486,6 @@ def build(session: Any, limit: int = 12, now: datetime | None = None,
         scope=(
             f"{_count(session, Project, ids=ids, column=Project.id)} repositories "
             + (f"owned by {owner}" if owner else "in this dossier")
-            + ("" if include_forks or not owner else ", forks excluded")
+            + ("" if include_forks else ", forks excluded")
         ),
     )

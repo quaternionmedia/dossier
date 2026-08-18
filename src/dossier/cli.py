@@ -4157,3 +4157,27 @@ def deltas_from_prs(apply: bool) -> None:
             return
         deltas_from_pull_requests(session, apply=True)
         click.echo(f"Wrote {len(names)} delta(s).")
+
+
+@deltas.command("prune-forks")
+@click.option("--apply", is_flag=True, help="Actually delete. Without this nothing changes.")
+def deltas_prune_forks(apply: bool) -> None:
+    """Remove deltas belonging to forks.
+
+    A fork's open pull requests are upstream's work. On a board they read
+    exactly like the organisation's own.
+    """
+    from dossier.maintenance import prune_fork_deltas
+
+    with get_session() as session:
+        names = prune_fork_deltas(session, apply=False)
+        if not names:
+            click.echo("No deltas belong to forks.")
+            return
+        click.echo(f"{len(names)} delta(s) on forks: {', '.join(names[:10])}"
+                   + (" ..." if len(names) > 10 else ""))
+        if not apply:
+            click.echo("Dry run. Re-run with --apply to delete.")
+            return
+        prune_fork_deltas(session, apply=True)
+        click.echo(f"Removed {len(names)} delta(s).")

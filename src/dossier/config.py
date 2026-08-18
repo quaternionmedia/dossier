@@ -62,8 +62,19 @@ class DossierConfig:
     
     @classmethod
     def get_config_path(cls) -> Path:
-        """Get the path to the config file."""
-        return Path.home() / ".dossier" / "config.json"
+        """Where the config lives. `DOSSIER_HOME` overrides the home directory.
+
+        The override exists because the test suite drives the real app, and the
+        app saves its view state on exit -- so running the tests rewrote the
+        operator's own dashboard state: last project, active tab, and a filter
+        that then matched nothing and emptied their sidebar. A test that can
+        reach `~` is a test that can break the thing it is checking.
+        """
+        import os
+
+        home = os.environ.get("DOSSIER_HOME")
+        base = Path(home) if home else Path.home() / ".dossier"
+        return base / "config.json"
     
     @classmethod
     def load(cls) -> "DossierConfig":
