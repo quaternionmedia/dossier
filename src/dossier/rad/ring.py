@@ -46,10 +46,41 @@ from dossier.rad.session import RadSession, RingView
 from dossier.rad.tokens import DEFAULT_THEME, Roles, roles
 
 # A cell is roughly twice as tall as it is wide.
-ASPECT = 2.0
+ASPECT = 2.6
 RADIUS_ROWS = 4
-GRID_ROWS = RADIUS_ROWS * 2 + 2
-GRID_COLS = 48
+GRID_ROWS = RADIUS_ROWS * 2 + 5
+GRID_COLS = 58
+
+# A node is a bordered box, three rows tall, drawn in ASCII because box-drawing
+# characters are not encodable in cp1252 -- the same constraint that governs
+# every other glyph here.
+BOX_H, BOX_CORNER, BOX_V = "-", "+", "|"
+
+
+def _box(label: str, selected: bool = False) -> tuple[str, str, str]:
+    """One node: its top, middle and bottom rows.
+
+    A selected node is drawn with a doubled rule rather than only a colour.
+    rad treats accessibility as foundation, and a selection carried by colour
+    alone is invisible to a reader who cannot see it -- so the border says it
+    too, in the plain text.
+    """
+    inner = f" {label} "
+    horizontal = "=" if selected else BOX_H
+    edge = BOX_CORNER + horizontal * len(inner) + BOX_CORNER
+    return edge, f"{BOX_V}{inner}{BOX_V}", edge
+
+
+def _depth_marks(depth: int, width: int) -> list[str]:
+    """One rule per level, so the palette's depth is readable at a glance.
+
+    Three lines means three deep. It sits under the hub -- the one part of the
+    ring that never moves -- so depth is read from the same place as what is on
+    deck, rather than by counting breadcrumbs.
+    """
+    del width  # a fixed short mark: a rule as wide as the hub collides with
+    # the side nodes, which sit on the hub's own rows.
+    return [BOX_H * 3 for _ in range(max(depth, 1))]
 
 # A submenu is marked with a glyph rather than a word, so a label's length says
 # something about the label and not about its arity.
@@ -90,41 +121,59 @@ class Ring(Static):
     def render_view(self, view: RingView) -> str:
         """Rich markup for the ring. Every colour is a role token."""
         grid = [[" "] * GRID_COLS for _ in range(GRID_ROWS)]
-        centre_row, centre_col = RADIUS_ROWS, GRID_COLS // 2
+        centre_row, centre_col = GRID_ROWS // 2, GRID_COLS // 2
         count = max(len(view.wedges), 1)
         selected_index = view.highlighted % count
+        current = view.current
 
-        here = view.path[-1] if view.path else "rad"
-        _place(grid, centre_row, centre_col - len(here) // 2, here)
-        rule = "-" * (len(here) + 2)
-        _place(grid, centre_row + 1, centre_col - len(rule) // 2, rule)
+        # THE HUB IS THE ON-DECK SLOT. It always holds the wedge that Enter
+        # would take, in the same place, so reading "what am I about to do"
+        # costs no eye movement and does not depend on spotting a highlight
+        # somewhere on the rim. It is the only part of the ring that never
+        # moves, which is what makes it worth reading.
+        on_deck = current.label if current else "-"
+        if current is not None and current.is_submenu:
+            on_deck += SUBMENU
+        hub = _box(on_deck)
+        for offset, line in enumerate(hub):
+            _place(grid, centre_row - 1 + offset, centre_col - len(line) // 2, line)
+
+        # Depth, directly under the hub: one rule per level.
+        depth = len(view.path) + 1
+        for offset, mark in enumerate(_depth_marks(depth, len(hub[0]) - 4)):
+            _place(grid, centre_row + 2 + offset, centre_col - len(mark) // 2, mark)
 
         painted: list[tuple[int, str, bool, bool]] = []
         for index, wedge in enumerate(view.wedges):
             angle = view.angle_of(index)
             dx, dy = math.cos(angle), math.sin(angle)
-            row = centre_row + round(RADIUS_ROWS * dy)
-            # The hub's rule owns its row. A wedge landing there sits against
-            # the rule and reads as part of it -- which happens for any ring
-            # whose item count puts a wedge one row below centre.
-            if row == centre_row + 1:
-                row += 1
             selected = index == selected_index
             label = wedge.label + (SUBMENU if wedge.is_submenu else "")
-            body = f"{SELECT_L}{label}{SELECT_R}" if selected else f" {label} "
+            rows = _box(label, selected)
+            width = len(rows[0])
+
+            row = centre_row + round(RADIUS_ROWS * dy)
+            # The hub occupies three rows, and a node overlapping them would
+            # sit inside the box that is meant to be the one stable thing here.
+            # Only the top and bottom positions can collide: the east and west
+            # nodes share the hub's rows and are far clear of it horizontally,
+            # so pushing them down would open a gap for no reason.
+            if abs(row - centre_row) <= 1 and abs(dx) < 0.3:
+                row = centre_row + (3 if dy >= 0 else -3)
 
             reach = round(RADIUS_ROWS * ASPECT * dx)
             if dx > 0.3:
                 col = centre_col + reach
             elif dx < -0.3:
-                col = centre_col + reach - len(body)
+                col = centre_col + reach - width
             else:
-                col = centre_col + reach - len(body) // 2
+                col = centre_col + reach - width // 2
 
-            _place(grid, row, col, body)
-            painted.append((row, body.strip(), selected, wedge.is_submenu))
+            for offset, line in enumerate(rows):
+                _place(grid, row - 1 + offset, col, line)
+            painted.append((row, label, selected, wedge.is_submenu))
 
-        plain = "\n".join("".join(row).rstrip() for row in grid)
+        plain = chr(10).join("".join(row).rstrip() for row in grid)
         self.last_render = plain
         return self._colourise(plain, painted, centre_row)
 

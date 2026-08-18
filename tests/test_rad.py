@@ -339,7 +339,11 @@ class TestRingInTheApp:
             await self._open(pilot)
             await pilot.press("right")      # Do
             await pilot.pause()
-            assert "[Do" in app.screen.query_one("#rad-ring").last_render
+            # Selection is carried by the hub and a doubled border now, not by
+            # brackets: the on-deck slot is what a reader checks.
+            drawn = app.screen.query_one("#rad-ring").last_render
+            lines = drawn.split(chr(10))
+            assert "Do" in lines[len(lines) // 2], "the hub did not follow the selection"
 
             await pilot.press("enter")      # descend
             await pilot.pause()
@@ -456,13 +460,17 @@ class TestRingLayout:
                 assert lines[row].strip().strip("-") == "", (
                     f"{count} wedges: something shares the rule row: {lines[row]!r}")
 
-    def test_the_hub_names_where_you_are(self):
-        assert "rad" in self._drawn()
+    def test_the_selected_node_is_marked_in_the_plain_text(self):
+        """rad treats accessibility as foundation. A selection carried by
+        colour alone is invisible to a reader who cannot see it, so the border
+        says it too."""
+        drawn = self._drawn()
+        assert "+===" in drawn, "the selected node has no doubled border"
+        assert "+---" in drawn, "unselected nodes lost their border"
 
-    def test_the_selected_wedge_is_marked_in_the_plain_text(self):
-        """Colour carries selection, and colour alone would be invisible to a
-        reader who cannot see it -- so the mark is in the text as well."""
-        assert "[Item 0]" in self._drawn()
+    def test_every_node_has_a_border(self):
+        drawn = self._drawn(4)
+        assert drawn.count("|") >= 4 * 2, "a node is missing its sides"
 
     def test_every_glyph_survives_a_cp1252_console(self):
         """This repository has already lost a demo to a folder emoji a Windows
