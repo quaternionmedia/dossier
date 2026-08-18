@@ -154,7 +154,7 @@ uv run dossier github sync-user myusername --force
 ```bash
 # Check open issues across all synced projects
 uv run dossier dashboard
-# Press Tab until you reach Issues tab, or use keyboard: 8
+# Switch to Projects > Issues
 
 # Export status report
 uv run dossier export all -d ./standup-$(date +%Y-%m-%d)
@@ -173,7 +173,7 @@ uv run dossier projects show myorg/current-sprint-project
 # Sync a project with dependencies
 uv run dossier github sync astral-sh/uv
 
-# View in dashboard (Dependencies tab = Tab 6)
+# View in dashboard (Projects > Dependencies)
 uv run dossier dashboard
 
 # Or query via CLI
@@ -237,7 +237,7 @@ uv run dossier github sync fastapi/fastapi
 uv run dossier github sync pydantic/pydantic
 uv run dossier github sync encode/starlette
 
-# View releases in dashboard (Releases tab = Tab 10)
+# View releases in dashboard (Projects > Releases)
 uv run dossier dashboard
 
 # Export dossier files with version info
@@ -414,6 +414,93 @@ print(dossier)
 
 ---
 
+## Workflow 13: Delta Management (Local Change Tracking)
+
+**Goal**: Track features, bugfixes, and changes through their lifecycle using deltas.
+
+Deltas are your local, structured way to track work across phases - like personal Jira tickets stored in your Dossier database.
+
+### The Delta Lifecycle
+
+```
+BRAINSTORM → PLANNING → IMPLEMENTATION → REVIEW → DOCUMENTATION → COMPLETE
+                                                                      ↓
+                                                               (ABANDONED)
+```
+
+### Creating and Managing Deltas
+
+```bash
+# Step 1: Launch dashboard and navigate to Deltas tab
+uv run dossier dashboard
+
+# Step 2: Create a new delta
+# Click "+ New Delta" button or press 'n'
+# Fill in:
+#   Name: add-dark-mode (slug format)
+#   Title: Add Dark Mode Toggle
+#   Type: feature
+#   Priority: medium
+
+# Step 3: Add notes during brainstorming
+# Select delta → Click "+ Add Note"
+# Document initial ideas, questions to resolve
+
+# Step 4: Advance through phases
+# Click ">> Advance Phase" button or press 'a'
+# Add transition notes at each phase
+
+# Step 5: Link related entities
+# Click "Link Entity" or press 'l'
+# Link to: Issues, PRs, Branches, other Deltas
+```
+
+### Example: Feature Development Flow
+
+```bash
+# 1. Create delta in BRAINSTORM phase
+#    → Add notes with initial ideas
+
+# 2. Advance to PLANNING
+#    → Document technical design
+#    → Link to GitHub issue if one exists
+
+# 3. Advance to IMPLEMENTATION
+#    → started_at timestamp is set
+#    → Link your feature branch
+#    → Add progress notes as you code
+
+# 4. Advance to REVIEW
+#    → Link the PR
+#    → Add notes about review feedback
+
+# 5. Advance to DOCUMENTATION
+#    → Track docs updates
+
+# 6. Advance to COMPLETE
+#    → completed_at timestamp is set
+#    → Full history preserved
+```
+
+### Keyboard Shortcuts in Deltas Tab
+
+| Key | Action |
+|-----|--------|
+| `n` | New delta |
+| `a` | Advance phase |
+| `l` | Add link |
+| `Enter` | View delta details |
+
+### Best Practices
+
+- **Use descriptive names**: `fix-auth-timeout`, `refactor-api-client`
+- **Add notes at every phase**: Creates audit trail of decisions and blockers
+- **Link related entities**: Issues, branches, PRs, other deltas
+- **Don't skip phases**: Each serves a purpose (prevents premature coding, captures feedback)
+- **Use priority wisely**: critical (production bugs), high (blocking), medium (normal), low (nice-to-have)
+
+---
+
 ## Quick Reference: Common Commands
 
 ### Sync
@@ -465,6 +552,15 @@ uv run dossier dev status                          # Stats
 uv run dossier dev reset -y                        # Reset all
 uv run dossier dev vacuum                          # Optimize
 uv run dossier db upgrade                          # Run migrations
+```
+
+### Deltas (coming in Phase 2)
+```bash
+uv run dossier deltas list owner/repo              # List deltas
+uv run dossier deltas create owner/repo name       # Create delta
+uv run dossier deltas advance owner/repo name      # Advance phase
+uv run dossier deltas link owner/repo name --issue 42  # Link entity
+uv run dossier deltas show owner/repo name         # Show details
 ```
 
 ---

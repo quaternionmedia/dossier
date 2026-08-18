@@ -163,6 +163,7 @@ AVAILABLE_TABS = [
     ("tab-releases", "Releases"),
     ("tab-governance", "Governance"),
     ("tab-components", "Components"),
+    ("tab-deltas", "Deltas"),
 ]
 
 TREE_DENSITY_OPTIONS = [

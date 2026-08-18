@@ -109,17 +109,19 @@ Choose which tab opens when you select a project:
 
 | Tab | Description |
 |-----|-------------|
-| **Dossier** | Formatted overview with component tree (default) |
-| **Details** | Raw project metadata |
-| **Documentation** | Parsed doc sections |
-| **Languages** | Language breakdown |
-| **Branches** | Repository branches |
-| **Dependencies** | Package dependencies |
-| **Contributors** | Top contributors |
-| **Issues** | GitHub issues |
-| **Pull Requests** | PRs with diff stats |
-| **Releases** | Version releases |
-| **Components** | Project relationships |
+| **Dossier (Main)** | Formatted overview with component tree (default) |
+| **Projects > Details** | Raw project metadata |
+| **Projects > Documentation** | Parsed doc sections |
+| **Projects > Languages** | Language breakdown |
+| **Projects > Branches** | Repository branches |
+| **Projects > Dependencies** | Package dependencies |
+| **Projects > Contributors** | Top contributors |
+| **Projects > Issues** | GitHub issues |
+| **Projects > Pull Requests** | PRs with diff stats |
+| **Projects > Releases** | Version releases |
+| **Projects > Components** | Project relationships |
+| **Deltas (Main)** | Delta list with phases, notes, and links |
+
 
 ---
 

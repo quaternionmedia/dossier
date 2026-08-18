@@ -98,8 +98,13 @@ class TestTUIWidgets:
 
 
 # Define tabs and resolutions for parameterized screenshot tests
-TABS = [
+MAIN_TABS = [
     ("tab-dossier", "Dossier"),
+    ("tab-projects", "Projects"),
+    ("tab-deltas", "Deltas"),
+]
+
+PROJECT_TABS = [
     ("tab-details", "Details"),
     ("tab-docs", "Documentation"),
     ("tab-languages", "Languages"),
@@ -111,6 +116,9 @@ TABS = [
     ("tab-releases", "Releases"),
     ("tab-components", "Components"),
 ]
+
+MAIN_TAB_IDS = {tab_id for tab_id, _ in MAIN_TABS}
+TABS = MAIN_TABS + PROJECT_TABS
 
 RESOLUTIONS = [
     ((120, 40), "desktop"),      # Standard terminal
@@ -290,14 +298,14 @@ uv run dossier dashboard
 
 [![PyPI version](https://badge.fury.io/py/dossier.svg)](https://pypi.org/project/dossier/)
 
-**Decentralized project tracking system** — a modern replacement for Jira.
+**Decentralized project tracking system** - a delta-centric, offline-first replacement for Jira.
 
 ## Features
 
-- 🔄 **Sync GitHub repos** — Issues, PRs, releases, languages, contributors
-- 📊 **TUI Dashboard** — Keyboard-driven terminal interface
-- 🗃️ **Local SQLite cache** — Works offline, queries fast
-- 📁 **Portable exports** — `.dossier` YAML files for sharing
+- Sync GitHub repos - Issues, PRs, releases, languages, contributors
+- TUI dashboard - Keyboard-driven terminal interface
+- Local SQLite cache - Works offline, queries fast
+- Delta management - Link phases, notes, and related entities
 
 ## Quick Start
 
@@ -347,21 +355,21 @@ dossier dashboard
 Dossier uses a layered architecture:
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Interface Layer                       │
-│  TUI Dashboard │ CLI │ REST API │ Command Explorer      │
-├─────────────────────────────────────────────────────────┤
-│                    Business Layer                        │
-│  GitHub Parser │ Autolinker │ Dossier Exporter          │
-├─────────────────────────────────────────────────────────┤
-│                    Data Layer                            │
-│  SQLModel Schemas │ SQLite Cache                        │
-└─────────────────────────────────────────────────────────┘
++-----------------------------+
+| Interface Layer             |
+| TUI Dashboard | CLI | API   |
++-----------------------------+
+| Business Layer              |
+| Parsers | Autolinker        |
++-----------------------------+
+| Data Layer                  |
+| SQLModel Schemas | SQLite   |
++-----------------------------+
 ```
 
 ## Data Models
 
-13 typed SQLModel schemas for consistent querying.
+Core SQLModel schemas for consistent querying.
 """
         
         app = DossierApp()
@@ -409,7 +417,7 @@ This is a sample markdown document to demonstrate the frogmouth viewer integrati
 ## Features
 
 - **Keyboard shortcut**: Press `f` to open in frogmouth
-- **Button**: Click the 🐸 Frogmouth button in the footer
+- **Button**: Click the Frogmouth button in the footer
 - **External viewer**: Full-featured markdown rendering
 
 ## Installation
@@ -420,8 +428,6 @@ uv tool install frogmouth
 
 The frogmouth viewer provides enhanced markdown rendering with:
 - Syntax highlighting
-- Table of contents navigation
-- Link following
 """
         
         app = DossierApp()
@@ -624,8 +630,13 @@ class TestTUIScreenshotsParameterized:
             
             # Switch to the target tab
             try:
-                tabs = app.query_one("#project-tabs", TabbedContent)
-                tabs.active = tab_id
+                main_tabs = app.query_one("#main-tabs", TabbedContent)
+                if tab_id in MAIN_TAB_IDS:
+                    main_tabs.active = tab_id
+                else:
+                    main_tabs.active = "tab-projects"
+                    project_tabs = app.query_one("#project-tabs", TabbedContent)
+                    project_tabs.active = tab_id
                 # Wait for tab content to render
                 await pilot.pause()
                 await pilot.pause()

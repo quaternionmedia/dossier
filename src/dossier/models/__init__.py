@@ -25,6 +25,10 @@ from .schemas import (
     DocumentSection,
     DocumentationQuery,
     DocumentationResponse,
+    DeltaPhase,
+    ProjectDelta,
+    DeltaNote,
+    DeltaLink,
     utcnow,
 )
 
@@ -49,5 +53,9 @@ __all__ = [
     "DocumentSection",
     "DocumentationQuery",
     "DocumentationResponse",
+    "DeltaPhase",
+    "ProjectDelta",
+    "DeltaNote",
+    "DeltaLink",
     "utcnow",
 ]
