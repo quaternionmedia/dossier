@@ -32,6 +32,9 @@ from textual.widgets import (
 )
 
 from dossier.models import (
+    DeltaLink,
+    DeltaNote,
+    DeltaPhase,
     DocumentSection,
     DocumentationLevel,
     Project,
@@ -39,6 +42,7 @@ from dossier.models import (
     ProjectComponent,
     ProjectContributor,
     ProjectDependency,
+    ProjectDelta,
     ProjectIssue,
     ProjectLanguage,
     ProjectPullRequest,
@@ -52,6 +56,19 @@ from dossier.dossier_file import generate_dossier
 PAGE_SIZE = 100  # Number of projects to load per page
 DEBOUNCE_MS = 300  # Milliseconds to wait before filtering
 TREE_ENTITY_LIMIT = 20  # Max entities to show per section in tree
+MAIN_TABS = {"tab-dossier", "tab-projects", "tab-deltas"}
+PROJECT_TABS = {
+    "tab-details",
+    "tab-docs",
+    "tab-languages",
+    "tab-branches",
+    "tab-dependencies",
+    "tab-contributors",
+    "tab-issues",
+    "tab-prs",
+    "tab-releases",
+    "tab-components",
+}
 
 
 def extract_file_path(source_file: str | None) -> str | None:
@@ -373,6 +390,7 @@ class ProjectListItem(ListItem):
                     "pr": "🔀",
                     "ver": "🏷️",
                     "doc": "📄",
+                    "delta": "🔺",
                 }
                 icon = type_icons.get(entity_type, "•")
                 return f"{icon} {parts[1]}/{entity_type}/{entity_id}"
@@ -637,38 +655,36 @@ class DossierApp(App):
     #search-input {
         border: none;
     }
-    
-    #filter-bar {
+
+    #sidebar-controls {
+        dock: bottom;
         height: auto;
         width: 100%;
-        margin: 0 0 1 0;
+        padding: 1 0 0 0;
+        background: $surface;
+        border-top: solid $primary;
     }
-    
-    #filter-bar Button {
-        margin: 0 1 0 0;
-        min-width: 4;
-    }
-    
+
     #filter-bar-2 {
         height: auto;
         width: 100%;
         margin: 0 0 1 0;
     }
-    
+
     #filter-bar-2 Select {
         margin: 0 1 0 0;
         width: 1fr;
     }
-    
-    #sort-bar {
+
+    #filter-bar {
         height: auto;
         width: 100%;
-        margin: 0 0 1 0;
+        margin: 0;
     }
-    
-    #sort-bar Button {
+
+    #filter-bar Button {
         margin: 0 1 0 0;
-        min-width: 8;
+        min-width: 6;
     }
     
     SyncStatusWidget {
@@ -688,6 +704,10 @@ class DossierApp(App):
     
     TabPane {
         padding: 1;
+    }
+
+    #tab-projects {
+        padding: 0;
     }
     
     #dossier-layout {
@@ -810,12 +830,15 @@ class DossierApp(App):
             init_db()
             session_factory = get_session
         self.session_factory = session_factory
-        
+
+        # Check if delta tables exist (migration may not have been applied)
+        self._delta_tables_exist = self._check_delta_tables_exist()
+
         # Load config and apply saved settings
         from dossier.config import DossierConfig
         self._config = DossierConfig.load()
         self.theme = self._config.theme
-        
+
         # Restore view state from config
         if self._config.view_state:
             vs = self._config.view_state
@@ -824,6 +847,17 @@ class DossierApp(App):
             self.filter_entity = vs.filter_entity
             self.filter_starred = vs.filter_starred
             self.sort_by = vs.sort_by
+
+    def _check_delta_tables_exist(self) -> bool:
+        """Check if delta tables exist in the database."""
+        try:
+            from sqlalchemy import inspect as sa_inspect
+            with self.session_factory() as session:
+                inspector = sa_inspect(session.get_bind())
+                tables = inspector.get_table_names()
+                return "project_delta" in tables
+        except Exception:
+            return False
     
     def compose(self) -> ComposeResult:
         yield Header()
@@ -833,33 +867,37 @@ class DossierApp(App):
         
         with Horizontal(id="main-layout"):
             with Vertical(id="sidebar"):
-                with Horizontal(id="filter-bar"):
-                    yield Button("All", id="btn-filter-all", variant="primary")
-                    yield Button("🔄", id="btn-filter-synced", variant="default")
-                    yield Button("○", id="btn-filter-unsynced", variant="default")
-                    yield Button("⭐", id="btn-filter-starred", variant="default")
-                with Horizontal(id="filter-bar-2"):
-                    yield Select(
-                        [("All Types", "all"), ("📁 Repos", "repo"), ("🌿 Branches", "branch"), 
-                         ("📋 Issues", "issue"), ("🔀 PRs", "pr"), ("📦 Versions", "ver"),
-                         ("📄 Docs", "doc"), ("👤 Users", "user"), ("💻 Languages", "lang"), ("📚 Packages", "pkg")],
-                        value="all",
-                        id="select-entity-type",
-                        allow_blank=False,
-                    )
-                    yield Select(
-                        [("Any Language", "")],  # Will be populated on mount
-                        value="",
-                        id="select-language",
-                        allow_blank=False,
-                    )
-                with Horizontal(id="sort-bar"):
-                    yield Button("⭐ Stars", id="btn-sort-stars", variant="primary")
-                    yield Button("🔤 Name", id="btn-sort-name", variant="default")
-                    yield Button("🕐 Recent", id="btn-sort-synced", variant="default")
                 with Container(id="project-list-container"):
-                    yield Tree("📂 Projects", id="project-tree")
-            
+                    yield Tree("Projects", id="project-tree")
+                with Vertical(id="sidebar-controls"):
+                    with Horizontal(id="filter-bar-2"):
+                        yield Select(
+                            [("All Types", "all"), ("Repos", "repo"), ("Branches", "branch"),
+                             ("Issues", "issue"), ("PRs", "pr"), ("Versions", "ver"),
+                             ("Docs", "doc"), ("Deltas", "delta"), ("Users", "user"),
+                             ("Languages", "lang"), ("Packages", "pkg")],
+                            value="all",
+                            id="select-entity-type",
+                            allow_blank=False,
+                        )
+                        yield Select(
+                            [("Any Language", "")],  # Will be populated on mount
+                            value="",
+                            id="select-language",
+                            allow_blank=False,
+                        )
+                        yield Select(
+                            [("Sort: Stars", "stars"), ("Sort: Name", "name"), ("Sort: Recent", "synced")],
+                            value=self.sort_by,
+                            id="select-sort",
+                            allow_blank=False,
+                        )
+                    with Horizontal(id="filter-bar"):
+                        yield Button("All", id="btn-filter-all", variant="primary")
+                        yield Button("Synced", id="btn-filter-synced", variant="default")
+                        yield Button("Unsynced", id="btn-filter-unsynced", variant="default")
+                        yield Button("Star", id="btn-filter-starred", variant="default")
+
             with Vertical(id="main-content"):
                 with TabbedContent(id="project-tabs"):
                     with TabPane("Dossier", id="tab-dossier"):
@@ -901,10 +939,18 @@ class DossierApp(App):
                         with Vertical():
                             yield DataTable(id="components-table")
                             with Horizontal(id="component-buttons"):
-                                yield Button("➕ Add Component", id="btn-add-component", variant="primary")
-                                yield Button("🔗 Link as Parent", id="btn-link-parent", variant="default")
-                                yield Button("❌ Remove", id="btn-remove-component", variant="error")
-        
+                                yield Button("Add Component", id="btn-add-component", variant="primary")
+                                yield Button("Link as Parent", id="btn-link-parent", variant="default")
+                                yield Button("Remove", id="btn-remove-component", variant="error")
+                    with TabPane("Deltas", id="tab-deltas"):
+                        with Vertical():
+                            yield DataTable(id="deltas-table")
+                            with Horizontal(id="delta-buttons"):
+                                yield Button("New Delta", id="btn-new-delta", variant="primary")
+                                yield Button("Advance", id="btn-advance-phase", variant="default")
+                                yield Button("Note", id="btn-add-note", variant="default")
+                                yield Button("Link", id="btn-add-delta-link", variant="default")
+
         # Bottom command bar
         with Horizontal(id="command-bar"):
             yield Input(placeholder="🔍 Search... or :cmd (try :help)", id="search-input")
@@ -1024,7 +1070,17 @@ class DossierApp(App):
         components_table.add_column("Type", width=15)
         components_table.add_column("Order", width=8)
         components_table.cursor_type = "row"
-        
+
+        # Setup deltas table columns
+        deltas_table = self.query_one("#deltas-table", DataTable)
+        deltas_table.add_column("Name", width=20)
+        deltas_table.add_column("Title", width=30)
+        deltas_table.add_column("Phase", width=18)
+        deltas_table.add_column("Type", width=12)
+        deltas_table.add_column("Priority", width=10)
+        deltas_table.add_column("Links", width=8)
+        deltas_table.cursor_type = "row"
+
         # Populate language filter dropdown
         self._populate_language_filter()
         
@@ -1077,6 +1133,8 @@ class DossierApp(App):
             return "ver"
         if "/doc/" in name:
             return "doc"
+        if "/delta/" in name:
+            return "delta"
         # If it has owner/repo format without other patterns, it's a repo
         if "/" in name and name.count("/") == 1:
             return "repo"
@@ -1118,6 +1176,8 @@ class DossierApp(App):
                     return f"{repo}!{entity_id}"
                 if entity_type == "ver":
                     return f"{repo}@{entity_id}"
+                if entity_type == "delta":
+                    return f"{repo}△{entity_id}"
                 # For branch/doc, keep slash format
                 return f"{repo}/{entity_type}/{entity_id}"
         
@@ -1140,7 +1200,39 @@ class DossierApp(App):
         project_tree = self.query_one("#project-tree", Tree)
         project_tree.clear()
         project_tree.root.expand()
-        
+
+        # Pre-fetch deltas in a separate session to avoid corrupting main session
+        # if delta tables don't exist
+        deltas_by_project: dict[int, list] = {}
+        delta_links_by_delta: dict[int, list[DeltaLink]] = {}
+        deltas_by_id: dict[int, ProjectDelta] = {}
+        deltas_by_project_name: dict[tuple[int, str], ProjectDelta] = {}
+        if self._delta_tables_exist:
+            try:
+                with self.session_factory() as delta_session:
+                    all_deltas = delta_session.exec(
+                        select(ProjectDelta).order_by(ProjectDelta.updated_at.desc())
+                    ).all()
+                    for delta in all_deltas:
+                        delta_session.expunge(delta)
+                        if delta.project_id not in deltas_by_project:
+                            deltas_by_project[delta.project_id] = []
+                        deltas_by_project[delta.project_id].append(delta)
+                        if delta.id is not None:
+                            deltas_by_id[delta.id] = delta
+                            deltas_by_project_name[(delta.project_id, delta.name)] = delta
+                    delta_ids = [delta.id for delta in all_deltas if delta.id is not None]
+                    if delta_ids:
+                        links = delta_session.exec(
+                            select(DeltaLink).where(DeltaLink.delta_id.in_(delta_ids))
+                        ).all()
+                        for link in links:
+                            delta_session.expunge(link)
+                            delta_links_by_delta.setdefault(link.delta_id, []).append(link)
+            except Exception:
+                # Silently fail if delta tables don't exist
+                pass
+
         with self.session_factory() as session:
             # Build base query with SQL-level filtering
             stmt = select(Project)
@@ -1185,6 +1277,7 @@ class DossierApp(App):
                     "pr": "%/pr/%",
                     "ver": "%/ver/%",
                     "doc": "%/doc/%",
+                    "delta": "%/delta/%",
                     "repo": None,  # Special case: owner/repo without entity type
                 }
                 pattern = entity_patterns.get(self.filter_entity)
@@ -1201,6 +1294,7 @@ class DossierApp(App):
                             Project.name.notlike("%/pr/%"),
                             Project.name.notlike("%/ver/%"),
                             Project.name.notlike("%/doc/%"),
+                            Project.name.notlike("%/delta/%"),
                         )
                     )
             
@@ -1375,6 +1469,7 @@ class DossierApp(App):
                             "pr": "🔀",
                             "ver": "🏷️",
                             "doc": "📄",
+                            "delta": "🔺",
                         }
                         icon = type_icons.get(entity_type, "•")
                         display = f"{icon} {entity_type}/{entity_id}"
@@ -1655,7 +1750,160 @@ class DossierApp(App):
                 if len(project_branches) > 10:
                     more = branches_folder.add_leaf(f"... {len(project_branches) - 10} more")
                     more.data = {"type": "section", "section": "tab-branches"}
-            
+
+            def add_deltas_to_node(parent_node, project):
+                """Add deltas as children of a project node."""
+                project_deltas = deltas_by_project.get(project.id, [])
+                if not project_deltas:
+                    return
+                # Count by phase
+                active_count = sum(1 for d in project_deltas if d.phase not in [DeltaPhase.COMPLETE, DeltaPhase.ABANDONED])
+                deltas_folder = parent_node.add(f"🔺 Deltas ({len(project_deltas)}, {active_count} active)", expand=False)
+                deltas_folder.data = {"type": "section", "section": "tab-deltas"}
+                phase_icons = {
+                    DeltaPhase.BRAINSTORM: "💡",
+                    DeltaPhase.PLANNING: "📋",
+                    DeltaPhase.IMPLEMENTATION: "⚙️",
+                    DeltaPhase.REVIEW: "🔍",
+                    DeltaPhase.DOCUMENTATION: "📝",
+                    DeltaPhase.COMPLETE: "✅",
+                    DeltaPhase.ABANDONED: "❌",
+                }
+                for delta in project_deltas[:15]:
+                    phase_icon = phase_icons.get(delta.phase, "•")
+                    link_items = delta_links_by_delta.get(delta.id, [])
+                    delta_node = deltas_folder.add(
+                        f"{phase_icon} {delta.name}: {delta.title[:30]}",
+                        expand=False,
+                    ) if link_items else deltas_folder.add_leaf(
+                        f"{phase_icon} {delta.name}: {delta.title[:30]}"
+                    )
+                    delta_node.data = {
+                        "type": "delta",
+                        "delta_id": delta.id,
+                        "name": delta.name,
+                        "title": delta.title,
+                        "phase": delta.phase.value,
+                        "project_id": project.id,
+                    }
+                    if link_items:
+                        links_node = delta_node.add(f"Links ({len(link_items)})", expand=False)
+                        links_node.data = {"type": "section", "section": "tab-deltas"}
+                        for link in link_items[:TREE_ENTITY_LIMIT]:
+                            link_type = link.link_type
+                            target_id = link.target_id
+                            target_name = link.target_name or ""
+                            label = None
+                            nav_data = None
+                            if link_type == "issue":
+                                number = target_id
+                                if number is None and target_name:
+                                    try:
+                                        number = int(target_name)
+                                    except ValueError:
+                                        number = None
+                                if number is not None:
+                                    issue_title = next(
+                                        (issue.title for issue in issues_by_project.get(project.id, []) if issue.issue_number == number),
+                                        None,
+                                    )
+                                    label = f"Issue #{number}"
+                                    if issue_title:
+                                        label = f"Issue #{number}: {issue_title[:30]}"
+                                    nav_data = {
+                                        "type": "issue",
+                                        "number": number,
+                                        "title": issue_title,
+                                        "project_id": project.id,
+                                        "owner": project.github_owner,
+                                        "repo": project.github_repo,
+                                        "url": project.github_issues_url(number) if project.github_owner else None,
+                                    }
+                                else:
+                                    label = f"Issue {target_name or '?'}"
+                            elif link_type == "pr":
+                                number = target_id
+                                if number is None and target_name:
+                                    try:
+                                        number = int(target_name)
+                                    except ValueError:
+                                        number = None
+                                if number is not None:
+                                    pr_title = next(
+                                        (pr.title for pr in prs_by_project.get(project.id, []) if pr.pr_number == number),
+                                        None,
+                                    )
+                                    label = f"PR #{number}"
+                                    if pr_title:
+                                        label = f"PR #{number}: {pr_title[:30]}"
+                                    nav_data = {
+                                        "type": "pr",
+                                        "number": number,
+                                        "title": pr_title,
+                                        "project_id": project.id,
+                                        "owner": project.github_owner,
+                                        "repo": project.github_repo,
+                                        "url": project.github_pulls_url(number) if project.github_owner else None,
+                                    }
+                                else:
+                                    label = f"PR {target_name or '?'}"
+                            elif link_type == "branch":
+                                branch_name = target_name or (str(target_id) if target_id is not None else "")
+                                label = f"Branch {branch_name or '?'}"
+                                if branch_name:
+                                    branch_info = next(
+                                        (branch for branch in branches_by_project.get(project.id, []) if branch.name == branch_name),
+                                        None,
+                                    )
+                                    nav_data = {
+                                        "type": "branch",
+                                        "name": branch_name,
+                                        "is_default": branch_info.is_default if branch_info else False,
+                                        "is_protected": branch_info.is_protected if branch_info else False,
+                                        "project_id": project.id,
+                                        "owner": project.github_owner,
+                                        "repo": project.github_repo,
+                                        "url": project.github_branch_url(branch_name) if project.github_owner else None,
+                                    }
+                            elif link_type == "doc":
+                                doc_title = target_name or (str(target_id) if target_id is not None else "")
+                                label = f"Doc {doc_title or '?'}"
+                                if doc_title:
+                                    nav_data = {
+                                        "type": "doc",
+                                        "title": doc_title,
+                                        "project_id": project.id,
+                                    }
+                            elif link_type == "delta":
+                                target_delta = None
+                                if target_id is not None:
+                                    target_delta = deltas_by_id.get(target_id)
+                                if target_delta is None and target_name:
+                                    target_delta = deltas_by_project_name.get((project.id, target_name))
+                                if target_delta:
+                                    label = f"Delta {target_delta.name}: {target_delta.title[:30]}"
+                                    nav_data = {
+                                        "type": "delta",
+                                        "delta_id": target_delta.id,
+                                        "name": target_delta.name,
+                                        "title": target_delta.title,
+                                        "phase": target_delta.phase.value,
+                                        "project_id": target_delta.project_id,
+                                    }
+                                else:
+                                    label = f"Delta {target_name or (str(target_id) if target_id is not None else '?')}"
+                            else:
+                                label = f"{link_type}: {target_name or target_id or '?'}"
+                            link_leaf = links_node.add_leaf(label)
+                            if nav_data:
+                                link_leaf.data = nav_data
+                        if len(link_items) > TREE_ENTITY_LIMIT:
+                            more = links_node.add_leaf(f"... {len(link_items) - TREE_ENTITY_LIMIT} more")
+                            more.data = {"type": "section", "section": "tab-deltas"}
+                if len(project_deltas) > 15:
+                    more = deltas_folder.add_leaf(f"... {len(project_deltas) - 15} more")
+                    more.data = {"type": "section", "section": "tab-deltas"}
+
             def add_all_data_to_node(parent_node, project):
                 """Add all entity data folders to a project node."""
                 add_docs_to_node(parent_node, project)
@@ -1666,6 +1914,7 @@ class DossierApp(App):
                 add_releases_to_node(parent_node, project)
                 add_issues_to_node(parent_node, project)
                 add_prs_to_node(parent_node, project)
+                add_deltas_to_node(parent_node, project)
             
             first_project = None
             for group in sorted_groups:
@@ -1692,6 +1941,7 @@ class DossierApp(App):
                         project.id in prs_by_project,
                         project.id in releases_by_project,
                         project.id in branches_by_project,
+                        project.id in deltas_by_project,
                     ])
                     
                     if has_data:
@@ -1757,7 +2007,10 @@ class DossierApp(App):
         """Handle internal dossier:// links.
         
         Link formats:
-        - dossier://tab/languages - Switch to tab
+        - dossier://tab/dossier - Switch to Dossier tab
+        - dossier://tab/projects - Switch to Projects tab
+        - dossier://tab/deltas - Switch to Deltas tab
+        - dossier://tab/languages - Switch to Projects > Languages
         - dossier://lang/python - Link language entity
         - dossier://pkg/fastapi - Link dependency entity  
         - dossier://user/username - Show contributor
@@ -1779,8 +2032,7 @@ class DossierApp(App):
         if link_type == "tab":
             # Switch to tab
             tab_id = f"tab-{value}"
-            tabbed_content = self.query_one("#project-tabs", TabbedContent)
-            tabbed_content.active = tab_id
+            self._activate_tab(tab_id)
         
         elif link_type == "lang":
             # Link language entity
@@ -2036,7 +2288,7 @@ class DossierApp(App):
             self.notify(f"Unknown sort: {arg}. Use: stars, name, recent", severity="warning")
             return
         
-        self._update_sort_buttons()
+        self._update_sort_ui()
         self.load_projects()
         self.notify(f"Sort: {self.sort_by}")
     
@@ -2119,11 +2371,9 @@ class DossierApp(App):
                 self.show_project_details(project)
                 # Switch to configured default tab, unless navigating from tree
                 if not self._navigating_from_tree:
-                    tabbed_content = self.query_one("#project-tabs", TabbedContent)
-                    tabbed_content.active = self._config.default_tab
+                    self._activate_tab(self._config.default_tab)
                 elif self._tree_target_tab:
-                    tabbed_content = self.query_one("#project-tabs", TabbedContent)
-                    tabbed_content.active = self._tree_target_tab
+                    self._activate_tab(self._tree_target_tab)
                     self._tree_target_tab = None
                 self._navigating_from_tree = False
         
@@ -2139,13 +2389,16 @@ class DossierApp(App):
             project_id = nav_data.get("project_id")
             if source and project_id:
                 self._show_file_viewer(project_id, source)
+
+        elif nav_type == "doc":
+            # Show documentation content in viewer
+            self._show_doc_viewer(nav_data)
         
         elif nav_type == "section":
             # Switch to the corresponding tab
             section = nav_data.get("section")
             if section and section.startswith("tab-"):
-                tabbed_content = self.query_one("#project-tabs", TabbedContent)
-                tabbed_content.active = section
+                self._activate_tab(section)
         
         elif nav_type == "language":
             # Link language entity
@@ -2213,7 +2466,44 @@ class DossierApp(App):
                 content=content,
                 url=url
             ))
-    
+
+        elif nav_type == "delta":
+            # Link delta as project and navigate to it
+            self._link_delta_project(nav_data)
+
+    def _activate_tab(self, tab_id: str) -> None:
+        """Activate a main or project sub-tab by id."""
+        if not tab_id:
+            return
+        try:
+            main_tabs = self.query_one("#project-tabs", TabbedContent)
+        except Exception:
+            return
+        if tab_id in MAIN_TABS:
+            main_tabs.active = tab_id
+            return
+        if tab_id in PROJECT_TABS:
+            main_tabs.active = "tab-projects"
+            try:
+                project_tabs = self.query_one("#project-tabs", TabbedContent)
+                project_tabs.active = tab_id
+            except Exception:
+                pass
+
+    def _get_active_tab_id(self) -> Optional[str]:
+        """Return the active tab id across main and project tabs."""
+        try:
+            main_tabs = self.query_one("#project-tabs", TabbedContent)
+        except Exception:
+            return None
+        if main_tabs.active == "tab-projects":
+            try:
+                project_tabs = self.query_one("#project-tabs", TabbedContent)
+                return project_tabs.active
+            except Exception:
+                return "tab-projects"
+        return main_tabs.active
+
     def show_project_details(self, project: Project) -> None:
         """Show details for the selected project.
         
@@ -2242,8 +2532,20 @@ class DossierApp(App):
         self._tabs_loaded = {"tab-dossier"}
         
         # Load the currently active tab
-        tabbed_content = self.query_one("#project-tabs", TabbedContent)
-        self._load_tab_data(tabbed_content.active)
+        active_tab = self._get_active_tab_id()
+        if active_tab and active_tab != "tab-dossier":
+            self._load_tab_data(active_tab)
+
+    @on(TabbedContent.TabActivated, "#project-tabs")
+    def on_main_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        """Lazy load tab data when a main tab is activated."""
+        if not hasattr(self, "_current_project_id"):
+            return
+        if event.pane.id == "tab-projects":
+            project_tabs = self.query_one("#project-tabs", TabbedContent)
+            self._load_tab_data(project_tabs.active)
+        elif event.pane.id == "tab-deltas":
+            self._load_tab_data("tab-deltas")
     
     @on(TabbedContent.TabActivated, "#project-tabs")
     def on_tab_activated(self, event: TabbedContent.TabActivated) -> None:
@@ -2299,6 +2601,7 @@ class DossierApp(App):
             "tab-prs": self._load_prs_tab,
             "tab-releases": self._load_releases_tab,
             "tab-components": self._load_components_tab,
+            "tab-deltas": self._load_deltas_tab,
         }
         
         loader = loaders.get(tab_id)
@@ -3185,7 +3488,110 @@ class DossierApp(App):
             
             if not has_components:
                 components_table.add_row("", "(No component relationships)", "", "", key="empty")
-    
+
+    def _load_deltas_tab(self, project: Project) -> None:
+        """Load deltas tab."""
+        deltas_table = self.query_one("#deltas-table", DataTable)
+        deltas_table.clear()
+
+        # Skip if delta tables don't exist
+        if not self._delta_tables_exist:
+            deltas_table.add_row(
+                "(No deltas)", "-", "-", "-", "-", "-", key="empty"
+            )
+            return
+
+        # Phase display icons
+        phase_icons = {
+            DeltaPhase.BRAINSTORM: "💡",
+            DeltaPhase.PLANNING: "📋",
+            DeltaPhase.IMPLEMENTATION: "⚙️",
+            DeltaPhase.REVIEW: "🔍",
+            DeltaPhase.DOCUMENTATION: "📝",
+            DeltaPhase.COMPLETE: "✅",
+            DeltaPhase.ABANDONED: "❌",
+        }
+        priority_icons = {
+            "critical": "🔴",
+            "high": "🟠",
+            "medium": "🟡",
+            "low": "🟢",
+        }
+        type_icons = {
+            "feature": "✨",
+            "bugfix": "🐛",
+            "refactor": "♻️",
+            "docs": "📚",
+            "chore": "🔧",
+        }
+
+        with self.session_factory() as session:
+            # Query deltas ordered by phase (active first) then by update time
+            deltas = session.exec(
+                select(ProjectDelta)
+                .where(ProjectDelta.project_id == project.id)
+                .order_by(ProjectDelta.updated_at.desc())
+            ).all()
+
+            if not deltas:
+                deltas_table.add_row(
+                    "(No deltas)", "-", "-", "-", "-", "-", key="empty"
+                )
+            else:
+                for delta in deltas:
+                    # Count links for this delta
+                    link_count = session.exec(
+                        select(DeltaLink).where(DeltaLink.delta_id == delta.id)
+                    ).all()
+
+                    phase_icon = phase_icons.get(delta.phase, "❓")
+                    priority_icon = priority_icons.get(delta.priority, "⚪")
+                    type_icon = type_icons.get(delta.delta_type, "❓")
+
+                    # Truncate title if needed
+                    title_display = delta.title
+                    if len(title_display) > 28:
+                        title_display = title_display[:25] + "..."
+
+                    deltas_table.add_row(
+                        delta.name,
+                        title_display,
+                        f"{phase_icon} {delta.phase.value}",
+                        f"{type_icon} {delta.delta_type}",
+                        f"{priority_icon} {delta.priority}",
+                        f"🔗{len(link_count)}" if link_count else "-",
+                        key=f"delta-{delta.id}",
+                    )
+                    if link_count:
+                        for link in link_count:
+                            link_type = link.link_type or "link"
+                            target = None
+                            if link_type in ("issue", "pr"):
+                                number = link.target_id
+                                if number is None and link.target_name:
+                                    try:
+                                        number = int(link.target_name)
+                                    except ValueError:
+                                        number = None
+                                target = f"#{number}" if number is not None else (link.target_name or "?")
+                            elif link_type == "delta":
+                                if link.target_id is not None:
+                                    target = f"#{link.target_id}"
+                                else:
+                                    target = link.target_name or "?"
+                            else:
+                                target = link.target_name or (str(link.target_id) if link.target_id is not None else "?")
+                            link_label = f"{link_type} {target}".strip()
+                            deltas_table.add_row(
+                                f"  -> {link_label}",
+                                "-",
+                                "-",
+                                "-",
+                                "-",
+                                "-",
+                                key=f"delta-link-{link.id}",
+                            )
+
     def load_dossier_view(self, project: Project) -> None:
         """Load the dossier view for a project."""
         dossier_md = self.query_one("#dossier-view", Markdown)
@@ -3221,6 +3627,19 @@ class DossierApp(App):
                     stats.append(f"[🐛 {activity['open_issues']} open](dossier://tab/issues)")
                 if activity.get("open_prs"):
                     stats.append(f"[🔀 {activity['open_prs']} PRs](dossier://tab/prs)")
+            if self._delta_tables_exist:
+                deltas = session.exec(
+                    select(ProjectDelta).where(ProjectDelta.project_id == project.id)
+                ).all()
+                if deltas:
+                    active_count = sum(
+                        1 for d in deltas
+                        if d.phase not in (DeltaPhase.COMPLETE, DeltaPhase.ABANDONED)
+                    )
+                    stats.append(
+                        f"[Deltas {len(deltas)} / {active_count} active](dossier://tab/deltas)"
+                    )
+
             
             if stats:
                 md_lines.append(" • ".join(stats))
@@ -3452,7 +3871,7 @@ class DossierApp(App):
             
             # Helper function for relationship icons
             def rel_icon(rel_type: str) -> str:
-                return {"component": "🧩", "dependency": "📦", "related": "🔗", "language": "🌐", "contributor": "👤", "doc": "📄", "version": "🏷️", "branch": "🌿", "issue": "🐛", "pr": "🔀"}.get(rel_type, "•")
+                return {"component": "🧩", "dependency": "📦", "related": "🔗", "language": "🌐", "contributor": "👤", "doc": "📄", "version": "🏷️", "branch": "🌿", "issue": "🐛", "pr": "🔀", "delta": "🔺"}.get(rel_type, "•")
             
             # Add parent section if there are parents
             if parent_links:
@@ -3909,9 +4328,7 @@ class DossierApp(App):
             }
             tab_id = tab_map.get(section)
             if tab_id:
-                tabs = self.query_one("#project-tabs", TabbedContent)
-                if tabs.active != tab_id:
-                    tabs.active = tab_id
+                self._activate_tab(tab_id)
         
         elif nav_type == "language":
             # Create/find language project and link it
@@ -4460,6 +4877,154 @@ class DossierApp(App):
             if linked_project:
                 self._select_project_by_name(linked_project.name)
                 self.notify(f"Navigated to {linked_project.name}")
+
+    @on(DataTable.RowSelected, "#deltas-table")
+    def on_deltas_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle deltas table row selection."""
+        if not self.selected_project or event.row_key.value == "empty":
+            return
+
+        row_key = str(event.row_key.value)
+        if row_key.startswith("delta-link-"):
+            try:
+                link_id = int(row_key.replace("delta-link-", ""))
+            except ValueError:
+                return
+            self._handle_delta_link_row(link_id)
+            return
+
+        if not row_key.startswith("delta-"):
+            return
+
+        try:
+            delta_id = int(row_key.replace("delta-", ""))
+        except ValueError:
+            return
+
+        with self.session_factory() as session:
+            delta = session.get(ProjectDelta, delta_id)
+            if delta:
+                self._link_delta_project({
+                    "delta_id": delta.id,
+                    "name": delta.name,
+                    "title": delta.title,
+                    "phase": delta.phase.value,
+                    "project_id": delta.project_id,
+                })
+
+    def _handle_delta_link_row(self, link_id: int) -> None:
+        """Handle delta link subrows from the deltas table."""
+        with self.session_factory() as session:
+            link = session.get(DeltaLink, link_id)
+            if not link:
+                return
+            delta = session.get(ProjectDelta, link.delta_id)
+            if not delta:
+                return
+            project = session.get(Project, delta.project_id)
+            if not project:
+                return
+
+            link_type = link.link_type
+            if link_type == "issue":
+                number = link.target_id
+                if number is None and link.target_name:
+                    try:
+                        number = int(link.target_name)
+                    except ValueError:
+                        number = None
+                if number is None:
+                    return
+                issue = session.exec(
+                    select(ProjectIssue)
+                    .where(ProjectIssue.project_id == project.id)
+                    .where(ProjectIssue.issue_number == number)
+                ).first()
+                self._link_issue_project({
+                    "number": number,
+                    "title": issue.title if issue else "",
+                    "state": issue.state if issue else "open",
+                    "project_id": project.id,
+                    "owner": project.github_owner,
+                    "repo": project.github_repo,
+                    "url": project.github_issues_url(number) if project.github_owner else None,
+                })
+            elif link_type == "pr":
+                number = link.target_id
+                if number is None and link.target_name:
+                    try:
+                        number = int(link.target_name)
+                    except ValueError:
+                        number = None
+                if number is None:
+                    return
+                pr = session.exec(
+                    select(ProjectPullRequest)
+                    .where(ProjectPullRequest.project_id == project.id)
+                    .where(ProjectPullRequest.pr_number == number)
+                ).first()
+                self._link_pr_project({
+                    "number": number,
+                    "title": pr.title if pr else "",
+                    "is_merged": pr.is_merged if pr else False,
+                    "project_id": project.id,
+                    "owner": project.github_owner,
+                    "repo": project.github_repo,
+                    "url": project.github_pulls_url(number) if project.github_owner else None,
+                })
+            elif link_type == "branch":
+                branch_name = link.target_name or (str(link.target_id) if link.target_id is not None else None)
+                if not branch_name:
+                    return
+                branch = session.exec(
+                    select(ProjectBranch)
+                    .where(ProjectBranch.project_id == project.id)
+                    .where(ProjectBranch.name == branch_name)
+                ).first()
+                self._link_branch_project({
+                    "name": branch_name,
+                    "is_default": branch.is_default if branch else False,
+                    "project_id": project.id,
+                    "owner": project.github_owner,
+                    "repo": project.github_repo,
+                    "url": project.github_branch_url(branch_name) if project.github_owner else None,
+                })
+            elif link_type == "doc":
+                doc_title = link.target_name or (str(link.target_id) if link.target_id is not None else None)
+                if not doc_title:
+                    return
+                doc = session.exec(
+                    select(DocumentSection)
+                    .where(DocumentSection.project_id == project.id)
+                    .where(DocumentSection.title == doc_title)
+                ).first()
+                self._link_doc_project({
+                    "title": doc.title if doc else doc_title,
+                    "section_type": doc.section_type if doc else "doc",
+                    "source_file": doc.source_file if doc else None,
+                    "project_id": project.id,
+                    "owner": project.github_owner,
+                    "repo": project.github_repo,
+                })
+            elif link_type == "delta":
+                target_delta = None
+                if link.target_id is not None:
+                    target_delta = session.get(ProjectDelta, link.target_id)
+                if target_delta is None and link.target_name:
+                    target_delta = session.exec(
+                        select(ProjectDelta)
+                        .where(ProjectDelta.project_id == project.id)
+                        .where(ProjectDelta.name == link.target_name)
+                    ).first()
+                if not target_delta:
+                    return
+                self._link_delta_project({
+                    "delta_id": target_delta.id,
+                    "name": target_delta.name,
+                    "title": target_delta.title,
+                    "phase": target_delta.phase.value,
+                    "project_id": target_delta.project_id,
+                })
     
     def action_open_tree_url(self) -> None:
         """Open the URL of the last selected tree item in browser."""
@@ -4970,10 +5535,77 @@ class DossierApp(App):
         
         self.load_projects()
         self._select_project_by_name(project_name)
-    
+
+    def _link_delta_project(self, nav_data: dict) -> None:
+        """Create or find a delta project and link it to the current project."""
+        delta_id = nav_data.get("delta_id")
+        name = nav_data.get("name")
+        title = nav_data.get("title", "")
+        phase = nav_data.get("phase", "brainstorm")
+        parent_project_id = nav_data.get("project_id")
+
+        if not delta_id or not name or not parent_project_id:
+            return
+
+        # Get parent project info for naming
+        with self.session_factory() as session:
+            parent_project = session.get(Project, parent_project_id)
+            if not parent_project:
+                return
+
+            owner = parent_project.github_owner
+            repo = parent_project.github_repo
+
+            # Create a project name for the delta with owner/repo for disambiguation
+            if owner and repo:
+                project_name = f"{owner}/{repo}/delta/{name}"
+            else:
+                project_name = f"delta/{name}"
+
+            delta_project = session.exec(
+                select(Project).where(Project.name == project_name)
+            ).first()
+
+            if not delta_project:
+                desc = f"Delta: {title[:80]} [{phase}]"
+                delta_project = Project(
+                    name=project_name,
+                    full_name=project_name,
+                    description=desc,
+                    github_owner=owner,
+                    github_repo=repo,
+                )
+                session.add(delta_project)
+                session.commit()
+                session.refresh(delta_project)
+                self.notify(f"Created delta project: {project_name}")
+
+            existing_link = session.exec(
+                select(ProjectComponent).where(
+                    ProjectComponent.parent_id == parent_project_id,
+                    ProjectComponent.child_id == delta_project.id,
+                )
+            ).first()
+
+            if not existing_link:
+                link = ProjectComponent(
+                    parent_id=parent_project_id,
+                    child_id=delta_project.id,
+                    relationship_type="delta",
+                    order=0,
+                )
+                session.add(link)
+                session.commit()
+                self.notify(f"Linked delta: {name}")
+            else:
+                self.notify(f"Delta {name} already linked", severity="warning")
+
+        self.load_projects()
+        self._select_project_by_name(project_name)
+
     def _select_project_by_name(self, name: str, target_tab: Optional[str] = None) -> None:
         """Select a project by name in the project tree.
-        
+
         Args:
             name: The project name to select
             target_tab: Optional tab to switch to after selection (e.g., 'tab-languages')
@@ -4982,9 +5614,7 @@ class DossierApp(App):
         if self.selected_project and self.selected_project.name == name:
             # Still switch tab if requested
             if target_tab:
-                tabs = self.query_one("#project-tabs", TabbedContent)
-                if tabs.active != target_tab:
-                    tabs.active = target_tab
+                self._activate_tab(target_tab)
             return
         
         # Set flag to prevent auto-switch to dossier tab
@@ -5092,7 +5722,27 @@ class DossierApp(App):
     def on_remove_component_pressed(self) -> None:
         """Handle remove component button press."""
         self.action_remove_component()
-    
+
+    @on(Button.Pressed, "#btn-new-delta")
+    def on_new_delta_pressed(self) -> None:
+        """Handle new delta button press."""
+        self.action_new_delta()
+
+    @on(Button.Pressed, "#btn-advance-phase")
+    def on_advance_phase_pressed(self) -> None:
+        """Handle advance phase button press."""
+        self.action_advance_delta_phase()
+
+    @on(Button.Pressed, "#btn-add-note")
+    def on_add_note_pressed(self) -> None:
+        """Handle add note button press."""
+        self.action_add_delta_note()
+
+    @on(Button.Pressed, "#btn-add-delta-link")
+    def on_add_delta_link_pressed(self) -> None:
+        """Handle add delta link button press."""
+        self.action_add_delta_link()
+
     @on(Button.Pressed, "#btn-filter-all")
     def on_filter_all_pressed(self) -> None:
         """Show all projects (clear sync filter)."""
@@ -5137,7 +5787,7 @@ class DossierApp(App):
     def on_sort_stars_pressed(self) -> None:
         """Sort by stars."""
         self.sort_by = "stars"
-        self._update_filter_buttons()
+        self._update_sort_ui()
         search_input = self.query_one("#search-input", Input)
         self.load_projects(search=search_input.value)
     
@@ -5145,7 +5795,7 @@ class DossierApp(App):
     def on_sort_name_pressed(self) -> None:
         """Sort by name."""
         self.sort_by = "name"
-        self._update_filter_buttons()
+        self._update_sort_ui()
         search_input = self.query_one("#search-input", Input)
         self.load_projects(search=search_input.value)
     
@@ -5153,7 +5803,7 @@ class DossierApp(App):
     def on_sort_synced_pressed(self) -> None:
         """Sort by recently synced."""
         self.sort_by = "synced"
-        self._update_filter_buttons()
+        self._update_sort_ui()
         search_input = self.query_one("#search-input", Input)
         self.load_projects(search=search_input.value)
     
@@ -5170,6 +5820,14 @@ class DossierApp(App):
         self.filter_language = event.value if event.value else None
         search_input = self.query_one("#search-input", Input)
         self.load_projects(search=search_input.value)
+
+    @on(Select.Changed, "#select-sort")
+    def on_sort_changed(self, event: Select.Changed) -> None:
+        """Handle sort selection change."""
+        if event.value:
+            self.sort_by = event.value
+        search_input = self.query_one("#search-input", Input)
+        self.load_projects(search=search_input.value)
     
     def _update_filter_buttons(self) -> None:
         """Update filter button variants to show active state."""
@@ -5177,31 +5835,23 @@ class DossierApp(App):
         btn_synced = self.query_one("#btn-filter-synced", Button)
         btn_unsynced = self.query_one("#btn-filter-unsynced", Button)
         btn_starred = self.query_one("#btn-filter-starred", Button)
-        btn_sort_stars = self.query_one("#btn-sort-stars", Button)
-        btn_sort_name = self.query_one("#btn-sort-name", Button)
-        btn_sort_synced = self.query_one("#btn-sort-synced", Button)
-        
+
         # Update sync filter buttons
         btn_all.variant = "primary" if self.filter_synced is None else "default"
         btn_synced.variant = "primary" if self.filter_synced is True else "default"
         btn_unsynced.variant = "primary" if self.filter_synced is False else "default"
-        
+
         # Update starred filter button (cycles through states)
         if self.filter_starred is None:
             btn_starred.variant = "default"
-            btn_starred.label = "⭐"
+            btn_starred.label = "Star"
         elif self.filter_starred is True:
             btn_starred.variant = "primary"
-            btn_starred.label = "⭐✓"
+            btn_starred.label = "Starred"
         else:
             btn_starred.variant = "warning"
-            btn_starred.label = "⭐✗"
-        
-        # Update sort buttons
-        btn_sort_stars.variant = "primary" if self.sort_by == "stars" else "default"
-        btn_sort_name.variant = "primary" if self.sort_by == "name" else "default"
-        btn_sort_synced.variant = "primary" if self.sort_by == "synced" else "default"
-    
+            btn_starred.label = "Unstarred"
+
     def _update_filter_ui(self) -> None:
         """Update all filter UI elements to match current filter state."""
         self._update_filter_buttons()
@@ -5219,20 +5869,17 @@ class DossierApp(App):
             select_lang.value = self.filter_language if self.filter_language else ""
         except Exception:
             pass
+
+        self._update_sort_ui()
     
     def _update_sort_ui(self) -> None:
-        """Update sort button UI to match current sort state."""
+        """Update sort UI to match current sort state."""
         try:
-            btn_sort_stars = self.query_one("#btn-sort-stars", Button)
-            btn_sort_name = self.query_one("#btn-sort-name", Button)
-            btn_sort_synced = self.query_one("#btn-sort-synced", Button)
-            
-            btn_sort_stars.variant = "primary" if self.sort_by == "stars" else "default"
-            btn_sort_name.variant = "primary" if self.sort_by == "name" else "default"
-            btn_sort_synced.variant = "primary" if self.sort_by == "synced" else "default"
+            select_sort = self.query_one("#select-sort", Select)
+            select_sort.value = self.sort_by
         except Exception:
             pass
-    
+
     def _restore_view_state(self) -> None:
         """Restore view state from config on app mount."""
         vs = self._config.view_state
@@ -5252,11 +5899,7 @@ class DossierApp(App):
                     
                     # Restore active tab
                     if vs.active_tab:
-                        try:
-                            tabbed_content = self.query_one("#project-tabs", TabbedContent)
-                            tabbed_content.active = vs.active_tab
-                        except Exception:
-                            pass
+                        self._activate_tab(vs.active_tab)
                     return
         
         # Fall back to auto-selecting first project
@@ -5265,12 +5908,7 @@ class DossierApp(App):
     def _save_view_state(self) -> None:
         """Save current view state to config."""
         # Get current active tab
-        active_tab = None
-        try:
-            tabbed_content = self.query_one("#project-tabs", TabbedContent)
-            active_tab = tabbed_content.active
-        except Exception:
-            pass
+        active_tab = self._get_active_tab_id()
         
         # Get selected project's full_name
         last_project = None
@@ -5362,6 +6000,8 @@ class DossierApp(App):
                 self._link_issue_project(nav_data)
             elif nav_type == "pr":
                 self._link_pr_project(nav_data)
+            elif nav_type == "delta":
+                self._link_delta_project(nav_data)
             elif nav_type == "project":
                 self.notify("Already a project", severity="warning")
             elif nav_type == "section":
@@ -6738,7 +7378,444 @@ class DossierApp(App):
         self.notify(f"Removed relationship with '{other_project_name}'")
         if self.selected_project:
             self.show_project_details(self.selected_project)
-    
+
+    def action_new_delta(self) -> None:
+        """Create a new delta for the selected project."""
+        if not self.selected_project:
+            self.notify("Select a project first", severity="warning")
+            return
+
+        project_id = self.selected_project.id
+        project_name = self.selected_project.name
+
+        class NewDeltaModal(ModalScreen[Optional[dict]]):
+            """Modal for creating a new delta."""
+
+            CSS = """
+            NewDeltaModal {
+                align: center middle;
+            }
+
+            #new-delta-dialog {
+                width: 70;
+                height: auto;
+                padding: 1 2;
+                background: $surface;
+                border: solid $primary;
+            }
+
+            #new-delta-dialog Input {
+                margin: 1 0;
+            }
+
+            #new-delta-dialog Select {
+                margin: 1 0;
+                width: 100%;
+            }
+
+            #new-delta-dialog Horizontal {
+                margin-top: 1;
+                align: right middle;
+            }
+
+            #new-delta-dialog Button {
+                margin-left: 1;
+            }
+            """
+
+            def compose(self) -> ComposeResult:
+                with Vertical(id="new-delta-dialog"):
+                    yield Label(f"New Delta for {project_name}", classes="title")
+                    yield Label("Name (slug):")
+                    yield Input(placeholder="e.g., add-dark-mode", id="delta-name")
+                    yield Label("Title:")
+                    yield Input(placeholder="Human-readable title", id="delta-title")
+                    yield Label("Type:")
+                    yield Select(
+                        [("✨ Feature", "feature"), ("🐛 Bugfix", "bugfix"),
+                         ("♻️ Refactor", "refactor"), ("📚 Docs", "docs"), ("🔧 Chore", "chore")],
+                        value="feature",
+                        id="delta-type",
+                        allow_blank=False,
+                    )
+                    yield Label("Priority:")
+                    yield Select(
+                        [("🟢 Low", "low"), ("🟡 Medium", "medium"),
+                         ("🟠 High", "high"), ("🔴 Critical", "critical")],
+                        value="medium",
+                        id="delta-priority",
+                        allow_blank=False,
+                    )
+                    with Horizontal():
+                        yield Button("Cancel", id="cancel-btn")
+                        yield Button("Create", id="create-btn", variant="primary")
+
+            @on(Button.Pressed, "#create-btn")
+            def on_create(self) -> None:
+                name = self.query_one("#delta-name", Input).value.strip()
+                title = self.query_one("#delta-title", Input).value.strip()
+                delta_type = self.query_one("#delta-type", Select).value
+                priority = self.query_one("#delta-priority", Select).value
+
+                if not name:
+                    self.notify("Name is required", severity="error")
+                    return
+                if not title:
+                    self.notify("Title is required", severity="error")
+                    return
+
+                self.dismiss({
+                    "name": name,
+                    "title": title,
+                    "delta_type": delta_type,
+                    "priority": priority,
+                })
+
+            @on(Button.Pressed, "#cancel-btn")
+            def on_cancel(self) -> None:
+                self.dismiss(None)
+
+        def handle_result(result: Optional[dict]) -> None:
+            if result:
+                self._create_delta(project_id, result)
+
+        self.push_screen(NewDeltaModal(), handle_result)
+
+    def _create_delta(self, project_id: int, data: dict) -> None:
+        """Create a new delta in the database."""
+        with self.session_factory() as session:
+            delta = ProjectDelta(
+                project_id=project_id,
+                name=data["name"],
+                title=data["title"],
+                delta_type=data["delta_type"],
+                priority=data["priority"],
+                phase=DeltaPhase.BRAINSTORM,
+            )
+            session.add(delta)
+            session.commit()
+
+        self.notify(f"Created delta: {data['name']}")
+        # Reload deltas tab
+        if hasattr(self, "_tabs_loaded"):
+            self._tabs_loaded.discard("tab-deltas")
+        if self.selected_project:
+            self._load_deltas_tab(self.selected_project)
+
+    def action_advance_delta_phase(self) -> None:
+        """Advance the selected delta to the next phase."""
+        if not self.selected_project:
+            self.notify("Select a project first", severity="warning")
+            return
+
+        deltas_table = self.query_one("#deltas-table", DataTable)
+
+        if deltas_table.cursor_row is None:
+            self.notify("Select a delta to advance", severity="warning")
+            return
+
+        try:
+            row_key = deltas_table.coordinate_to_cell_key((deltas_table.cursor_row, 0)).row_key
+        except Exception:
+            self.notify("Select a delta to advance", severity="warning")
+            return
+
+        row_key_str = str(row_key.value) if row_key else ""
+        if not row_key_str.startswith("delta-") or row_key_str.startswith("delta-link-"):
+            self.notify("Select a delta to advance", severity="warning")
+            return
+
+        try:
+            delta_id = int(row_key_str.split("-")[1])
+        except ValueError:
+            self.notify("Select a delta to advance", severity="warning")
+            return
+
+        with self.session_factory() as session:
+            delta = session.get(ProjectDelta, delta_id)
+            if not delta:
+                self.notify("Delta not found", severity="error")
+                return
+
+            if not delta.can_advance():
+                if delta.phase == DeltaPhase.COMPLETE:
+                    self.notify("Delta is already complete", severity="warning")
+                elif delta.phase == DeltaPhase.ABANDONED:
+                    self.notify("Cannot advance abandoned delta", severity="warning")
+                else:
+                    self.notify("Cannot advance delta", severity="warning")
+                return
+
+            old_phase = delta.phase.value
+            delta.advance_phase()
+            new_phase = delta.phase.value
+            session.commit()
+
+        self.notify(f"Advanced delta: {old_phase} → {new_phase}")
+        # Reload deltas tab
+        if hasattr(self, "_tabs_loaded"):
+            self._tabs_loaded.discard("tab-deltas")
+        if self.selected_project:
+            self._load_deltas_tab(self.selected_project)
+
+    def action_add_delta_note(self) -> None:
+        """Add a note to the selected delta."""
+        if not self.selected_project:
+            self.notify("Select a project first", severity="warning")
+            return
+
+        deltas_table = self.query_one("#deltas-table", DataTable)
+
+        if deltas_table.cursor_row is None:
+            self.notify("Select a delta first", severity="warning")
+            return
+
+        try:
+            row_key = deltas_table.coordinate_to_cell_key((deltas_table.cursor_row, 0)).row_key
+        except Exception:
+            self.notify("Select a delta first", severity="warning")
+            return
+
+        row_key_str = str(row_key.value) if row_key else ""
+        if not row_key_str.startswith("delta-") or row_key_str.startswith("delta-link-"):
+            self.notify("Select a delta first", severity="warning")
+            return
+
+        try:
+            delta_id = int(row_key_str.split("-")[1])
+        except ValueError:
+            self.notify("Select a delta first", severity="warning")
+            return
+
+        # Get delta info for the modal
+        with self.session_factory() as session:
+            delta = session.get(ProjectDelta, delta_id)
+            if not delta:
+                self.notify("Delta not found", severity="error")
+                return
+            delta_name = delta.name
+            delta_phase = delta.phase
+
+        class AddNoteModal(ModalScreen[Optional[str]]):
+            """Modal for adding a note to a delta."""
+
+            CSS = """
+            AddNoteModal {
+                align: center middle;
+            }
+
+            #add-note-dialog {
+                width: 70;
+                height: auto;
+                padding: 1 2;
+                background: $surface;
+                border: solid $primary;
+            }
+
+            #add-note-dialog Input {
+                margin: 1 0;
+            }
+
+            #add-note-dialog Horizontal {
+                margin-top: 1;
+                align: right middle;
+            }
+
+            #add-note-dialog Button {
+                margin-left: 1;
+            }
+            """
+
+            def compose(self) -> ComposeResult:
+                with Vertical(id="add-note-dialog"):
+                    yield Label(f"Add Note to '{delta_name}'", classes="title")
+                    yield Label(f"Current phase: {delta_phase.value}")
+                    yield Label("Note content:")
+                    yield Input(placeholder="Enter your note...", id="note-content")
+                    with Horizontal():
+                        yield Button("Cancel", id="cancel-btn")
+                        yield Button("Add Note", id="add-btn", variant="primary")
+
+            @on(Button.Pressed, "#add-btn")
+            def on_add(self) -> None:
+                content = self.query_one("#note-content", Input).value.strip()
+                if not content:
+                    self.notify("Note content is required", severity="error")
+                    return
+                self.dismiss(content)
+
+            @on(Button.Pressed, "#cancel-btn")
+            def on_cancel(self) -> None:
+                self.dismiss(None)
+
+        def handle_result(content: Optional[str]) -> None:
+            if content:
+                self._add_delta_note(delta_id, delta_phase, content)
+
+        self.push_screen(AddNoteModal(), handle_result)
+
+    def _add_delta_note(self, delta_id: int, phase: DeltaPhase, content: str) -> None:
+        """Add a note to a delta."""
+        with self.session_factory() as session:
+            note = DeltaNote(
+                delta_id=delta_id,
+                phase=phase,
+                content=content,
+            )
+            session.add(note)
+            session.commit()
+
+        self.notify("Note added successfully")
+
+    def action_add_delta_link(self) -> None:
+        """Add a link to the selected delta."""
+        if not self.selected_project:
+            self.notify("Select a project first", severity="warning")
+            return
+
+        if not self._delta_tables_exist:
+            self.notify("Delta tables not available (run migration)", severity="warning")
+            return
+
+        deltas_table = self.query_one("#deltas-table", DataTable)
+
+        if deltas_table.cursor_row is None:
+            self.notify("Select a delta first", severity="warning")
+            return
+
+        try:
+            row_key = deltas_table.coordinate_to_cell_key((deltas_table.cursor_row, 0)).row_key
+        except Exception:
+            self.notify("Select a delta first", severity="warning")
+            return
+
+        row_key_str = str(row_key.value) if row_key else ""
+        if not row_key_str.startswith("delta-") or row_key_str.startswith("delta-link-"):
+            self.notify("Select a delta first", severity="warning")
+            return
+
+        try:
+            delta_id = int(row_key_str.split("-")[1])
+        except ValueError:
+            self.notify("Select a delta first", severity="warning")
+            return
+
+        # Get delta info for the modal
+        with self.session_factory() as session:
+            delta = session.get(ProjectDelta, delta_id)
+            if not delta:
+                self.notify("Delta not found", severity="error")
+                return
+            delta_name = delta.name
+
+        class AddLinkModal(ModalScreen[Optional[tuple[str, str]]]):
+            """Modal for adding a link to a delta."""
+
+            CSS = """
+            AddLinkModal {
+                align: center middle;
+            }
+
+            #add-link-dialog {
+                width: 70;
+                height: auto;
+                padding: 1 2;
+                background: $surface;
+                border: solid $primary;
+            }
+
+            #add-link-dialog Select {
+                margin: 1 0;
+            }
+
+            #add-link-dialog Input {
+                margin: 1 0;
+            }
+
+            #add-link-dialog Horizontal {
+                margin-top: 1;
+                align: right middle;
+            }
+
+            #add-link-dialog Button {
+                margin-left: 1;
+            }
+            """
+
+            def compose(self) -> ComposeResult:
+                with Vertical(id="add-link-dialog"):
+                    yield Label(f"Add Link to '{delta_name}'", classes="title")
+                    yield Label("Link type:")
+                    yield Select(
+                        [
+                            ("Issue", "issue"),
+                            ("Pull Request", "pr"),
+                            ("Branch", "branch"),
+                            ("Documentation", "doc"),
+                            ("Other Delta", "delta"),
+                        ],
+                        id="link-type",
+                        value="issue",
+                    )
+                    yield Label("Target (issue #, PR #, branch name, etc.):")
+                    yield Input(placeholder="Enter target identifier...", id="link-target")
+                    with Horizontal():
+                        yield Button("Cancel", id="cancel-btn")
+                        yield Button("Add Link", id="add-btn", variant="primary")
+
+            @on(Button.Pressed, "#add-btn")
+            def on_add(self) -> None:
+                link_type = self.query_one("#link-type", Select).value
+                target = self.query_one("#link-target", Input).value.strip()
+                if not target:
+                    self.notify("Target is required", severity="error")
+                    return
+                self.dismiss((link_type, target))
+
+            @on(Button.Pressed, "#cancel-btn")
+            def on_cancel(self) -> None:
+                self.dismiss(None)
+
+        def handle_result(result: Optional[tuple[str, str]]) -> None:
+            if result:
+                link_type, target = result
+                self._add_delta_link(delta_id, link_type, target)
+
+        self.push_screen(AddLinkModal(), handle_result)
+
+    def _add_delta_link(self, delta_id: int, link_type: str, target: str) -> None:
+        """Add a link to a delta."""
+        # Parse target based on link type
+        target_id = None
+        target_name = target
+
+        # Try to parse numeric targets for issue/pr/delta
+        if link_type in ("issue", "pr", "delta"):
+            try:
+                # Remove leading # if present
+                clean_target = target.lstrip("#")
+                target_id = int(clean_target)
+                target_name = None
+            except ValueError:
+                # Keep as name if not a number
+                pass
+
+        with self.session_factory() as session:
+            link = DeltaLink(
+                delta_id=delta_id,
+                link_type=link_type,
+                target_id=target_id,
+                target_name=target_name,
+            )
+            session.add(link)
+            session.commit()
+
+        self.notify(f"Link added: {link_type} -> {target}")
+
+        # Refresh the deltas tab
+        if self.selected_project:
+            self._load_deltas_tab(self.selected_project)
+
     def action_search(self) -> None:
         """Focus the search input."""
         self.query_one("#search-input", Input).focus()
@@ -6829,26 +7906,27 @@ Press `o` while tree is focused to open the item in your web browser.
 
 Selected projects are highlighted. Use multi-select with Sync or Delete to batch operate.
 
-## Filter Bar
+## Sidebar Controls
 
-### Sync Status (Row 1)
+### Selectors (Row 1)
+- **Type** - Filter by entity type (Repos, Branches, Issues, PRs, Docs, Deltas, Users, Languages, Packages)
+- **Language** - Filter by primary language
+- **Sort** - Sort by stars, name, or recent sync
+
+### Buttons (Row 2)
 - **All** - Show all projects (clear sync filter)
-- **🔄** - Show only synced projects
-- **○** - Show only unsynced projects
-- **⭐** - Toggle starred filter (⭐ all → ⭐✓ starred → ⭐✗ no stars)
-
-### Type & Language (Row 2)
-- **Type dropdown** - Filter by entity type (Repos, Branches, Issues, PRs, etc.)
-- **Language dropdown** - Filter by primary language
-
-### Sort Options (Row 3)
-- **⭐ Stars** - Sort by GitHub stars (highest first)
-- **🔤 Name** - Sort alphabetically by name
-- **🕐 Recent** - Sort by most recently synced
+- **Synced** - Show only synced projects
+- **Unsynced** - Show only unsynced projects
+- **Star** - Cycle starred filter (all ? starred ? unstarred)
 
 ## Tabs
 
-- **Dossier** - Formatted project overview (default on select)
+Main Tabs:
+- **Dossier** - Formatted overview with component tree
+- **Projects** - Project detail workspace (subtabs below)
+- **Deltas** - Delta list with phases, notes, and links
+
+Project Subtabs (inside Projects):
 - **Details** - Project info with clickable links
 - **Documentation** - Parsed doc sections
 - **Languages** - Language breakdown with visual bars
@@ -6860,7 +7938,11 @@ Selected projects are highlighted. Use multi-select with Sync or Delete to batch
 - **Releases** - Version releases with tags
 - **Components** - Manage subproject relationships
 
-## Components Tab
+## Deltas Tab
+
+Deltas are the unit of change. Use this tab to manage phases, add notes, and compose/link deltas to issues, PRs, branches, docs, or other deltas.
+
+## Projects > Components
 
 Link projects together as components, dependencies, or related projects:
 - **➕ Add Component** - Add a subproject to the current project

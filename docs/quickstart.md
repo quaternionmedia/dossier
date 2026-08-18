@@ -145,17 +145,19 @@ Click on documentation, issues, or PRs in the tree to open the **content viewer*
 
 ### The dashboard shows:
 - **Project Tree** - Hierarchical browser with org grouping and inline docs
-- **Dossier Tab** - Formatted project overview with component tree (languages, dependencies, contributors)
-- **Details Tab** - Project metadata, clickable GitHub links, timestamps
-- **Documentation Tab** - Tree view of docs grouped by source file (click to preview)
-- **Languages Tab** - Language breakdown with file extensions and encoding
-- **Branches Tab** - Repository branches with default/protected status, latest commits
-- **Dependencies Tab** - Clickable links to entity projects (creates `pkg/name` entities)
-- **Contributors Tab** - Top contributors (non-clickable, view only)
-- **Issues Tab** - Click to navigate to issue entity (`owner/repo/issue/123`)
-- **Pull Requests Tab** - PRs with merge status (click to navigate to PR entity)
-- **Releases Tab** - Version releases with tags (click to navigate to version entity)
-- **Components Tab** - Child project relationships
+- **Dossier (Main)** - Formatted project overview with component tree (languages, dependencies, contributors)
+- **Projects > Details** - Project metadata, clickable GitHub links, timestamps
+- **Projects > Documentation** - Tree view of docs grouped by source file (click to preview)
+- **Projects > Languages** - Language breakdown with file extensions and encoding
+- **Projects > Branches** - Repository branches with default/protected status, latest commits
+- **Projects > Dependencies** - Clickable links to entity projects (creates `pkg/name` entities)
+- **Projects > Contributors** - Top contributors (non-clickable, view only)
+- **Projects > Issues** - Click to navigate to issue entity (`owner/repo/issue/123`)
+- **Projects > Pull Requests** - PRs with merge status (click to navigate to PR entity)
+- **Projects > Releases** - Version releases with tags (click to navigate to version entity)
+- **Projects > Components** - Child project relationships
+- **Deltas (Main)** - Track change units with phases, notes, and composed links
+
 
 ## GitHub Authentication Setup
 
