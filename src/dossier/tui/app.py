@@ -56,7 +56,12 @@ from dossier.dossier_file import generate_dossier
 PAGE_SIZE = 100  # Number of projects to load per page
 DEBOUNCE_MS = 300  # Milliseconds to wait before filtering
 TREE_ENTITY_LIMIT = 20  # Max entities to show per section in tree
-MAIN_TABS = {"tab-dossier", "tab-projects", "tab-deltas"}
+# The tabs that exist at the top level. `tab-projects` used to be here: it came
+# from a nested restructure that was rejected when the delta entity landed, and
+# five references to it survived, pointing at a tab nothing composes. They were
+# dormant until something took that path, and then failed as
+# "No Tab with id '--content-tab-tab-projects'" -- nowhere near the cause.
+MAIN_TABS = {"tab-dossier", "tab-details", "tab-deltas"}
 PROJECT_TABS = {
     "tab-details",
     "tab-docs",
@@ -706,7 +711,7 @@ class DossierApp(App):
         padding: 1;
     }
 
-    #tab-projects {
+    #tab-details {
         padding: 0;
     }
     
@@ -790,6 +795,7 @@ class DossierApp(App):
         Binding("o", "open_github", "Open GitHub", show=True),
         Binding("/", "search", "Search", show=True),
         Binding("f", "cycle_filter", "Filter", show=True),
+        Binding("m", "rad_menu", "Menu (rad)", show=True),
         Binding("?", "help", "Help", show=True),
         Binding("`", "settings", "Settings", show=False),
         Binding("l", "link_selected", "Link as Project", show=False),
@@ -961,6 +967,59 @@ class DossierApp(App):
         
         yield Footer()
     
+    def action_rad_menu(self) -> None:
+        """Open the rad ring, and apply whatever it commits.
+
+        The host half of rad's division of ownership: rad decided *what* was
+        chosen, and applying it is ours. Unhandled actions are reported rather
+        than swallowed -- a wedge that commits nothing is a dead end, and a
+        silent one is worse than a loud one.
+        """
+        from dossier.rad import resolve
+        from dossier.rad.ring import RingScreen
+        from dossier.rad.session import RadSession
+
+        if self._rad is None:
+            self._rad = RadSession(resolve=resolve)
+
+        def applied(intent) -> None:
+            if intent is None:
+                return
+            self._apply_rad_intent(intent)
+
+        self.push_screen(RingScreen(self._rad), applied)
+
+    # One rad session for the app's lifetime, so the cost ledger accumulates
+    # across actions rather than resetting each time the ring opens. A class
+    # attribute rather than an __init__ line, so it exists however the app was
+    # constructed -- this app has more than one construction path.
+    _rad = None
+
+    # Actions the ring can commit that map onto a view this app already has.
+    RAD_VIEWS = {
+        "view.deltas": "tab-deltas",
+        "view.governance": "tab-governance",
+        "view.disk": "tab-disk",
+        "view.details": "tab-details",
+    }
+
+    def _apply_rad_intent(self, intent) -> None:
+        """Apply one committed intent, and say so where a reader can see it."""
+        tab = self.RAD_VIEWS.get(intent.action)
+        if tab is not None:
+            try:
+                self.query_one("#project-tabs").active = tab
+            except Exception:
+                pass
+            self.notify(f"{intent.action}  (ipa {intent.ipa})", timeout=3)
+            return
+        # Named in the palette and not yet handled here. Reported, because a
+        # wedge that quietly does nothing teaches a reader the menu is broken.
+        self.notify(
+            f"{intent.action}: not applied yet (ipa {intent.ipa})",
+            severity="warning", timeout=4,
+        )
+
     def on_mount(self) -> None:
         # Setup docs tree
         docs_tree = self.query_one("#docs-tree", Tree)
@@ -2483,7 +2542,7 @@ class DossierApp(App):
             main_tabs.active = tab_id
             return
         if tab_id in PROJECT_TABS:
-            main_tabs.active = "tab-projects"
+            main_tabs.active = "tab-details"
             try:
                 project_tabs = self.query_one("#project-tabs", TabbedContent)
                 project_tabs.active = tab_id
@@ -2496,12 +2555,12 @@ class DossierApp(App):
             main_tabs = self.query_one("#project-tabs", TabbedContent)
         except Exception:
             return None
-        if main_tabs.active == "tab-projects":
+        if main_tabs.active == "tab-details":
             try:
                 project_tabs = self.query_one("#project-tabs", TabbedContent)
                 return project_tabs.active
             except Exception:
-                return "tab-projects"
+                return "tab-details"
         return main_tabs.active
 
     def show_project_details(self, project: Project) -> None:
@@ -2541,7 +2600,7 @@ class DossierApp(App):
         """Lazy load tab data when a main tab is activated."""
         if not hasattr(self, "_current_project_id"):
             return
-        if event.pane.id == "tab-projects":
+        if event.pane.id == "tab-details":
             project_tabs = self.query_one("#project-tabs", TabbedContent)
             self._load_tab_data(project_tabs.active)
         elif event.pane.id == "tab-deltas":
