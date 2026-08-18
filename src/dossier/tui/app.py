@@ -101,6 +101,9 @@ def extract_file_path(source_file: str | None) -> str | None:
 
 
 from dossier.tui.delta_board import DeltaBoard
+
+# The prefix `load_projects` puts on an owner group node.
+ORG_GROUP_PREFIX = "🏢"
 from dossier.tui.overview_panel import OverviewPanel
 
 
@@ -1997,7 +2000,12 @@ class DossierApp(App):
                         item_count += len(subgroup_items)
                 
                 group_node = project_tree.root.add(f"{group} ({item_count})", expand=group.startswith("🏢"))
-                group_node.data = {"type": "group", "name": group}
+                # A category is a selectable thing, not just a heading. An
+                # owner group carries its owner so selecting it can show the
+                # aggregate for that owner rather than doing nothing -- the
+                # same move as a project node showing that project.
+                owner = group[2:].strip() if group.startswith(ORG_GROUP_PREFIX) else None
+                group_node.data = {"type": "group", "name": group, "owner": owner}
                 
                 # Add direct items (no subgroup)
                 for display, project in group_data.get("_items", []):
@@ -2469,6 +2477,13 @@ class DossierApp(App):
                     self._tree_target_tab = None
                 self._navigating_from_tree = False
         
+        elif nav_type == "group":
+            # Selecting a category shows that category's aggregate. For an
+            # owner that is the org overview, scoped to them.
+            owner = nav_data.get("owner")
+            if owner:
+                self.show_org_overview(owner)
+
         elif nav_type == "tree_doc":
             # Open doc viewer directly from tree
             doc_id = nav_data.get("doc_id")
@@ -5957,6 +5972,12 @@ class DossierApp(App):
             select_sort.value = self.sort_by
         except Exception:
             pass
+
+    def show_org_overview(self, owner: str) -> None:
+        """Scope the overview to one owner and bring it to the front."""
+        panel = self.query_one(OverviewPanel)
+        panel.set_owner(owner)
+        self._activate_tab("tab-overview")
 
     def _filter_matches_anything(self) -> bool:
         """Whether the current filters select at least one project."""

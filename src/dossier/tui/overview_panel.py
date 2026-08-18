@@ -116,12 +116,19 @@ class OverviewPanel(VerticalScroll):
     under them.
     """
 
-    def __init__(self, session_factory, theme: str = DEFAULT_THEME, **kwargs) -> None:
+    def __init__(self, session_factory, theme: str = DEFAULT_THEME,
+                 owner: str | None = None, **kwargs) -> None:
         super().__init__(**kwargs)
         self.session_factory = session_factory
         self.theme_name = theme
+        self.owner = owner
         self._body = Static(id="overview-body")
         self.overview: OrgOverview | None = None
+
+    def set_owner(self, owner: str | None) -> None:
+        """Scope to one owner and redraw. Unscoped when `owner` is None."""
+        self.owner = owner
+        self.refresh_overview()
 
     def compose(self):
         yield self._body
@@ -132,5 +139,5 @@ class OverviewPanel(VerticalScroll):
     def refresh_overview(self) -> None:
         """Rebuild from the database. Safe to call from a binding or a button."""
         with self.session_factory() as session:
-            self.overview = build(session)
+            self.overview = build(session, owner=self.owner)
         self._body.update(render(self.overview, self.theme_name))

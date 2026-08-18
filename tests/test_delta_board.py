@@ -146,3 +146,37 @@ class _Borrowed:
 
     def __exit__(self, *exc):
         return False
+
+
+@pytest.mark.asyncio
+async def test_selecting_the_owner_group_shows_that_owner_s_overview(session):
+    """A category is a selectable thing. Selecting the org showed nothing
+    before; a heading you can highlight and not open reads as broken."""
+    from dossier.tui.app import DossierApp
+    from dossier.tui.overview_panel import OverviewPanel
+
+    app = DossierApp(session_factory=lambda: _Borrowed(session))
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        app.show_org_overview("org")
+        await pilot.pause()
+        panel = app.query_one(OverviewPanel)
+        assert panel.owner == "org"
+        assert "owned by org" in panel.overview.scope
+        assert app.query_one("#project-tabs").active == "tab-overview"
+
+
+@pytest.mark.asyncio
+async def test_the_owner_group_node_carries_its_owner(session):
+    """Without this the handler would have to parse a display label."""
+    from textual.widgets import Tree
+
+    from dossier.tui.app import DossierApp
+
+    app = DossierApp(session_factory=lambda: _Borrowed(session))
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        tree = app.query_one("#project-tree", Tree)
+        owners = [node.data.get("owner") for node in tree.root.children
+                  if node.data and node.data.get("type") == "group"]
+    assert "org" in owners
