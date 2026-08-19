@@ -656,3 +656,103 @@ class TestRingLeavesTheDataVisible:
             ring = app.screen.query_one("#rad-ring")
             assert ring.size.width < 120, "the panel spans the terminal"
             assert ring.size.height < 40, "the panel is as tall as the terminal"
+
+
+class TestTheRingIsRecorded:
+    """The ring, rendered, as a byproduct of asserting what it does.
+
+    `governance/qm/records/DRAFT-one-executable-walkthrough.md` §4: what prose
+    cannot hold is emitted by the test that asserts the behaviour, against the
+    real production component, and **recorded rather than compared**. The
+    picture is a byproduct of the render those assertions ran against, so it
+    cannot drift from the code without a test failing first.
+
+    It rides `uv run pytest`, deliberately. This repository's other screenshots
+    are written only when `--screenshots` is passed, and the record's evidence
+    is that artifacts needing a remembered command go stale while the ones
+    riding the command people already run do not.
+
+    Nothing here compares an image. A comparison would fail on a font, a
+    terminal size or a colour change and teach a reader to regenerate without
+    looking; the assertions below are what protect the behaviour.
+    """
+
+    OUTPUT = Path("docs/screenshots")
+
+    def _record(self, app, name: str) -> None:
+        self.OUTPUT.mkdir(parents=True, exist_ok=True)
+        (self.OUTPUT / f"{name}.svg").write_text(
+            app.export_screenshot(title=f"dossier — {name.replace('_', ' ')}"),
+            encoding="utf-8",
+        )
+
+    async def _app(self):
+        from sqlmodel import Session, SQLModel, create_engine
+
+        from dossier.models.schemas import Project
+        from dossier.tui import DossierApp
+
+        engine = create_engine("sqlite://")
+        SQLModel.metadata.create_all(engine)
+        session = Session(engine)
+        for name in ("quaternionmedia/dossier", "quaternionmedia/qmcp",
+                     "quaternionmedia/rad"):
+            session.add(Project(name=name, full_name=name,
+                                github_owner="quaternionmedia",
+                                description="a repository",
+                                github_language="Python"))
+        session.commit()
+
+        class Borrowed:
+            def __enter__(self):
+                return session
+
+            def __exit__(self, *exc):
+                return False
+
+        return DossierApp(session_factory=lambda: Borrowed())
+
+    @pytest.mark.asyncio
+    async def test_the_ring_opens_over_the_dashboard_and_is_recorded(self):
+        app = await self._app()
+        async with app.run_test(size=(120, 34)) as pilot:
+            await pilot.pause()
+            await pilot.press("m")
+            await pilot.pause()
+            await pilot.pause()
+
+            drawn = app.export_screenshot()
+            for verb in ("Go", "Do", "Show", "Reach"):
+                assert verb in drawn, f"{verb} is not on the ring"
+            self._record(app, "rad_ring_top_level")
+
+    @pytest.mark.asyncio
+    async def test_one_level_in_shows_that_verbs_children_and_is_recorded(self):
+        from dossier.rad import resolve
+
+        app = await self._app()
+        async with app.run_test(size=(120, 34)) as pilot:
+            await pilot.pause()
+            await pilot.press("m")
+            await pilot.pause()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.pause()
+
+            drawn = app.export_screenshot()
+            first_child = resolve()[0].children[0].label
+            assert first_child in drawn, (
+                f"{first_child!r} should be showing after entering the first verb")
+            self._record(app, "rad_ring_one_level_in")
+
+    def test_both_recordings_exist_after_the_tests_above(self):
+        """They ride the ordinary test command, so a run leaves them current.
+
+        This asserts the artifact, not the picture: an image comparison would
+        fail on a font change and teach a reader to regenerate without looking.
+        """
+        for name in ("rad_ring_top_level", "rad_ring_one_level_in"):
+            path = self.OUTPUT / f"{name}.svg"
+            assert path.is_file(), f"{path} was not recorded"
+            assert path.stat().st_size > 0
