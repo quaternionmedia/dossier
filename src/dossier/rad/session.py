@@ -51,6 +51,8 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from dossier.rad import numpad
+
 SCHEMA = 1
 
 # The durable palette. Fixed, and identical in every host.
@@ -94,6 +96,21 @@ class RingView:
     highlighted: int
     path: tuple[str, ...]
     context: Any = None
+
+    @property
+    def placement(self) -> numpad.Placement:
+        """Which numpad cell holds which wedge."""
+        return numpad.place(len(self.wedges))
+
+    @property
+    def cursor_cell(self) -> int:
+        """The cell the highlight is on."""
+        return self.placement.by_index.get(self.highlighted, numpad.BACK)
+
+    def wedge_at(self, cell: int) -> Wedge | None:
+        """The wedge in a cell, or None for the centre and empty cells."""
+        index = self.placement.by_cell.get(cell)
+        return None if index is None else self.wedges[index]
 
     @property
     def current(self) -> Wedge | None:
@@ -185,6 +202,9 @@ class RadSession:
         self._highlight: list[int] = []
         self._path: list[str] = []
         self._context: Any = None
+        # The last direction pressed, for reading two of them as a diagonal.
+        self._last_direction: str | None = None
+        self._last_direction_at: float = 0.0
         self.meter = Meter()
         self.intents: list[Intent] = []
 
@@ -224,6 +244,66 @@ class RadSession:
         self._path = []
         self.meter.transition()
         return self.view
+
+    def move(self, direction: str, now: float | None = None) -> RingView | None:
+        """Move the highlight one direction. One input.
+
+        Two presses arriving within `numpad.CHORD_WINDOW` are read as the
+        diagonal between them, which is what pressing both at once means to a
+        person and what a terminal cannot report. The chord is a shortcut, never
+        the only route: the same two presses spaced further apart walk to the
+        same corner one cell at a time.
+        """
+        if not self.is_open:
+            self.meter.raw(recognized=False)
+            return None
+        self.meter.raw(recognized=True)
+
+        view = self.view
+        placement = view.placement
+        target = None
+
+        if (now is not None and self._last_direction is not None
+                and now - self._last_direction_at <= numpad.CHORD_WINDOW):
+            corner = numpad.chord(self._last_direction, direction)
+            if corner is not None and corner in placement.by_cell:
+                target = corner
+
+        if target is None:
+            target = numpad.step_to_item(view.cursor_cell, direction, placement)
+
+        self._last_direction = direction
+        self._last_direction_at = now if now is not None else 0.0
+
+        index = placement.by_cell.get(target)
+        if index is not None:
+            self._highlight[-1] = index
+        self.meter.transition()
+        return self.view
+
+    def press_cell(self, cell: int) -> Intent | None:
+        """Choose the item in a numpad cell directly. One input.
+
+        The centre backs out at every depth, which is why it holds no item: a
+        menu whose centre sometimes cancels and sometimes chooses the fifth
+        thing cannot be used without looking.
+        """
+        if not self.is_open:
+            self.meter.raw(recognized=False)
+            return None
+        if cell == numpad.BACK:
+            self.back()
+            return None
+
+        view = self.view
+        index = view.placement.by_cell.get(cell)
+        if index is None:
+            # An empty cell is not a mistake worth punishing, and it is not a
+            # transition either: nothing moved and nothing was chosen.
+            self.meter.raw(recognized=False)
+            return None
+        self._highlight[-1] = index
+        return self.enter()
 
     def rotate(self, delta: int) -> RingView | None:
         """Move the highlight. One input. Wraps, because a ring has no ends."""
