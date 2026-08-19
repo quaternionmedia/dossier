@@ -389,3 +389,18 @@ def _isolate_dossier_home(tmp_path_factory):
         os.environ.pop("DOSSIER_HOME", None)
     else:
         os.environ["DOSSIER_HOME"] = previous
+
+
+@pytest.fixture(scope="session")
+def repo_root() -> Path:
+    """The repository root, found rather than counted to.
+
+    Tests reached it as `Path(__file__).parent.parent`, which is a count of
+    directories between a test file and the root -- so organising the suite
+    into categories moved every one of them one level and broke tests that had
+    nothing to do with the change. Anchoring on a file that only exists at the
+    root makes the depth irrelevant.
+    """
+    from tests.structural import repo_root as find_root
+
+    return find_root()

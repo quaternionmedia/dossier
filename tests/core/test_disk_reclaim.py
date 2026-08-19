@@ -30,7 +30,7 @@ from sqlmodel import Session, SQLModel, create_engine
 from dossier import disk as disk_tools
 from dossier import disk_store
 
-from .test_disk_store import document, measured_target, unknown_target
+from tests.disk_documents import document, measured_target, unknown_target
 
 
 @pytest.fixture

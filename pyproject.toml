@@ -62,10 +62,14 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# `walkthrough` is listed, and the CI invocation names both paths explicitly.
+# `testpaths` is ignored the moment pytest is given a path argument, so a
+# walkthrough wired only here would be collected by nobody and stay green
+# forever.
+testpaths = ["tests", "walkthrough"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
-addopts = "-v"
+addopts = "-v --doctest-glob=*.md"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [

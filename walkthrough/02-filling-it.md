@@ -1,0 +1,120 @@
+# 02 — Filling it, and the rate limit
+
+`01-first-run.md` left a working, empty database. This page fills it, and
+covers the thing that stops most first syncs.
+
+## A token first
+
+GitHub allows sixty unauthenticated requests an hour. A sync of more than a
+handful of repositories needs more than that, and without a token it stops part
+way through:
+
+    >>> from dossier.ratelimit import ANONYMOUS_PER_HOUR, AUTHENTICATED_PER_HOUR
+    >>> ANONYMOUS_PER_HOUR, AUTHENTICATED_PER_HOUR
+    (60, 5000)
+
+So set one before syncing an organisation:
+
+    export GITHUB_TOKEN=$(gh auth token)
+
+The health check says whether one is set, because a missing token is a
+first-run condition rather than a fault:
+
+    >>> from dossier.ratelimit import has_token
+    >>> has_token(env={})
+    False
+    >>> has_token(env={"GITHUB_TOKEN": "abc"})
+    True
+
+## What happens when the limit is reached anyway
+
+It is reported as an instruction, not a traceback. The failure that produced
+this page ended in `httpx.HTTPStatusError` with eight frames of stack, every
+one accurate and none of them saying what to do.
+
+    >>> from dossier.ratelimit import advice, is_rate_limit
+    >>> error = Exception("Rate limit exceeded. Resets in 3175s")
+    >>> is_rate_limit(error)
+    True
+
+Without a token, the advice is the fix:
+
+    >>> print(advice(error, env={}))
+    GitHub's rate limit for unauthenticated requests is used up. It resets in about 53 minute(s).
+    Unauthenticated requests are limited to 60 an hour; with a token the limit is 5000.
+    <BLANKLINE>
+    Set one and run the same command again:
+        export GITHUB_TOKEN=$(gh auth token)      # if you use the gh CLI
+        export GITHUB_TOKEN=<a personal access token>
+    <BLANKLINE>
+    Already-synced repositories are kept, so a re-run continues rather than starting over.
+
+With a token the limit is real and waiting is the only remedy, so it does not
+tell you to set one you already have:
+
+    >>> "export GITHUB_TOKEN" in advice(error, env={"GITHUB_TOKEN": "abc"})
+    False
+
+Any command that reaches the limit reports it this way. It is caught once, on
+the command group, because a fix applied only where the failure was first seen
+leaves the same traceback waiting behind every other route:
+
+    >>> import click
+    >>> from click.testing import CliRunner
+    >>> from dossier.cli import cli
+    >>> @cli.command("demo-limit")
+    ... def demo_limit():
+    ...     raise Exception("Rate limit exceeded. Resets in 3175s")
+    >>> result = CliRunner().invoke(cli, ["demo-limit"])
+    >>> result.exit_code
+    2
+    >>> "rate limit" in result.output.lower()
+    True
+
+## Syncing
+
+One repository:
+
+    uv run dossier github sync https://github.com/quaternionmedia/dossier
+
+A whole organisation:
+
+    uv run dossier github sync-org quaternionmedia
+
+Both are safe to re-run. Already-synced repositories are kept, so a sync
+interrupted by the rate limit continues from where it stopped rather than
+starting over.
+
+## Forks are kept and not counted
+
+A fork carries upstream's whole history. Its contributors, branches and
+dependencies are real rows and none of them are your organisation's work, so
+the org figures exclude them while the data stays:
+
+    >>> from sqlmodel import Session, SQLModel, create_engine
+    >>> from dossier.models.schemas import Project
+    >>> from dossier.overview import build
+    >>> engine = create_engine("sqlite://")
+    >>> SQLModel.metadata.create_all(engine)
+    >>> session = Session(engine)
+    >>> session.add(Project(name="org/own", full_name="org/own",
+    ...                     github_owner="org", github_stars=5))
+    >>> session.add(Project(name="org/fork", full_name="org/fork",
+    ...                     github_owner="org", github_stars=40000, is_fork=True))
+    >>> session.commit()
+    >>> overview = build(session, owner="org")
+    >>> {cell.label: cell.value for cell in overview.masthead}["stars"]
+    '5'
+    >>> "forks excluded" in overview.scope
+    True
+
+Ask for them explicitly if you want the other reading:
+
+    >>> both = build(session, owner="org", include_forks=True)
+    >>> {cell.label: cell.value for cell in both.masthead}["stars"]
+    '40,005'
+
+## Next
+
+`03-before-a-pull-request.md` is the governance side: which gates exist, how to
+run them, and what each one cannot see.

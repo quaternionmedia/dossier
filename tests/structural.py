@@ -88,3 +88,18 @@ def runs_commands(module) -> set[str]:
     one it found.
     """
     return (imports_of(module) & COMMAND_IMPORTS) | (calls_of(module) & COMMAND_CALLS)
+
+
+def repo_root() -> Path:
+    """The repository root, found rather than counted to.
+
+    Tests reached it as `Path(__file__).parent.parent` -- a count of the
+    directories between a test file and the root. Organising the suite into
+    categories moved every test one level deeper and broke tests that had
+    nothing to do with the change. Anchoring on a file that exists only at the
+    root makes the depth irrelevant.
+    """
+    for candidate in Path(__file__).resolve().parents:
+        if (candidate / "pyproject.toml").is_file():
+            return candidate
+    raise RuntimeError("no pyproject.toml above the test suite")

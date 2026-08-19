@@ -376,7 +376,10 @@ def test_prepare_is_quiet_when_there_is_nothing_to_do(tmp_path, monkeypatch):
 
     actions, findings = health.prepare(cwd=tmp_path)
     assert actions == []
-    assert health.worst(findings) == health.OK
+    # Not "everything is OK": a missing GitHub token is a legitimate warning
+    # about a first run and says nothing about the database. What "quiet"
+    # means is that prepare changed nothing.
+    assert not any(finding.is_blocking for finding in findings)
 
 
 def test_prepare_runs_every_time_rather_than_behind_a_flag():

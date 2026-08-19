@@ -42,8 +42,15 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+# `fileConfig` attaches a StreamHandler bound to whatever `sys.stderr` is at
+# this moment. In a long-lived process that runs alembic more than once -- the
+# test suite, and any command that migrates then carries on -- the second run
+# writes to a stream the first one's caller has since closed, and alembic
+# fails with "I/O operation on closed file" for a migration that was fine.
+# The caller can opt out by setting `configure_logger` on the config.
+if (config.config_file_name is not None
+        and config.attributes.get("configure_logger", True)):
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # add your model's MetaData object here
 # for 'autogenerate' support

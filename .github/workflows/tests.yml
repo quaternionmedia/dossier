@@ -48,4 +48,7 @@ jobs:
         env:
           COLUMNS: "120"
           LINES: "40"
-        run: uv run pytest -q
+        # Both paths named. `testpaths` is ignored the moment pytest is
+        # given a path, so a walkthrough left to configuration alone
+        # would be collected by nobody and stay green forever.
+        run: uv run pytest tests walkthrough -q

@@ -15,6 +15,14 @@ confirmed to go red against the code it names.
 
 from __future__ import annotations
 
+from tests.structural import repo_root
+
+from tests.disk_documents import (  # noqa: F401
+    document,
+    measured_target,
+    unknown_target,
+)
+
 import ast
 import json
 from datetime import datetime, timedelta
@@ -34,71 +42,6 @@ def session():
     SQLModel.metadata.create_all(engine)
     with Session(engine) as active:
         yield active
-
-
-def document(
-    tmp_path: Path,
-    generated_at: str = "2026-08-11T00:00:00Z",
-    volumes=None,
-    targets=None,
-    name: str = "disk-status.json",
-) -> Path:
-    """A disk status document, in the shape ci/disk_status.py writes."""
-    payload = {
-        "schema": 1,
-        "generated_at": generated_at,
-        "generator": {"tool": "ci/disk_status.py", "policy": "ci/disk-policy.yaml"},
-        "reading": {"staleness_budget_hours": 6},
-        "totals": {
-            "volumes_critical": 1,
-            "volumes_warn": 0,
-            "volumes_unknown": 0,
-            "targets_measured": 1,
-            "targets_unknown": 0,
-            "reclaimable_bytes": {
-                "refetched": 100, "rebuilt": 0, "destructive": 0
-            },
-        },
-        "volumes": volumes if volumes is not None else [
-            {
-                "path": "C:\\", "total_bytes": 1000, "used_bytes": 900,
-                "free_bytes": 100, "free_ratio": 0.1, "state": "warn",
-                "severity": "critical", "thresholds_fired": ["under the floor"],
-            }
-        ],
-        "targets": targets if targets is not None else [
-            {
-                "name": "cache", "title": "A cache", "kind": "directory_contents",
-                "safety": "refetched", "owner": "something",
-                "measured": {
-                    "bytes": 500, "files": 5, "units_total": 1, "unreadable": 0,
-                    "units": [{"path": "C:/cache/big", "bytes": 500}],
-                },
-            }
-        ],
-    }
-    path = tmp_path / name
-    path.write_text(json.dumps(payload), encoding="utf-8")
-    return path
-
-
-def unknown_target(name: str = "cache", reason: str = "daemon not running") -> dict:
-    return {
-        "name": name, "title": "A cache", "kind": "command",
-        "safety": "rebuilt", "owner": "something",
-        "measured": {"unknown": reason},
-    }
-
-
-def measured_target(name: str = "cache", size: int = 500) -> dict:
-    return {
-        "name": name, "title": "A cache", "kind": "directory_contents",
-        "safety": "refetched", "owner": "something",
-        "measured": {
-            "bytes": size, "files": 1, "units_total": 1, "unreadable": 0,
-            "units": [{"path": f"C:/{name}", "bytes": size}],
-        },
-    }
 
 
 # --- loading ----------------------------------------------------------------
@@ -410,7 +353,7 @@ def test_the_disk_tables_are_created_by_the_migration_chain(tmp_path: Path) -> N
     import subprocess
     import sys
 
-    root = Path(__file__).resolve().parent.parent
+    root = repo_root()
     if not (root / "alembic.ini").exists():
         pytest.skip("no alembic.ini")
 
@@ -446,7 +389,7 @@ def test_the_migration_can_be_undone(tmp_path: Path) -> None:
     import subprocess
     import sys
 
-    root = Path(__file__).resolve().parent.parent
+    root = repo_root()
     if not (root / "alembic.ini").exists():
         pytest.skip("no alembic.ini")
     shutil.copy(root / "alembic.ini", tmp_path / "alembic.ini")
@@ -495,7 +438,7 @@ def test_every_table_model_is_imported_by_alembic_env() -> None:
     means an autogenerate run would have emitted a drop against the org's
     governance history.
     """
-    root = Path(__file__).resolve().parent.parent
+    root = repo_root()
     env = root / "alembic" / "env.py"
     source = env.read_text(encoding="utf-8")
     for name in ("DiskSnapshot", "DiskVolume", "DiskTarget",

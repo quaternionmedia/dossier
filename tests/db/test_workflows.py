@@ -137,15 +137,17 @@ class TestWorkflowCommands:
     def test_db_current(self, runner: CliRunner) -> None:
         """Test: uv run dossier db current"""
         result = runner.invoke(cli, ["db", "current"])
-        # May show revision or "not under version control"
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.exception
     
     def test_db_history(self, runner: CliRunner) -> None:
         """Test: uv run dossier db history"""
         result = runner.invoke(cli, ["db", "history"])
-        # Alembic can fail in test environment due to I/O on closed file
-        # The command works in real usage, test just verifies it's callable
-        assert result.exit_code in [0, 1]
+        # Was tolerated as `in [0, 1]` with a comment blaming the test
+        # environment. It was a real defect: alembic binds `sys.stdout` as a
+        # default argument at import, so a second command in one process wrote
+        # to the first one's closed stream. The config now passes stdout
+        # explicitly and this can assert what it means.
+        assert result.exit_code == 0, result.exception
 
 
 class TestAPICommands:
