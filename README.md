@@ -53,40 +53,58 @@ uv run dossier github sync-user YOUR_USERNAME && uv run dossier dashboard
 - **Keyboard-driven speed** - Consistent TUI layouts you can navigate blindfolded
 
 
-## One menu, everywhere: the rad ring
+## One menu, everywhere: the rad menu
 
-Press **`m`** anywhere in the dashboard. A ring opens over whatever you were
-looking at, with the same four verbs every time:
+Press **`m`** anywhere in the dashboard. Nine cells open over whatever you were
+looking at, laid out like a numeric keypad:
 
-**Go** somewhere · **Do** something · **Show** a different slice · **Reach** into another system
+```
+7 8 9
+4 5 6     5 always backs out
+1 2 3
+```
+
+**Press the digit.** Any item is one keystroke away, wherever the highlight
+happens to be. `7` is up-left on your keyboard and up-left on the screen.
 
 <p align="center">
-  <img src="docs/screenshots/rad_ring_top_level.svg" alt="The rad ring open over the dashboard, showing Go, Do, Show and Reach" width="800">
+  <img src="docs/screenshots/rad_ring_top_level.svg" alt="The rad menu open over the dashboard: Go, Do, Show and Reach on the cardinal cells, with 5 offering to close" width="800">
 </p>
 
-The four verbs never change. What sits under them does — `Go` offers the views
-this screen has, `Do` offers what you can do to the thing selected. So you learn
-the menu once instead of learning each screen's menu.
+The four verbs never change — **Go** somewhere, **Do** something, **Show** a
+different slice, **Reach** into another system. What sits under them does, so
+you learn the menu once instead of learning each screen's menu.
 
 <p align="center">
-  <img src="docs/screenshots/rad_ring_one_level_in.svg" alt="One level into Go, showing Overview, Deltas and the other views" width="800">
+  <img src="docs/screenshots/rad_ring_one_level_in.svg" alt="One level into Go: Overview, Deltas, Governance, Disk and Details on numbered cells, with 5 offering to go back" width="800">
 </p>
 
-Arrow keys or `Tab` move around the ring, `Enter` or `Space` chooses, `Escape`
-backs out a level and then closes. The
-dashboard stays visible behind it, because a menu that hides the thing you are
-acting on makes you remember what you were looking at.
+**Or walk there.** Arrow keys move, and so does `wasd` — the same directions
+under either hand. Movement always lands on something choosable, never on an
+empty cell.
+
+**Diagonals work both ways.** A terminal cannot report two keys held together,
+so pressing up then left within a moment is read as the corner, `7`. Press them
+slowly and you walk to the same cell one step at a time. Same destination,
+nothing depending on how fast you type.
+
+**`5` always backs out** — one level, then closes. It never holds an item, at
+any depth, so you never have to look to find out what the middle does.
+
+The dashboard stays visible behind it, because a menu that hides the thing you
+are acting on makes you remember what you were looking at.
 
 It counts what it costs you. Every choice records how many keystrokes it took
 from opening the menu to committing, so a menu that grows awkward shows up as a
-number rather than as a vague feeling.
+number rather than as a vague feeling. A digit press is two: open, choose.
 
 This is an implementation of [rad](https://github.com/quaternionmedia/rad),
 Quaternion Media's interaction contract, in a terminal. The same four verbs are
 meant to work the same way in a browser.
 
 **Both screenshots above are produced by the test suite**, by the tests that
-assert the ring behaves — so they cannot show something the code stopped doing.
+assert the menu behaves — so they cannot show something the code stopped doing.
+They changed when this layout did, without anybody remembering to retake them.
 
 
 ## ✨ Features
