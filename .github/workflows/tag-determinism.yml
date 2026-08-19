@@ -52,7 +52,7 @@ jobs:
 
       - name: Validation passes, and says so without a skip
         run: |
-          uv run pytest -q > test-output.txt
+          uv run pytest tests walkthrough -q > test-output.txt
           python governance/qm/project-seed/ci/check_tag_claims.py \
             --test-output test-output.txt
 

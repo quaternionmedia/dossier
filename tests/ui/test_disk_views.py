@@ -24,7 +24,7 @@ from dossier import disk_store
 from dossier.api import main as api_main
 from dossier.api.main import app
 
-from .test_disk_store import document, measured_target, unknown_target
+from tests.disk_documents import document, measured_target, unknown_target
 
 
 @pytest.fixture

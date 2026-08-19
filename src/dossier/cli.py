@@ -31,9 +31,46 @@ DATABASE_URL = "sqlite:///dossier.db"
 engine = create_engine(DATABASE_URL, echo=False)
 
 
+def _alembic_config():
+    """An alembic config that does not rebind logging on every use.
+
+    `fileConfig` attaches a handler to whatever `sys.stderr` is when it runs,
+    so a process that invokes alembic twice writes the second run's output to a
+    stream the first caller has closed. The database commands are fine alone
+    and failed when another command had run first, which is the hardest kind of
+    failure to read. It also resolves `alembic.ini` from the package, so these
+    commands work from any directory.
+    """
+    from alembic.config import Config
+
+    from dossier.health import project_root
+
+    # `stdout` is passed explicitly. Alembic's `Config.__init__` declares
+    # `stdout=sys.stdout` as a *default argument*, which Python evaluates once
+    # when `alembic.config` is first imported -- binding whatever `sys.stdout`
+    # was at that moment. Any later run then writes its output to that stream,
+    # and if the first import happened inside something that has since replaced
+    # or closed stdout, alembic fails with "I/O operation on closed file" for a
+    # command that is otherwise fine.
+    config = Config(str(project_root() / "alembic.ini"), stdout=sys.stdout)
+    config.set_main_option("script_location", str(project_root() / "alembic"))
+    config.attributes["configure_logger"] = False
+    return config
+
+
 def init_db() -> None:
-    """Initialize the database."""
-    SQLModel.metadata.create_all(engine)
+    """Make sure this installation has a database the code can read.
+
+    It does NOT call `create_all`. That is what produced every schema failure
+    reported against this project: `create_all` builds tables with no alembic
+    stamp, so the first command a fresh installation ran left a database
+    alembic had no record of -- and once it held data, no stamp could be
+    inferred and it could not be migrated at all. The schema comes from the
+    migrations, which stamp as they go.
+    """
+    from dossier.health import ensure_schema
+
+    ensure_schema()
 
 
 def get_session() -> Session:
@@ -53,6 +90,15 @@ def _make_output_encodable() -> None:
     glyphs one at a time fixes only the ones somebody remembered.
     """
     for stream in (sys.stdout, sys.stderr):
+        # Only a stream that would actually fail is touched. Under pytest and
+        # under click's CliRunner, stdout is already a UTF-8 capture buffer;
+        # reconfiguring one of those detached it, and a later command in the
+        # same process wrote to a closed file. The symptom was a test failing
+        # only when another test had run first, which is the hardest kind to
+        # read.
+        encoding = (getattr(stream, "encoding", "") or "").lower()
+        if getattr(stream, "closed", False) or encoding.startswith("utf"):
+            continue
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
             try:
@@ -64,8 +110,31 @@ def _make_output_encodable() -> None:
                 pass
 
 
+class DossierGroup(click.Group):
+    """The command group, with one exception turned into an instruction.
+
+    Caught here rather than in the sync commands because the limit can be
+    reached by any command that talks to GitHub, and a fix applied only where
+    the failure was first seen leaves the same traceback waiting behind every
+    other route. This is the whole class, in one place.
+    """
+
+    def invoke(self, ctx):
+        from dossier.ratelimit import advice, is_rate_limit
+
+        try:
+            return super().invoke(ctx)
+        except SystemExit:
+            raise
+        except Exception as error:
+            if is_rate_limit(error):
+                click.echo(advice(error), err=True)
+                raise SystemExit(2) from None
+            raise
+
+
 @tui()
-@click.group()
+@click.group(cls=DossierGroup)
 @click.version_option(version="0.1.0", prog_name="dossier")
 def cli() -> None:
     """Dossier - Documentation standardization tool.
@@ -2146,7 +2215,7 @@ def db_upgrade(revision: str) -> None:
     from alembic import command
     from alembic.config import Config
     
-    alembic_cfg = Config("alembic.ini")
+    alembic_cfg = _alembic_config()
     click.echo(f"🔄 Upgrading database to {revision}...")
     
     try:
@@ -2172,7 +2241,7 @@ def db_downgrade(revision: str) -> None:
     from alembic import command
     from alembic.config import Config
     
-    alembic_cfg = Config("alembic.ini")
+    alembic_cfg = _alembic_config()
     click.echo(f"🔄 Downgrading database to {revision}...")
     
     try:
@@ -2189,7 +2258,7 @@ def db_current() -> None:
     from alembic import command
     from alembic.config import Config
     
-    alembic_cfg = Config("alembic.ini")
+    alembic_cfg = _alembic_config()
     click.echo("📊 Current database revision:")
     command.current(alembic_cfg, verbose=True)
 
@@ -2201,7 +2270,7 @@ def db_history(verbose: bool) -> None:
     from alembic import command
     from alembic.config import Config
     
-    alembic_cfg = Config("alembic.ini")
+    alembic_cfg = _alembic_config()
     click.echo("📜 Migration history:")
     command.history(alembic_cfg, verbose=verbose)
 
@@ -2221,7 +2290,7 @@ def db_revision(message: str, autogenerate: bool) -> None:
     from alembic import command
     from alembic.config import Config
     
-    alembic_cfg = Config("alembic.ini")
+    alembic_cfg = _alembic_config()
     click.echo(f"📝 Creating migration: {message}")
     
     try:
@@ -2246,7 +2315,7 @@ def db_stamp(revision: str) -> None:
     from alembic import command
     from alembic.config import Config
     
-    alembic_cfg = Config("alembic.ini")
+    alembic_cfg = _alembic_config()
     click.echo(f"🔖 Stamping database with {revision}...")
     
     try:
@@ -4070,9 +4139,6 @@ def main() -> None:
     cli()
 
 
-if __name__ == "__main__":
-    main()
-
 
 # `backup` joins the existing `db` group defined above -- a second
 # `@cli.group() def db()` silently replaced it, taking `db current`,
@@ -4228,3 +4294,125 @@ def db_health(fix: bool) -> None:
             click.echo(f"  {path.name}: {action}")
     click.echo("")
     click.echo(render(check()))
+
+
+@cli.group()
+def gates() -> None:
+    """The governance checks, and how to run them before a pull request."""
+
+
+@gates.command("list")
+def gates_list() -> None:
+    """Every gate, what it checks, and what it cannot see."""
+    for gate in GATES:
+        click.echo(f"{gate['name']}")
+        click.echo(f"    runs:   {gate['command']}")
+        click.echo(f"    checks: {gate['checks']}")
+        click.echo(f"    misses: {gate['misses']}")
+        click.echo("")
+
+
+@gates.command("run")
+@click.option("--base", default="main", help="Base branch, for the provenance check")
+def gates_run(base: str) -> None:
+    """Run every gate that can run locally, and report what could not.
+
+    This is the route the corpus asks for: a project fork runs the seed scripts
+    in place out of `governance/qm/project-seed/ci/`, and remembering four
+    paths is how a check gets skipped. `uv run qm preflight` is the same idea in
+    the corpus repository; this is its local equivalent.
+    """
+    import subprocess
+    import sys
+
+    from dossier.health import BLOCKED, check, render, worst
+
+    failures: list[str] = []
+
+    click.echo("== installation health")
+    findings = check()
+    click.echo(render(findings))
+    if worst(findings) == BLOCKED:
+        failures.append("health")
+
+    for gate in GATES:
+        if not gate.get("local"):
+            click.echo(f"\n-- {gate['name']}: not runnable locally ({gate['misses']})")
+            continue
+        click.echo(f"\n== {gate['name']}")
+        command = list(gate["argv"])
+        if gate.get("takes_base"):
+            command += ["--base", base, "--head", _current_branch()]
+        result = subprocess.run([sys.executable, *command])
+        if result.returncode != 0:
+            failures.append(gate["name"])
+
+    click.echo("")
+    if failures:
+        click.echo(f"FAILED: {', '.join(failures)}")
+        raise SystemExit(1)
+    click.echo("Every gate that can run here passed. `uses:` steps and the "
+               "runner image are not reproduced, so this is evidence, not proof.")
+
+
+def _current_branch() -> str:
+    import subprocess
+
+    result = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                            capture_output=True, text=True)
+    return result.stdout.strip() or "HEAD"
+
+
+SEED = "governance/qm/project-seed/ci"
+
+GATES = (
+    {
+        "name": "tests",
+        "command": "uv run pytest tests walkthrough",
+        "argv": ["-m", "pytest", "tests", "walkthrough", "-q"],
+        "checks": "every behaviour the suite asserts, and every walkthrough example",
+        "misses": "anything nobody wrote a test for",
+        "local": True,
+    },
+    {
+        "name": "workflows",
+        "command": f"python {SEED}/run_workflows_locally.py",
+        "argv": [f"{SEED}/run_workflows_locally.py"],
+        "checks": "the real steps of each workflow triggered by a pull request",
+        "misses": "`uses:` steps and the runner image; tag-triggered workflows",
+        "local": True,
+    },
+    {
+        "name": "branch provenance",
+        "command": f"python {SEED}/check_pr_base.py --base <base> --head <branch>",
+        "argv": [f"{SEED}/check_pr_base.py"],
+        "takes_base": True,
+        "checks": "what the branch actually carries, and where it was cut from",
+        "misses": "whether the changes are correct",
+        "local": True,
+    },
+    {
+        "name": "one open pull request",
+        "command": f"python {SEED}/check_one_pr.py",
+        "checks": "the one-PR-per-repository-per-contributor rule",
+        "misses": "runs against the host, so it needs a pushed branch",
+        "local": False,
+    },
+    {
+        "name": "tag claims",
+        "command": f"python {SEED}/check_tag_claims.py --all",
+        "checks": "that a version tag is annotated and names its reviewer",
+        "misses": "whether the review or the manual test actually happened",
+        "local": False,
+    },
+)
+
+
+# Last in the file, deliberately. Commands appended after this guard are not
+# registered when the module is run as `python -m dossier.cli`: the guard calls
+# through to the group at the point it appears, so anything defined below it
+# does not exist yet. The failure is invisible through the console script,
+# which imports the whole module before calling anything -- so `dossier db
+# health` worked and `python -m dossier.cli db health` said "No such command".
+if __name__ == "__main__":
+    main()

@@ -229,6 +229,19 @@ def check(cwd: Path | None = None) -> list[Finding]:
             continue
         findings.extend(inspect(path))
 
+    from dossier.ratelimit import ANONYMOUS_PER_HOUR, has_token
+
+    if not has_token():
+        findings.append(Finding(
+            WARN,
+            "No GitHub token is set",
+            f"Unauthenticated requests are limited to {ANONYMOUS_PER_HOUR} an "
+            "hour, which a sync of more than a handful of repositories will "
+            "exhaust part way through. The sync stops cleanly and resumes on a "
+            "re-run, so this is a warning rather than a fault.",
+            "export GITHUB_TOKEN=$(gh auth token)",
+        ))
+
     populated = [(path, row_count(path)) for path in databases]
     populated = [(path, count) for path, count in populated if count]
     if len(populated) > 1:
@@ -257,6 +270,32 @@ def summary_line(findings: list[Finding], cwd: Path | None = None) -> str:
     path, count = live[0]
     state = {OK: "ready", WARN: "ready, with notes", BLOCKED: "not usable"}[worst(findings)]
     return f"{path} - {count} project(s) - {state}"
+
+
+def ensure_schema(path: Path | None = None) -> bool:
+    """Make sure the database at `path` has a schema alembic knows about.
+
+    Cheap enough to call from every command: an existing, stamped database
+    costs one small query and returns immediately. Anything else is handed to
+    `repair`, which builds or migrates it.
+
+    THIS REPLACES `create_all`. Calling `SQLModel.metadata.create_all` on
+    startup is what produced every schema failure reported here. It creates
+    tables without an alembic stamp, so the very first command a fresh
+    installation runs leaves a database alembic has no record of -- and once
+    that database holds data, no stamp can be inferred and it cannot be
+    migrated at all. The database is created by the migrations or not at all.
+    """
+    path = path or candidate_databases()[0]
+    if path.exists():
+        connection = sqlite3.connect(str(path))
+        try:
+            if _stamp(connection) is not None:
+                return False
+        finally:
+            connection.close()
+    repair(path)
+    return True
 
 
 def prepare(cwd: Path | None = None) -> tuple[list[str], list[Finding]]:
@@ -361,7 +400,19 @@ def repair(path: Path, backup_first: bool = True) -> list[str]:
     if backup_first and path.exists() and rows:
         done.append(f"backed up to {backup(path, timestamped_name(path)).name}")
 
-    config = Config(str(project_root() / "alembic.ini"))
+    import sys
+
+    # `stdout` is passed explicitly. Alembic's `Config.__init__` declares
+    # `stdout=sys.stdout` as a *default argument*, which Python evaluates once
+    # when `alembic.config` is first imported -- binding whatever `sys.stdout`
+    # was at that moment. Any later run then writes its output to that stream,
+    # and if the first import happened inside something that has since replaced
+    # or closed stdout, alembic fails with "I/O operation on closed file" for a
+    # command that is otherwise fine.
+    config = Config(str(project_root() / "alembic.ini"), stdout=sys.stdout)
+    # This process may run alembic more than once. Re-running `fileConfig`
+    # rebinds logging to a stream the previous caller may have closed.
+    config.attributes["configure_logger"] = False
     config.set_main_option("script_location",
                            str(project_root() / "alembic"))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
