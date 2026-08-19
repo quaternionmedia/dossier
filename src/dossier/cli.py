@@ -4466,7 +4466,14 @@ def harness_ingest(payload: Path, write: bool) -> None:
 
         verdicts = plan(document, lookup)
         click.echo(render(verdicts, written=write))
-        if not write or any(v.state == "refused" for v in verdicts):
+
+        # A refusal exits non-zero whether or not --write was passed. It used
+        # to exit 0, so a scheduled ingest of an unreadable harness printed the
+        # refusal and reported success to whatever ran it -- a check that says
+        # nothing was enforced while its caller records that it passed.
+        if any(v.state == "refused" for v in verdicts):
+            raise SystemExit(1)
+        if not write:
             return
 
         totals = totals_of(document)

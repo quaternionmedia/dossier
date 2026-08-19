@@ -19,6 +19,19 @@ how current either is.
 NOTHING IS WRITTEN WITHOUT `--write`, and nothing is ever deleted. An
 invocation absent from a payload is one this payload did not mention, not one
 that was removed -- the payload is an excerpt by construction.
+
+A TOTAL THE HARNESS COULD NOT TAKE IS REFUSED, NOT STORED AS ZERO. Schema 2
+carries `{"unknown": "<reason>"}` where a count could not be established, and
+this reader refuses the whole payload rather than recording a harness that has
+run nothing. Under schema 1 the harness emitted `0` and this reader coerced it
+with `int(... or 0)`, so a harness whose database was missing its tables was
+stored as a harness in perfect health -- and a table count did not tell them
+apart, because a database of unrelated tables reports one like any other.
+
+Refusing loses something and the trade is deliberate: the fact that a harness
+was unreadable is reported to whoever ran the ingest and is not recorded in the
+database, because the snapshot columns cannot hold `unknown` without a
+migration. A stored zero is invisible; a refusal is not.
 """
 
 from __future__ import annotations
@@ -28,7 +41,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-SCHEMA = 1
+SCHEMA = 2
+
+# The totals a snapshot is made of. Named because they are the ones that may
+# arrive as `{"unknown": ...}` and the ones a refusal has to be able to name.
+COUNTS = ("invocations", "failures", "human_requests", "human_responses")
 
 # Every key the payload must carry for this to be that payload rather than some
 # other JSON file somebody had to hand.
@@ -73,11 +90,33 @@ def invocations_of(payload: dict) -> list[dict]:
     return [row for row in payload.get("recent", []) if row.get("address")]
 
 
-def totals_of(payload: dict) -> dict[str, int]:
+def unknown_totals(payload: dict) -> list[str]:
+    """Every total the harness said it could not take, with its reason.
+
+    `{"unknown": "<reason>"}` is a value and not a missing key: it means the
+    fact could not be established and says why. It is not zero, not empty and
+    not compliant.
+    """
     totals = payload.get("totals") or {}
-    return {name: int(totals.get(name, 0) or 0)
-            for name in ("invocations", "failures", "human_requests",
-                         "human_responses")}
+    found = []
+    for name in COUNTS:
+        value = totals.get(name)
+        if isinstance(value, dict) and "unknown" in value:
+            found.append(f"{name}: {value['unknown']}")
+    return found
+
+
+def totals_of(payload: dict) -> dict[str, int]:
+    """The counts, verbatim.
+
+    THIS NEVER COERCES. It used to read `int(totals.get(name, 0) or 0)`, which
+    turned an absent total, a null and an unknown alike into a zero the
+    database then held as a fact about the harness. Anything that is not an
+    integer here is a caller's mistake, because `plan` refuses such a payload
+    before reaching this.
+    """
+    totals = payload.get("totals") or {}
+    return {name: int(totals[name]) for name in COUNTS if name in totals}
 
 
 def plan(payload: dict, lookup_invocation) -> list[Verdict]:
@@ -86,6 +125,22 @@ def plan(payload: dict, lookup_invocation) -> list[Verdict]:
     if problem:
         return [Verdict(str(payload.get("project", "<payload>")), "refused",
                         reason=problem)]
+
+    unknowns = unknown_totals(payload)
+    if unknowns:
+        return [Verdict(
+            str(payload.get("project", "<payload>")), "refused",
+            differences=unknowns,
+            reason="the harness could not take these counts; storing them as "
+                   "zero would record a harness with nothing wrong",
+        )]
+
+    missing = [name for name in COUNTS if name not in (payload.get("totals") or {})]
+    if missing:
+        return [Verdict(
+            str(payload.get("project", "<payload>")), "refused",
+            reason=f"totals missing {', '.join(missing)}",
+        )]
 
     verdicts = [Verdict(f"{payload['project']} totals", "new")]
     for row in invocations_of(payload):
