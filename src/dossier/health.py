@@ -116,7 +116,7 @@ def code_revision(root: Path | None = None) -> str | None:
     Read from the files rather than through alembic so this still works when
     the database is too broken for alembic to open -- which is when it matters.
     """
-    root = root or Path("alembic/versions")
+    root = root or project_root() / "alembic" / "versions"
     if not root.is_dir():
         return None
 
@@ -158,15 +158,30 @@ def inspect(path: Path) -> list[Finding]:
                 continue
             missing = sorted(set(expected) - _columns(connection, table))
             if missing:
+                if stamp:
+                    # Stamped at a revision whose columns are absent: the stamp
+                    # is wrong, so `db upgrade` believes there is nothing to do
+                    # and reports success while changing nothing. Recommending
+                    # it here sent a reader in a circle.
+                    detail = (
+                        f"The stamp says {stamp}, but the columns that revision "
+                        "adds are not there. alembic therefore believes the "
+                        "database is current, and db upgrade reports success "
+                        "without changing anything. The stamp has to be moved "
+                        "back before the migration can run.")
+                    fix = "uv run dossier db health --fix"
+                else:
+                    detail = (
+                        "The code selects on these columns, so reads fail with "
+                        "no such column rather than returning nothing. A schema "
+                        "created before a migration keeps its old shape: "
+                        "create_all adds missing tables and never alters an "
+                        "existing one.")
+                    fix = "uv run dossier db health --fix"
                 findings.append(Finding(
                     BLOCKED,
                     f"{path} is missing {table}.{', '.join(missing)}",
-                    "The code selects on these columns, so reads fail with "
-                    "no such column rather than returning nothing. A schema "
-                    "created before a migration keeps its old shape: create_all "
-                    "adds missing tables and never alters an existing one.",
-                    "uv run dossier db upgrade" if stamp
-                    else "uv run dossier db stamp head, then uv run dossier db upgrade",
+                    detail, fix,
                 ))
 
         if stamp is None:
@@ -175,8 +190,10 @@ def inspect(path: Path) -> list[Finding]:
                 f"{path} carries no migration stamp",
                 "It was created by create_all rather than by a migration, so "
                 "alembic cannot tell which migrations have run and db upgrade "
-                "will try to create tables that already exist.",
-                "uv run dossier db stamp head",
+                "will try to create tables that already exist. Do not stamp it "
+                "at head: that marks every migration applied, including ones "
+                "that never ran, and the columns they add then never arrive.",
+                "uv run dossier db health --fix",
             ))
         else:
             head = code_revision()
@@ -200,8 +217,16 @@ def inspect(path: Path) -> list[Finding]:
 def check(cwd: Path | None = None) -> list[Finding]:
     """Every finding across every database this installation might open."""
     databases = candidate_databases(cwd)
+    holding_data = {path for path in databases if row_count(path)}
+
     findings: list[Finding] = []
     for path in databases:
+        # A database that was never created is only worth mentioning when there
+        # is no other one holding data. Otherwise it is a location this
+        # installation simply does not use, and reporting it as a warning
+        # teaches a reader that warnings here are noise.
+        if not path.exists() and holding_data:
+            continue
         findings.extend(inspect(path))
 
     populated = [(path, row_count(path)) for path in databases]
@@ -218,6 +243,47 @@ def check(cwd: Path | None = None) -> list[Finding]:
             "location you intend to use.",
         ))
     return findings
+
+
+def summary_line(findings: list[Finding], cwd: Path | None = None) -> str:
+    """One line a person can read on the way into the dashboard.
+
+    The full report is right for a diagnostic command and wrong for a launch:
+    a wall of text before a UI opens is text nobody reads. This states where
+    the data is, how much of it there is, and whether anything is wrong.
+    """
+    databases = [(path, row_count(path)) for path in candidate_databases(cwd)]
+    live = [(path, count) for path, count in databases if count] or databases
+    path, count = live[0]
+    state = {OK: "ready", WARN: "ready, with notes", BLOCKED: "not usable"}[worst(findings)]
+    return f"{path} - {count} project(s) - {state}"
+
+
+def prepare(cwd: Path | None = None) -> tuple[list[str], list[Finding]]:
+    """Everything the dashboard needs done before it opens. Returns actions and
+    the findings that remain.
+
+    This is the whole of `init`: create a database that does not exist, apply
+    migrations that have not run, correct a stamp that claims they did. It runs
+    on every launch rather than on a first-run flag, because the state it
+    repairs arrives from outside -- pulling a branch with a new migration is the
+    ordinary way to get it, and a flag saying "already initialised" would be
+    true and useless.
+    """
+    actions: list[str] = []
+    findings = check(cwd)
+    if worst(findings) == OK:
+        return actions, findings
+
+    for path in candidate_databases(cwd):
+        # A database that has never existed is created; one that exists is
+        # repaired only if something is wrong with it.
+        if not path.exists() and row_count(path) == 0 and path != candidate_databases(cwd)[0]:
+            continue
+        for action in repair(path):
+            actions.append(f"{path.name}: {action}")
+
+    return actions, check(cwd)
 
 
 def worst(findings: Iterable[Finding]) -> str:
@@ -248,22 +314,26 @@ def render(findings: list[Finding]) -> str:
 def repair(path: Path, backup_first: bool = True) -> list[str]:
     """Bring one database up to the code's schema. Returns what it did.
 
-    THREE CASES, AND ONE OF THEM IS REFUSED.
+    FOUR CASES.
 
-      * **Stamped and behind** -- upgrade to head. Ordinary.
-      * **Unstamped and empty** -- rebuild. Alembic cannot migrate a schema it
-        has no record of: running from base tries to create tables that already
-        exist and fails on the first one. An empty database is worth nothing, so
-        the file is replaced by one built from the migrations.
-      * **Unstamped with rows** -- refused. There is no way to tell which
-        migrations that schema has already had, so any stamp is a guess, and a
-        wrong guess marks migrations applied that never ran. The columns they
-        would have added then never arrive, and the failure resurfaces later
-        looking like a different bug. This returns without touching it and the
-        finding says so.
+      * **Stamped, behind, schema matches** -- upgrade. Ordinary.
+      * **Stamped at a revision whose columns it does not have** -- the stamp is
+        wrong, and `upgrade` is a no-op because alembic believes it is already
+        there. The stamp is moved back to the parent of the migration that adds
+        the missing column, and then upgraded, so exactly that migration runs.
+        This is the state that produced the report this function exists for:
+        `db upgrade` said "upgraded successfully" and changed nothing.
+      * **Unstamped and empty** -- rebuilt from the migrations. Alembic cannot
+        migrate a schema it has no record of, and an empty database is worth
+        nothing.
+      * **Unstamped with rows** -- refused. No stamp can be inferred, and a
+        wrong one marks migrations applied that never ran, which is how a
+        database arrives in the second case above.
 
-    A backup is taken before anything is written. The one thing worse than a
-    stale database is a half-migrated one with no copy of what it used to be.
+    IT VERIFIES, AND REPORTS WHAT IT FINDS. The previous version returned
+    "upgraded to head" for a database that was still broken, because it
+    reported the command it ran rather than the state it left. Anything still
+    blocking afterwards is named in the return value.
     """
     from alembic import command
     from alembic.config import Config
@@ -277,32 +347,112 @@ def repair(path: Path, backup_first: bool = True) -> list[str]:
     rows = row_count(path)
     connection = sqlite3.connect(str(path)) if path.exists() else None
     try:
-        stamped = _stamp(connection) is not None if connection else False
+        stamp = _stamp(connection) if connection else None
         has_tables = "project" in _tables(connection) if connection else False
     finally:
         if connection is not None:
             connection.close()
 
-    if not stamped and has_tables and rows:
-        done.append(
-            "refused: unstamped and holding data, so no stamp can be inferred. "
-            "Back it up, then either migrate it by hand or re-sync into a fresh "
-            "database.")
-        return done
+    if stamp is None and has_tables and rows:
+        return ["refused: unstamped and holding data, so no stamp can be "
+                "inferred. Back it up, then either migrate it by hand or "
+                "re-sync into a fresh database."]
 
     if backup_first and path.exists() and rows:
         done.append(f"backed up to {backup(path, timestamped_name(path)).name}")
 
-    config = Config("alembic.ini")
+    config = Config(str(project_root() / "alembic.ini"))
+    config.set_main_option("script_location",
+                           str(project_root() / "alembic"))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{path}")
 
-    if not stamped and has_tables:
-        # Empty and unstamped: replace it rather than migrate it. Nothing is
-        # lost, and it is the only route that ends at a schema alembic knows.
+    absent = missing_columns(path)
+    if stamp is not None and absent:
+        # The stamp claims a migration ran that plainly did not. Rewind to just
+        # before the one that adds the column, so that migration alone re-runs;
+        # stamping further back would re-run migrations whose work is already
+        # present, and those fail on tables that already exist.
+        parents = []
+        for columns in absent.values():
+            for column in columns:
+                found = migration_introducing(column)
+                if found:
+                    parents.append(found[1])
+        if not parents:
+            return done + [f"cannot repair: no migration adds {absent}"]
+        command.stamp(config, parents[0])
+        done.append(f"corrected a wrong stamp: {stamp} -> {parents[0]}")
+
+    if stamp is None and has_tables:
         path.unlink()
         done.append("removed an empty, unstamped database")
 
     path.parent.mkdir(parents=True, exist_ok=True)
     command.upgrade(config, "head")
-    done.append("built to head" if not stamped else "upgraded to head")
+    done.append("upgraded to head")
+
+    # Assert the intermediate. Reporting the command that ran is not reporting
+    # the state it left, and the difference is what let a broken database be
+    # called repaired.
+    remaining = [f for f in inspect(path) if f.is_blocking]
+    if remaining:
+        done.append("STILL BLOCKED: " + "; ".join(f.title for f in remaining))
     return done
+
+
+def project_root() -> Path:
+    """Where `alembic.ini` and `alembic/` live.
+
+    Resolved from this file rather than from the working directory: the
+    dashboard is meant to be runnable from anywhere, and a config loaded as
+    `Config("alembic.ini")` is found only when the caller happens to be
+    standing in the repository root.
+    """
+    here = Path(__file__).resolve()
+    for candidate in (here.parent.parent.parent, Path.cwd()):
+        if (candidate / "alembic.ini").is_file():
+            return candidate
+    return Path.cwd()
+
+
+def migration_introducing(column: str, root: Path | None = None) -> tuple[str, str] | None:
+    """The revision that adds `column`, and its parent. None if not found.
+
+    Found by reading the migrations for an `add_column` naming it. That is
+    coarse -- a column added and later renamed would answer wrongly -- and it
+    is enough for the case it exists to repair: a schema stamped at a revision
+    whose columns it does not have.
+    """
+    root = root or project_root() / "alembic" / "versions"
+    if not root.is_dir():
+        return None
+    for path in sorted(root.glob("*.py"), key=lambda p: p.name):
+        text = path.read_text(encoding="utf-8")
+        if not re.search(rf"add_column\([^)]*['\"]{re.escape(column)}['\"]", text):
+            continue
+        revision = re.search(r"^revision(?::[^=]+)?\s*=\s*['\"]([^'\"]+)['\"]",
+                             text, re.M)
+        parent = re.search(r"^down_revision(?::[^=]+)?\s*=\s*['\"]([^'\"]+)['\"]",
+                           text, re.M)
+        if revision and parent:
+            return revision.group(1), parent.group(1)
+    return None
+
+
+def missing_columns(path: Path) -> dict[str, list[str]]:
+    """Expected columns absent from each table, for a database that exists."""
+    if not path.exists():
+        return {}
+    connection = sqlite3.connect(str(path))
+    try:
+        tables = _tables(connection)
+        found = {}
+        for table, expected in EXPECTED_COLUMNS.items():
+            if table not in tables:
+                continue
+            absent = sorted(set(expected) - _columns(connection, table))
+            if absent:
+                found[table] = absent
+        return found
+    finally:
+        connection.close()
