@@ -438,6 +438,70 @@ def deltas_project(session: Any, project: Any, limit: int) -> Section:
     )
 
 
+# --- the harness -------------------------------------------------------------
+
+HARNESS_COLUMNS = ("harness", "invocation", "tool", "status", "ran")
+
+
+def _harness_row(row: Any) -> tuple[str, ...]:
+    # The address's last segment, not the whole address: the column beside it
+    # already carries the harness, and repeating `owner/repo` on every line
+    # pushes the part that differs off the edge.
+    identifier = row.address.rsplit("/", 1)[-1]
+    return (
+        _trim(row.project, 22),
+        identifier[:12],
+        _trim(row.tool_name, 16),
+        row.status or "--",
+        _trim(row.ran_at, 19),
+    )
+
+
+def harness_org(session: Any, ids, limit: int) -> Section:
+    """Every invocation this control panel has been shown.
+
+    Not scoped by `ids`: a harness is named by `owner/repo` in its own payload
+    and is not a row in `project`, so filtering by project ids would return
+    nothing and look like an idle harness.
+    """
+    from dossier.models.harness import HarnessInvocation
+
+    rows = tuple(
+        _harness_row(row)
+        for row in session.exec(
+            select(HarnessInvocation)
+            .order_by(HarnessInvocation.ran_at.desc())
+            .limit(limit)
+        ).all()
+    )
+    return Section(
+        "Harness invocations", HARNESS_COLUMNS, rows,
+        note=("What the harness reports having run, most recent first. It is an "
+              "excerpt: the payload carries recent rows, and the totals it "
+              "reports over its whole history are shown separately because they "
+              "cannot be recomputed from these."),
+    )
+
+
+def harness_project(session: Any, project: Any, limit: int) -> Section:
+    from dossier.models.harness import HarnessInvocation
+
+    name = project.full_name or project.name
+    rows = tuple(
+        _harness_row(row)
+        for row in session.exec(
+            select(HarnessInvocation)
+            .where(HarnessInvocation.project == name)
+            .order_by(HarnessInvocation.ran_at.desc())
+        ).all()
+    )
+    return Section(
+        "Harness invocations", HARNESS_COLUMNS, rows,
+        note=("Invocations a harness reported under this repository's address. "
+              "Empty means none were reported, not that none ran."),
+    )
+
+
 # --- the registry ------------------------------------------------------------
 
 FACETS: tuple[Facet, ...] = (
@@ -459,6 +523,8 @@ FACETS: tuple[Facet, ...] = (
           contributors_org, contributors_project),
     Facet("releases", "Releases", "Releases",
           "tab-releases", "releases-table", releases_org, releases_project),
+    Facet("harness", "Harness invocations", "Harness invocations",
+          "tab-harness", "harness-table", harness_org, harness_project),
 )
 
 BY_KEY = {facet.key: facet for facet in FACETS}

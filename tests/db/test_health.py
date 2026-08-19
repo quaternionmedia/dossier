@@ -311,7 +311,10 @@ def test_repair_moves_the_stamp_back_and_the_migration_runs(tmp_path, monkeypatc
     monkeypatch.setenv("DOSSIER_HOME", str(tmp_path))
     path = drifted_db(tmp_path / "drifted.db", rows=2)
     actions = health.repair(path, backup_first=False)
-    assert any("corrected a wrong stamp" in action for action in actions)
+    # The stamp is rewound, exactly the migration that adds the column is run,
+    # and the stamp is restored. Rewinding and upgrading to head instead
+    # re-runs later migrations against work that is already there.
+    assert any("restored the stamp" in action for action in actions), actions
     assert not [f for f in health.inspect(path) if f.is_blocking]
 
 
