@@ -140,3 +140,4 @@ def test_the_gates_route_names_every_seed_script_that_exists(empty):
             continue
         script = next(part for part in line.split() if part.endswith(".py"))
         assert (root / script).is_file(), f"{script} is named but not present"
+

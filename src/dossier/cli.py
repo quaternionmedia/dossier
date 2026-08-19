@@ -4343,6 +4343,28 @@ def gates_run(base: str) -> None:
         command = list(gate["argv"])
         if gate.get("takes_base"):
             command += ["--base", base, "--head", _current_branch()]
+        if gate["name"] == "tests":
+            # Captured, so the determinism claim can be checked against it. A
+            # skipped test contributes nothing to that claim, and a fresh clone
+            # once skipped two without anything saying so until a tag was
+            # refused. Redirected rather than piped: a pipe would replace
+            # pytest's exit code with the last command's.
+            captured = Path("test-output.txt")
+            with captured.open("w", encoding="utf-8") as sink:
+                result = subprocess.run([sys.executable, *command],
+                                        stdout=sink, stderr=subprocess.STDOUT)
+            click.echo(captured.read_text(encoding="utf-8").strip().splitlines()[-1])
+            if result.returncode != 0:
+                failures.append(gate["name"])
+            else:
+                claims = subprocess.run(
+                    [sys.executable,
+                     f"{SEED}/check_tag_claims.py",
+                     "--test-output", str(captured)])
+                if claims.returncode != 0:
+                    failures.append("determinism (a tag would be refused)")
+            continue
+
         result = subprocess.run([sys.executable, *command])
         if result.returncode != 0:
             failures.append(gate["name"])
