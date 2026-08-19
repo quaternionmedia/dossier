@@ -23,7 +23,7 @@ from textual.containers import VerticalScroll
 from textual.widgets import DataTable, Static
 
 from dossier.facets import BY_TITLE as FACET_BY_TITLE
-from dossier.overview import OrgOverview, Section, build
+from dossier.overview import OrgOverview, Section, build, dominant_owner
 from dossier.rad.tokens import DEFAULT_THEME
 
 # The column a row's repository is found in, when it has one. Facets put the
@@ -89,6 +89,11 @@ class OverviewPanel(VerticalScroll):
 
     def _read(self) -> OrgOverview:
         with self.session_factory() as session:
+            if self.owner is None:
+                # Local by default: whichever organisation this database is
+                # about. Unscoped totals mix every owner ever synced, which
+                # describes the database rather than anybody's work.
+                self.owner = dominant_owner(session)
             return build(session, owner=self.owner)
 
     def set_owner(self, owner: str | None) -> None:
