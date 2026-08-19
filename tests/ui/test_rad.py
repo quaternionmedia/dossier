@@ -343,11 +343,18 @@ class TestRingInTheApp:
             await self._open(pilot)
             await pilot.press("right")      # Do
             await pilot.pause()
-            # Selection is carried by the hub and a doubled border now, not by
-            # brackets: the on-deck slot is what a reader checks.
+            # The centre no longer follows the selection: it backs out, at every
+            # depth, so a reader never has to check what it means. Selection is
+            # carried by the doubled border on the cell itself.
             drawn = app.screen.query_one("#rad-ring").last_render
             lines = drawn.split(chr(10))
-            assert "Do" in lines[len(lines) // 2], "the hub did not follow the selection"
+            # The doubled border sits on the lines above and below the label,
+            # not on the label's own line.
+            row = next(i for i, line in enumerate(lines) if "Do" in line)
+            column = lines[row].index("Do")
+            assert "=" in lines[row - 1][max(0, column - 4):column + 4], (
+                "the highlight did not move to Do")
+            assert "close" in drawn, "the centre should offer to close at the top level"
 
             await pilot.press("enter")      # descend
             await pilot.pause()

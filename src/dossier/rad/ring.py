@@ -34,6 +34,8 @@ the token layer are the contract; the shape is not.
 
 from __future__ import annotations
 
+import time
+
 import math
 from typing import Any
 
@@ -42,6 +44,7 @@ from textual.containers import Center, Middle
 from textual.screen import ModalScreen
 from textual.widgets import Static
 
+from dossier.rad import numpad
 from dossier.rad.session import RadSession, RingView
 from dossier.rad.tokens import DEFAULT_THEME, Roles, roles
 
@@ -94,6 +97,17 @@ SUBMENU = "›"
 SELECT_L, SELECT_R = "[", "]"
 
 
+def _place_in(grid: list[list[str]], row: int, col: int, text: str,
+              width: int) -> None:
+    """Write `text` into a grid of a given width, clipped to it."""
+    if not 0 <= row < len(grid):
+        return
+    start = max(0, min(col, width - len(text)))
+    for offset, character in enumerate(text):
+        if 0 <= start + offset < width:
+            grid[row][start + offset] = character
+
+
 def _place(grid: list[list[str]], row: int, col: int, text: str) -> None:
     """Write text into the grid, clipped rather than wrapped or raising."""
     if not 0 <= row < len(grid):
@@ -119,63 +133,61 @@ class Ring(Static):
         self.roles: Roles = roles(theme)
 
     def render_view(self, view: RingView) -> str:
-        """Rich markup for the ring. Every colour is a role token."""
-        grid = [[" "] * GRID_COLS for _ in range(GRID_ROWS)]
-        centre_row, centre_col = GRID_ROWS // 2, GRID_COLS // 2
-        count = max(len(view.wedges), 1)
-        selected_index = view.highlighted % count
-        current = view.current
+        """Rich markup for the nine cells. Every colour is a role token.
 
-        # THE HUB IS THE ON-DECK SLOT. It always holds the wedge that Enter
-        # would take, in the same place, so reading "what am I about to do"
-        # costs no eye movement and does not depend on spotting a highlight
-        # somewhere on the rim. It is the only part of the ring that never
-        # moves, which is what makes it worth reading.
-        on_deck = current.label if current else "-"
-        if current is not None and current.is_submenu:
-            on_deck += SUBMENU
-        hub = _box(on_deck)
-        for offset, line in enumerate(hub):
-            _place(grid, centre_row - 1 + offset, centre_col - len(line) // 2, line)
+        Laid out as a numeric keypad, so a direction and a digit name the same
+        place and a reader who knows where `7` is on a keyboard knows where it
+        is on the screen.
 
-        # Depth, directly under the hub: one rule per level.
-        depth = len(view.path) + 1
-        for offset, mark in enumerate(_depth_marks(depth, len(hub[0]) - 4)):
-            _place(grid, centre_row + 2 + offset, centre_col - len(mark) // 2, mark)
+            7 8 9
+            4 5 6      5 always backs out
+            1 2 3
+
+        The centre never holds an item. It shows what backing out would do, in
+        the same place at every depth, so "what am I about to leave" costs no
+        eye movement -- and a menu whose centre sometimes cancels and sometimes
+        chooses cannot be used without looking.
+        """
+        placement = view.placement
+        cursor = view.cursor_cell
+
+        labelled: dict[int, tuple[str, bool]] = {}
+        for cell, index in placement.by_cell.items():
+            wedge = view.wedges[index]
+            text = f"{cell} {wedge.label}" + (SUBMENU if wedge.is_submenu else "")
+            labelled[cell] = (text, cell == cursor)
+
+        depth = len(view.path)
+        centre_text = f"{numpad.BACK} back" if depth else f"{numpad.BACK} close"
+        labelled[numpad.BACK] = (centre_text, False)
+
+        width = max(len(text) for text, _ in labelled.values()) + 4
+        gap = 2
+        column_at = [column * (width + gap) for column in range(3)]
+        row_at = [row * 4 for row in range(3)]
+
+        cols = column_at[-1] + width
+        rows = row_at[-1] + 3 + 2  # room for the depth marks underneath
+        grid = [[" "] * cols for _ in range(rows)]
 
         painted: list[tuple[int, str, bool, bool]] = []
-        for index, wedge in enumerate(view.wedges):
-            angle = view.angle_of(index)
-            dx, dy = math.cos(angle), math.sin(angle)
-            selected = index == selected_index
-            label = wedge.label + (SUBMENU if wedge.is_submenu else "")
-            rows = _box(label, selected)
-            width = len(rows[0])
+        for cell, (text, selected) in labelled.items():
+            column, row = numpad.POSITION[cell]
+            box = _box(text.ljust(width - 4), selected)
+            for offset, line in enumerate(box):
+                _place_in(grid, row_at[row] + offset, column_at[column], line, cols)
+            is_submenu = text.endswith(SUBMENU)
+            painted.append((row_at[row] + 1, text, selected, is_submenu))
 
-            row = centre_row + round(RADIUS_ROWS * dy)
-            # The hub occupies three rows, and a node overlapping them would
-            # sit inside the box that is meant to be the one stable thing here.
-            # Only the top and bottom positions can collide: the east and west
-            # nodes share the hub's rows and are far clear of it horizontally,
-            # so pushing them down would open a gap for no reason.
-            if abs(row - centre_row) <= 1 and abs(dx) < 0.3:
-                row = centre_row + (3 if dy >= 0 else -3)
+        # Depth, under the centre: one rule per level, so how deep you are is
+        # readable without counting the path.
+        for offset, mark in enumerate(_depth_marks(depth + 1, width - 4)):
+            _place_in(grid, row_at[-1] + 3 + offset,
+                      column_at[1] + (width - len(mark)) // 2, mark, cols)
 
-            reach = round(RADIUS_ROWS * ASPECT * dx)
-            if dx > 0.3:
-                col = centre_col + reach
-            elif dx < -0.3:
-                col = centre_col + reach - width
-            else:
-                col = centre_col + reach - width // 2
-
-            for offset, line in enumerate(rows):
-                _place(grid, row - 1 + offset, col, line)
-            painted.append((row, label, selected, wedge.is_submenu))
-
-        plain = chr(10).join("".join(row).rstrip() for row in grid)
+        plain = chr(10).join("".join(line).rstrip() for line in grid)
         self.last_render = plain
-        return self._colourise(plain, painted, centre_row)
+        return self._colourise(plain, painted, row_at[1] + 1)
 
     def _colourise(self, plain: str, painted, centre_row: int) -> str:
         """Wrap each placed label in its role token, leaving the grid alone.
@@ -311,9 +323,29 @@ class RingScreen(ModalScreen):
         key = event.key
         event.stop()
 
-        if key in ("right", "down", "tab"):
+        digit = numpad.digit_of(key)
+        direction = numpad.direction_of(key)
+
+        if digit is not None:
+            # One keystroke to any item. This is the whole point of a keypad
+            # layout: the fastest path does not depend on where the highlight
+            # happens to be.
+            intent = self._session.press_cell(digit)
+            if intent is not None:
+                self.dismiss(intent)
+                return
+            view = self._session.view
+            if view is None:
+                self.dismiss(None)
+                return
+        elif direction is not None:
+            # `time.monotonic` rather than the wall clock: the chord window is
+            # a duration, and a clock that can step backwards would read two
+            # deliberate presses as one.
+            view = self._session.move(direction, now=time.monotonic())
+        elif key == "tab":
             view = self._session.rotate(+1)
-        elif key in ("left", "up", "shift+tab"):
+        elif key == "shift+tab":
             view = self._session.rotate(-1)
         elif key in ("enter", "space"):
             intent = self._session.enter()
