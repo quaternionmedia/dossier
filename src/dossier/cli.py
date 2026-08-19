@@ -4430,6 +4430,65 @@ GATES = (
 )
 
 
+
+@cli.group()
+def harness() -> None:
+    """What a harness reports about itself."""
+
+
+@harness.command("ingest")
+@click.argument("payload", type=click.Path(exists=True, path_type=Path))
+@click.option("--write", is_flag=True, help="Apply it. Without this nothing changes.")
+def harness_ingest(payload: Path, write: bool) -> None:
+    """Read `qmcp dashboard --json` into this database.
+
+    The address on every row is the join. Nothing here imports qmcp: what
+    crosses is a schema.
+    """
+    from sqlmodel import select
+
+    from dossier.harness import (
+        invocations_of,
+        load,
+        plan,
+        render,
+        totals_of,
+    )
+    from dossier.models.harness import HarnessInvocation, HarnessSnapshot
+
+    document = load(payload)
+
+    with get_session() as session:
+        def lookup(address: str):
+            return session.exec(
+                select(HarnessInvocation).where(HarnessInvocation.address == address)
+            ).first()
+
+        verdicts = plan(document, lookup)
+        click.echo(render(verdicts, written=write))
+        if not write or any(v.state == "refused" for v in verdicts):
+            return
+
+        totals = totals_of(document)
+        session.add(HarnessSnapshot(
+            project=document["project"],
+            schema_version=document.get("schema", 1),
+            database=document.get("database"),
+            **totals,
+        ))
+        for row in invocations_of(document):
+            existing = lookup(row["address"])
+            target = existing or HarnessInvocation(
+                address=row["address"], project=document["project"])
+            target.tool_name = row.get("tool_name")
+            target.status = row.get("status")
+            target.duration_ms = row.get("duration_ms")
+            target.error = row.get("error")
+            target.ran_at = row.get("created_at")
+            session.add(target)
+        session.commit()
+
+
 # Last in the file, deliberately. Commands appended after this guard are not
 # registered when the module is run as `python -m dossier.cli`: the guard calls
 # through to the group at the point it appears, so anything defined below it

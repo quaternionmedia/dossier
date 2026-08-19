@@ -25,6 +25,8 @@ from dossier.models import (
     DocumentSection,
     GovernanceRepository,
     GovernanceThread,
+    HarnessInvocation,
+    HarnessSnapshot,
     Project,
     ProjectBranch,
     ProjectComponent,

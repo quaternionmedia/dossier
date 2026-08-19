@@ -299,6 +299,41 @@ def _deltas(session: Any, now: datetime, ids: list[int] | None) -> Section:
 
 
 
+def _harness_totals(session: Any, now: datetime) -> Section:
+    """What each harness reports about itself, and how old the reading is.
+
+    Stored rather than derived. The payload carries an excerpt of the rows and
+    the totals over the harness's whole history; recomputing them from the
+    excerpt would report the size of the excerpt and call it the history.
+    """
+    from dossier.models.harness import HarnessSnapshot
+
+    latest: dict[str, Any] = {}
+    for snapshot in session.exec(
+        select(HarnessSnapshot).order_by(HarnessSnapshot.loaded_at)
+    ).all():
+        latest[snapshot.project] = snapshot
+
+    rows = tuple(
+        (
+            _trim(project, 26),
+            str(snapshot.invocations),
+            str(snapshot.failures),
+            f"{snapshot.human_responses}/{snapshot.human_requests}",
+            _ago(_age_days(snapshot.loaded_at, now)),
+        )
+        for project, snapshot in sorted(latest.items())
+    )
+    return Section(
+        "Harness", ("harness", "invocations", "failures", "human answered", "read"),
+        rows,
+        note=("Reported by the harness about itself, not counted here. `read` is "
+              "how long ago this control panel was shown those figures: a "
+              "harness that has run since is not reflected until the next "
+              "`dossier harness ingest`."),
+    )
+
+
 def _attention(session: Any, now: datetime, limit: int, ids: list[int] | None) -> Section:
     ranked = []
     for project in session.exec(_in_scope(select(Project), Project.id, ids)):
@@ -365,6 +400,7 @@ def build(session: Any, limit: int = 12, now: datetime | None = None,
             _governance(session, now),
             *(facet.at(session, ids=ids, limit=limit) for facet in FACETS),
             _deltas(session, now, ids),
+            _harness_totals(session, now),
             _attention(session, now, limit, ids),
         ),
         generated_from=_horizon_phrase(_age_days(horizon, now)) if horizon

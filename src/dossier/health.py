@@ -423,16 +423,29 @@ def repair(path: Path, backup_first: bool = True) -> list[str]:
         # before the one that adds the column, so that migration alone re-runs;
         # stamping further back would re-run migrations whose work is already
         # present, and those fail on tables that already exist.
-        parents = []
+        introducing = []
         for columns in absent.values():
             for column in columns:
                 found = migration_introducing(column)
                 if found:
-                    parents.append(found[1])
-        if not parents:
+                    introducing.append(found)
+        if not introducing:
             return done + [f"cannot repair: no migration adds {absent}"]
-        command.stamp(config, parents[0])
-        done.append(f"corrected a wrong stamp: {stamp} -> {parents[0]}")
+
+        # Rewind, run exactly the migration that adds the column, then put the
+        # stamp back. Rewinding and upgrading to head instead re-runs every
+        # later migration, and those fail on work that is already present --
+        # which is what a wrongly-stamped database has by definition. The
+        # missing column is the only thing absent.
+        revision, parent = introducing[0]
+        command.stamp(config, parent)
+        command.upgrade(config, revision)
+        command.stamp(config, stamp)
+        done.append(f"ran {revision} and restored the stamp to {stamp}")
+        remaining = [f for f in inspect(path) if f.is_blocking]
+        if remaining:
+            done.append("STILL BLOCKED: " + "; ".join(f.title for f in remaining))
+        return done
 
     if stamp is None and has_tables:
         path.unlink()

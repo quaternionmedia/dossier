@@ -59,3 +59,8 @@ __all__ = [
     "DeltaLink",
     "utcnow",
 ]
+
+from dossier.models.harness import (  # noqa: E402,F401
+    HarnessInvocation,
+    HarnessSnapshot,
+)

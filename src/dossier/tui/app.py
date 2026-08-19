@@ -945,6 +945,11 @@ class DossierApp(App):
                         yield DataTable(id="prs-table")
                     with TabPane("Releases", id="tab-releases"):
                         yield DataTable(id="releases-table")
+                    # The harness half of the pair: what qmcp reports having
+                    # run, read through the address that names the same row on
+                    # both sides.
+                    with TabPane("Harness", id="tab-harness"):
+                        yield DataTable(id="harness-table")
                     with TabPane("Governance", id="tab-governance"):
                         with Vertical():
                             yield Static("", id="governance-age")
@@ -1022,6 +1027,7 @@ class DossierApp(App):
     # Actions the ring can commit that map onto a view this app already has.
     RAD_VIEWS = {
         "view.overview": "tab-overview",
+        "view.harness": "tab-harness",
         "view.deltas": "tab-deltas",
         "view.governance": "tab-governance",
         "view.disk": "tab-disk",
