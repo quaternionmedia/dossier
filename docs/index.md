@@ -1,6 +1,8 @@
 # Dossier Documentation
 
-> **Decentralized project tracking and delta-centric change management for cross-domain teams.** A data-modeled, offline-first alternative to Jira and proprietary trackers.
+> **Keep track of what every project is doing, without asking anybody.**
+> Dossier reads your repositories directly and shows one view of them: what is in
+> flight, who is working where, and where two systems disagree about the same thing.
 
 ## Quick Links
 
