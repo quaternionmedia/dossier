@@ -101,7 +101,28 @@ def dashboard() -> None:
         / - Search
         ? - Help
     """
+    from dossier.health import BLOCKED, candidate_databases, check, render, repair, worst
     from dossier.tui import DossierApp
+
+    # The dashboard is the only command a fresh clone should need. A schema
+    # behind the code fails as a driver error in the middle of a screen -- the
+    # message says what SQLite could not do and nothing about what to do next --
+    # so the check runs first and repairs what can be repaired safely.
+    findings = check()
+    if worst(findings) == BLOCKED:
+        click.echo("Preparing the database...")
+        for path in candidate_databases():
+            for action in repair(path):
+                click.echo(f"  {path.name}: {action}")
+        findings = check()
+
+    if worst(findings) == BLOCKED:
+        # Still blocked means a repair this cannot make -- an unstamped
+        # database holding data. Refusing to launch is the point: the app would
+        # open and then fail on the first query that names a missing column.
+        click.echo(render(findings), err=True)
+        raise SystemExit(1)
+
     app = DossierApp()
     app.run()
 
@@ -4181,3 +4202,30 @@ def deltas_prune_forks(apply: bool) -> None:
             return
         prune_fork_deltas(session, apply=True)
         click.echo(f"Removed {len(names)} delta(s).")
+
+
+@db.command("health")
+@click.option("--fix", is_flag=True,
+              help="Apply the repairs this reports, backing up first")
+def db_health(fix: bool) -> None:
+    """Report what is wrong with this installation, and how to fix it."""
+    from dossier.health import BLOCKED, check, render, repair, worst
+    from dossier.health import candidate_databases
+
+    findings = check()
+    click.echo(render(findings))
+
+    if not fix:
+        if worst(findings) == BLOCKED:
+            click.echo("\nRe-run with --fix to apply the repairs above.")
+            raise SystemExit(1)
+        return
+
+    click.echo("")
+    for path in candidate_databases():
+        if not path.exists():
+            continue
+        for action in repair(path):
+            click.echo(f"  {path.name}: {action}")
+    click.echo("")
+    click.echo(render(check()))

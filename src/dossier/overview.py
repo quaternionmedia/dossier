@@ -111,6 +111,26 @@ def owner_of(project: Any) -> str | None:
     return None
 
 
+def dominant_owner(session: Any) -> str | None:
+    """The owner holding the most non-fork repositories here, or None.
+
+    What "local" means for a dashboard opening cold: whichever organisation
+    this database is actually about. Opening unscoped shows a total mixed
+    across every owner that was ever synced, which is a number about the
+    database rather than about anybody's work.
+    """
+    from collections import Counter
+
+    tally = Counter(
+        owner_of(project)
+        for project in session.exec(select(Project)).all()
+        if not project.is_fork and owner_of(project)
+    )
+    if not tally:
+        return None
+    return tally.most_common(1)[0][0]
+
+
 def scope_ids(session: Any, owner: str | None,
               include_forks: bool = False) -> list[int] | None:
     """Project ids belonging to `owner`, or None for everything in the dossier.
