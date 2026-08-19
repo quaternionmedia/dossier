@@ -101,28 +101,27 @@ def dashboard() -> None:
         / - Search
         ? - Help
     """
-    from dossier.health import BLOCKED, candidate_databases, check, render, repair, worst
+    from dossier.health import BLOCKED, prepare, render, summary_line, worst
     from dossier.tui import DossierApp
 
-    # The dashboard is the only command a fresh clone should need. A schema
-    # behind the code fails as a driver error in the middle of a screen -- the
-    # message says what SQLite could not do and nothing about what to do next --
-    # so the check runs first and repairs what can be repaired safely.
-    findings = check()
-    if worst(findings) == BLOCKED:
-        click.echo("Preparing the database...")
-        for path in candidate_databases():
-            for action in repair(path):
-                click.echo(f"  {path.name}: {action}")
-        findings = check()
+    # The dashboard is the only command a fresh clone needs after `uv sync`.
+    # `prepare` is the whole of init: it creates a database that does not
+    # exist, applies migrations that have not run, and corrects a stamp that
+    # claims they did. It runs every launch rather than behind a first-run
+    # flag, because the state it repairs arrives from outside -- pulling a
+    # branch with a new migration is the ordinary way to get it.
+    actions, findings = prepare()
+    for action in actions:
+        click.echo(f"  {action}")
 
     if worst(findings) == BLOCKED:
-        # Still blocked means a repair this cannot make -- an unstamped
-        # database holding data. Refusing to launch is the point: the app would
-        # open and then fail on the first query that names a missing column.
+        # Refusing is the point: the app would open and then fail on the first
+        # query naming a missing column, in the middle of a screen, with a
+        # driver error that says nothing about what to do next.
         click.echo(render(findings), err=True)
         raise SystemExit(1)
 
+    click.echo(summary_line(findings))
     app = DossierApp()
     app.run()
 

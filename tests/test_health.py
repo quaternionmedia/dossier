@@ -92,7 +92,10 @@ def test_a_missing_column_is_blocking_and_names_the_fix(tmp_path: Path):
     blocking = [f for f in findings if f.is_blocking]
     assert blocking, "a missing column must block, not warn"
     assert "is_fork" in blocking[0].title
-    assert blocking[0].fix and "upgrade" in blocking[0].fix
+    # The command has to be one that actually repairs this. `db upgrade` is a
+    # no-op when the stamp already claims head, which is how the reported
+    # failure survived being "fixed".
+    assert blocking[0].fix == "uv run dossier db health --fix"
 
 
 def test_every_blocking_finding_carries_a_command(tmp_path: Path):
@@ -203,14 +206,13 @@ def test_render_puts_the_fix_under_the_finding(tmp_path):
 # --- the dashboard prepares itself -------------------------------------------
 
 
-def test_the_dashboard_checks_before_it_launches():
-    """It is meant to be the only command a fresh clone needs. A schema behind
-    the code otherwise surfaces as a driver error mid-screen."""
-    source = Path("src/dossier/cli.py").read_text(encoding="utf-8")
-    body = source.split("def dashboard(")[1].split("\ndef ")[0]
-    assert "check()" in body, "dashboard launches without a health check"
-    assert "repair(" in body, "dashboard checks but never repairs"
-    assert "SystemExit" in body, "dashboard would launch into a database it cannot read"
+def test_an_unused_location_is_not_reported_as_a_problem(tmp_path, monkeypatch):
+    """Reporting a database this installation does not use teaches a reader
+    that warnings here are noise."""
+    monkeypatch.setenv("DOSSIER_HOME", str(tmp_path / "unused"))
+    make_db(tmp_path / "dossier.db", stamp=health.code_revision(), rows=1)
+    findings = health.check(cwd=tmp_path)
+    assert not any("does not exist" in finding.title for finding in findings)
 
 
 def test_the_dashboard_refuses_rather_than_opening_a_broken_database(tmp_path, monkeypatch):
@@ -262,3 +264,180 @@ def test_an_empty_database_has_no_local_organisation(tmp_path):
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
         assert dominant_owner(session) is None
+
+
+# --- a stamp that claims a migration ran when it did not ----------------------
+
+
+def drifted_db(path: Path, rows: int = 1) -> Path:
+    """Stamped at head, missing the columns head adds. A real reported state."""
+    make_db(path, rows=rows, drop_columns=("is_fork", "is_archived"))
+    connection = sqlite3.connect(str(path))
+    connection.execute("create table if not exists alembic_version "
+                       "(version_num varchar(32) not null)")
+    connection.execute("insert into alembic_version values (?)",
+                       (health.code_revision(),))
+    connection.commit()
+    connection.close()
+    return path
+
+
+def test_a_wrong_stamp_is_named_as_the_cause(tmp_path: Path):
+    """`db upgrade` reported success and changed nothing, because alembic
+    believed the database was already current."""
+    path = drifted_db(tmp_path / "drifted.db")
+    blocking = [f for f in health.inspect(path) if f.is_blocking]
+    assert blocking
+    assert "stamp" in blocking[0].detail
+    assert "without changing anything" in blocking[0].detail
+
+
+def test_the_advice_for_a_wrong_stamp_is_not_the_command_that_does_nothing(tmp_path: Path):
+    """Recommending `db upgrade` here sent a reader in a circle."""
+    path = drifted_db(tmp_path / "drifted.db")
+    blocking = [f for f in health.inspect(path) if f.is_blocking]
+    assert blocking[0].fix == "uv run dossier db health --fix"
+
+
+def test_nothing_recommends_stamping_at_head():
+    """That marks every migration applied, including ones that never ran, and
+    the columns they add then never arrive. It is how a database reaches the
+    state above."""
+    source = Path("src/dossier/health.py").read_text(encoding="utf-8")
+    assert "stamp head" not in source
+
+
+def test_repair_moves_the_stamp_back_and_the_migration_runs(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOSSIER_HOME", str(tmp_path))
+    path = drifted_db(tmp_path / "drifted.db", rows=2)
+    actions = health.repair(path, backup_first=False)
+    assert any("corrected a wrong stamp" in action for action in actions)
+    assert not [f for f in health.inspect(path) if f.is_blocking]
+
+
+def test_repair_keeps_the_rows_it_repairs_around(tmp_path, monkeypatch):
+    """A repair that loses data is not a repair."""
+    monkeypatch.setenv("DOSSIER_HOME", str(tmp_path))
+    path = drifted_db(tmp_path / "drifted.db", rows=4)
+    health.repair(path, backup_first=False)
+    assert health.row_count(path) == 4
+
+
+def test_repair_reports_the_state_it_left_not_the_command_it_ran(tmp_path, monkeypatch):
+    """The earlier version returned "upgraded to head" for a database that was
+    still broken. Anything still blocking is named in the result."""
+    monkeypatch.setenv("DOSSIER_HOME", str(tmp_path))
+    path = drifted_db(tmp_path / "drifted.db", rows=1)
+
+    # Make the repair impossible: no migration on disk introduces the column,
+    # so it cannot rewind, and it must say so rather than claim success.
+    monkeypatch.setattr(health, "migration_introducing", lambda column, root=None: None)
+    actions = health.repair(path, backup_first=False)
+    assert any("cannot repair" in action for action in actions)
+    assert not any(action == "upgraded to head" for action in actions)
+
+
+def test_the_migration_introducing_a_column_is_found_with_its_parent(tmp_path: Path):
+    (tmp_path / "0001_base.py").write_text(
+        'revision = "aaa"\ndown_revision = None\n', encoding="utf-8")
+    (tmp_path / "0002_add.py").write_text(
+        'revision = "bbb"\ndown_revision = "aaa"\n'
+        'def upgrade():\n    op.add_column("project", sa.Column("is_fork"))\n',
+        encoding="utf-8")
+    assert health.migration_introducing("is_fork", tmp_path) == ("bbb", "aaa")
+
+
+def test_a_column_no_migration_adds_is_not_invented(tmp_path: Path):
+    (tmp_path / "0001_base.py").write_text(
+        'revision = "aaa"\ndown_revision = None\n', encoding="utf-8")
+    assert health.migration_introducing("nonexistent", tmp_path) is None
+
+
+# --- the dashboard is the only command needed --------------------------------
+
+
+def test_prepare_repairs_a_drifted_database(tmp_path, monkeypatch):
+    """`uv sync` then `dossier dashboard`, and nothing else."""
+    monkeypatch.setenv("DOSSIER_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    drifted_db(tmp_path / "dossier.db", rows=2)
+
+    actions, findings = health.prepare(cwd=tmp_path)
+    assert actions, "prepare did nothing to a broken database"
+    assert health.worst(findings) != health.BLOCKED
+
+
+def test_prepare_is_quiet_when_there_is_nothing_to_do(tmp_path, monkeypatch):
+    """A launch that prints repairs it did not make trains a reader to ignore
+    the line."""
+    monkeypatch.setenv("DOSSIER_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    make_db(tmp_path / "dossier.db", stamp=health.code_revision(), rows=1)
+
+    actions, findings = health.prepare(cwd=tmp_path)
+    assert actions == []
+    assert health.worst(findings) == health.OK
+
+
+def test_prepare_runs_every_time_rather_than_behind_a_flag():
+    """The state it repairs arrives from outside: pulling a branch with a new
+    migration is the ordinary way to get it, and a flag saying `already
+    initialised` would be true and useless."""
+    source = Path("src/dossier/health.py").read_text(encoding="utf-8")
+    body = source.split("def prepare(")[1].split("\ndef ")[0]
+    assert "first-run flag" in body or "first_run" not in body
+
+
+def test_the_status_line_says_where_the_data_is_and_how_much(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOSSIER_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    make_db(tmp_path / "dossier.db", stamp=health.code_revision(), rows=7)
+
+    line = health.summary_line(health.check(cwd=tmp_path), cwd=tmp_path)
+    assert "7 project(s)" in line
+    assert "ready" in line
+
+
+def test_the_dashboard_prepares_reports_and_refuses():
+    """All three, in that order, in the command a fresh clone runs."""
+    source = Path("src/dossier/cli.py").read_text(encoding="utf-8")
+    body = source.split("def dashboard(")[1].split("\ndef ")[0]
+    assert "prepare()" in body, "dashboard does not run init"
+    assert "summary_line" in body, "dashboard launches without saying what it opened"
+    assert "SystemExit" in body, "dashboard would open a database it cannot read"
+    assert body.index("prepare()") < body.index("DossierApp()")
+
+
+def test_a_fresh_clone_gets_a_database_from_one_command(tmp_path, monkeypatch):
+    """The end state the dashboard promises: `uv sync`, then `dossier
+    dashboard`, and nothing else. No database exists anywhere here."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("DOSSIER_HOME", str(home))
+
+    work = tmp_path / "work"
+    work.mkdir()
+    actions, findings = health.prepare(cwd=work)
+
+    assert (work / "dossier.db").exists(), "prepare did not create a database"
+    assert health.worst(findings) != health.BLOCKED
+    assert any("head" in action for action in actions)
+
+
+def test_prepare_works_from_a_directory_that_is_not_the_repository(tmp_path, monkeypatch):
+    """`Config("alembic.ini")` is found only when the caller happens to be
+    standing in the repository root, and the dashboard is meant to run from
+    anywhere."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("DOSSIER_HOME", str(home))
+    monkeypatch.chdir(tmp_path)
+
+    actions, findings = health.prepare(cwd=tmp_path)
+    assert health.worst(findings) != health.BLOCKED
+    assert (tmp_path / "dossier.db").exists()
+
+
+def test_the_project_root_is_found_from_the_package(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    assert (health.project_root() / "alembic.ini").is_file()
