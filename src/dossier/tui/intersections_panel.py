@@ -5,8 +5,8 @@ declared link carries an intent nothing else here does -- and above them now
 sits what can be observed: the corpus this project pins, the packages it shares,
 and the people who work on both sides.
 
-It renders through `overview_panel._section`, so an intersection table and an
-org table are the same shape on screen. A reader learns one table, not two.
+It renders through `tui.section_render`, so an intersection table and an org
+table are the same shape on screen. A reader learns one table, not two.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from textual.widgets import Static
 
 from dossier.intersections import build
 from dossier.rad.tokens import DEFAULT_THEME, roles
-from dossier.tui.overview_panel import _section
+from dossier.tui.section_render import render_section
 
 
 class IntersectionsPanel(VerticalScroll):
@@ -53,7 +53,7 @@ class IntersectionsPanel(VerticalScroll):
             ("   intersections", f"dim {role.hint}"),
         )
         body = [header, Text("")]
-        body.extend(_section(section, self.theme_name) for section in sections)
+        body.extend(render_section(section, self.theme_name) for section in sections)
         body.append(Text(
             "An integration nobody declared is invisible here: two services that talk "
             "over HTTP share no package and no submodule. An empty section is not "

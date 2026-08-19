@@ -1,119 +1,43 @@
-"""The org overview, rendered.
+"""The org overview: the same facts the tabs hold, read across every repository.
 
-This module turns `dossier.overview.OrgOverview` into Rich renderables and
-nothing else. It holds no queries: what to count lives in `dossier.overview`,
-which imports no Textual and can therefore be asked the same question by the
-API, by a test, and eventually by the ring's `Show` verb.
+WHY THE SECTIONS ARE TABLES AND NOT A PICTURE. Each one comes from a facet in
+`dossier.facets`, and that facet also fills a tab. Rendering the section as a
+`DataTable` means a row can be selected, and selecting it opens the tab holding
+that row's detail -- the vertical axis of the screen and the horizontal one are
+then the same data with a route between them, rather than two readings that
+happen to agree.
 
-DENSITY IS THE POINT, AND IT HAS A LIMIT. A reader opening this should see the
-shape of the whole organisation without scrolling, and then find the detail by
-scrolling. So the masthead is a wrapped grid of figures rather than a sentence,
-and every section is a table. What density must not buy is a number without its
-qualification -- each section carries the note its data needs, dimmed, directly
-under the table, because a figure whose caveat is one screen away is a figure
-that will be quoted without it.
+Sections with no facet -- governance posture, the phase board, what wants
+attention -- exist only at org scope and are drawn the same way. Selecting one
+of their rows does nothing, which is honest: there is no per-repository tab
+that holds a phase board.
 
-COLOURS COME FROM RAD'S TOKENS. Nothing here names a colour. `dossier.rad.tokens`
-holds the palette and role tiers read from rad, and this module asks for roles,
-so a theme change is a palette swap rather than an edit here.
+COLOURS COME FROM RAD'S TOKENS. Nothing here names a colour; it asks
+`dossier.rad.tokens` for its default, and the section renderer used by the
+intersections panel asks it for roles.
 """
 
 from __future__ import annotations
 
-from typing import Any
-
-from rich.console import Group
-from rich.table import Table
-from rich.text import Text
 from textual.containers import VerticalScroll
-from textual.widgets import Static
+from textual.widgets import DataTable, Static
 
-from dossier.overview import Cell, OrgOverview, Section, build
-from dossier.rad.tokens import DEFAULT_THEME, roles
+from dossier.facets import BY_TITLE as FACET_BY_TITLE
+from dossier.overview import OrgOverview, Section, build
+from dossier.rad.tokens import DEFAULT_THEME
 
-# Sections whose first column is a name worth leaning on. Everything else reads
-# as a figure, and a table where every column is bold is a table with no
-# emphasis at all.
-_LEAD_COLUMN_WIDTH = 30
-
-
-def _masthead(cells: tuple[Cell, ...], theme: str) -> Table:
-    """The figures, wrapped into columns rather than listed down the page."""
-    role = roles(theme)
-    grid = Table.grid(padding=(0, 3))
-    for _ in range(4):
-        grid.add_column(justify="left")
-
-    entries = []
-    for cell in cells:
-        stacked = Table.grid()
-        stacked.add_row(Text(cell.value, style=f"bold {role.wedge_label_selected}"))
-        stacked.add_row(Text(cell.label, style=role.hub_stroke))
-        if cell.note:
-            stacked.add_row(Text(cell.note, style=f"dim {role.hint}"))
-        entries.append(stacked)
-
-    for start in range(0, len(entries), 4):
-        row = entries[start:start + 4]
-        row += [Text("")] * (4 - len(row))
-        grid.add_row(*row)
-    return grid
-
-
-def _section(section: Section, theme: str) -> Group:
-    role = roles(theme)
-    table = Table(
-        title=None,
-        box=None,
-        pad_edge=False,
-        padding=(0, 2),
-        header_style=f"bold {role.hub_stroke}",
-        expand=False,
-    )
-    for index, header in enumerate(section.headers):
-        table.add_column(
-            header,
-            overflow="ellipsis",
-            max_width=_LEAD_COLUMN_WIDTH if index == 0 else None,
-            style=role.wedge_label_selected if index == 0 else role.wedge_label,
-        )
-    for row in section.rows:
-        table.add_row(*row)
-
-    heading = Text(section.title.upper(), style=f"bold {role.focus_ring}")
-    parts: list[Any] = [heading, table]
-    if section.note:
-        parts.append(Text(section.note, style=f"dim {role.hint}"))
-    if section.is_empty:
-        parts.insert(1, Text("  nothing recorded yet", style=f"dim {role.hint}"))
-    parts.append(Text(""))
-    return Group(*parts)
-
-
-def render(overview: OrgOverview, theme: str = DEFAULT_THEME) -> Group:
-    """One renderable for the whole overview, in the order `build` returned.
-
-    The order is the module's, not this one's. A renderer that re-ordered the
-    sections would be a second statement of what matters most.
-    """
-    role = roles(theme)
-    header = Text.assemble(
-        (overview.scope, f"bold {role.wedge_label_selected}"),
-        ("   ", ""),
-        (overview.generated_from, f"dim {role.hint}"),
-    )
-    body: list[Any] = [header, Text(""), _masthead(overview.masthead, theme), Text("")]
-    body.extend(_section(section, theme) for section in overview.sections)
-    return Group(*body)
+# The column a row's repository is found in, when it has one. Facets put the
+# repository first by convention; a section whose first column is not a repo
+# declares so by not appearing here.
+REPO_FIRST = {"repo"}
 
 
 class OverviewPanel(VerticalScroll):
-    """The overview tab. Reads on mount and on demand, never on a timer.
+    """Reads on mount and on demand, never on a timer.
 
-    A timer here would re-query the database behind a reader who is part way
-    down the page, and the figures are `as last synced` regardless -- so a
-    refresh that the reader did not ask for buys nothing and moves the page
-    under them.
+    A timer would re-query behind a reader part way down the page, and every
+    figure is `as last synced` regardless -- so an unasked-for refresh buys
+    nothing and moves the page under them.
     """
 
     def __init__(self, session_factory, theme: str = DEFAULT_THEME,
@@ -122,22 +46,91 @@ class OverviewPanel(VerticalScroll):
         self.session_factory = session_factory
         self.theme_name = theme
         self.owner = owner
-        self._body = Static(id="overview-body")
         self.overview: OrgOverview | None = None
+
+    # -- content ----------------------------------------------------------
+
+    def compose(self):
+        # Read here rather than in `on_mount`: compose runs first, so a panel
+        # that waited for mount would draw an empty page and fill it a frame
+        # later -- which is what a reader sees, and what a test sees too.
+        if self.overview is None:
+            self.overview = self._read()
+
+        yield Static(
+            f"[bold]{self.overview.scope}[/bold]   [dim]{self.overview.generated_from}[/dim]",
+            id="overview-scope",
+        )
+        yield Static(self._masthead_markup(), id="overview-masthead")
+
+        for index, section in enumerate(self.overview.sections):
+            linked = section.title in FACET_BY_TITLE
+            suffix = "   [dim](select a row to open it)[/dim]" if linked else ""
+            yield Static(f"[bold]{section.title.upper()}[/bold]{suffix}",
+                         classes="overview-heading")
+            table = DataTable(id=f"overview-section-{index}", zebra_stripes=False,
+                              classes="overview-section")
+            table.cursor_type = "row"
+            # Filled before yielding: the rows are known now, and populating on
+            # mount means one frame of an empty table for every section.
+            table.add_columns(*section.headers)
+            for row_index, row in enumerate(section.rows):
+                table.add_row(*row, key=f"{index}:{row_index}")
+            yield table
+            if section.note:
+                yield Static(f"[dim]{section.note}[/dim]", classes="overview-note")
+
+    def _masthead_markup(self) -> str:
+        cells = []
+        for cell in self.overview.masthead:
+            note = f"  [dim]{cell.note}[/dim]" if cell.note else ""
+            cells.append(f"[bold]{cell.value}[/bold] {cell.label}{note}")
+        return "\n".join(cells)
+
+    def _read(self) -> OrgOverview:
+        with self.session_factory() as session:
+            return build(session, owner=self.owner)
 
     def set_owner(self, owner: str | None) -> None:
         """Scope to one owner and redraw. Unscoped when `owner` is None."""
         self.owner = owner
         self.refresh_overview()
 
-    def compose(self):
-        yield self._body
-
-    def on_mount(self) -> None:
-        self.refresh_overview()
-
     def refresh_overview(self) -> None:
         """Rebuild from the database. Safe to call from a binding or a button."""
-        with self.session_factory() as session:
-            self.overview = build(session, owner=self.owner)
-        self._body.update(render(self.overview, self.theme_name))
+        self.overview = self._read()
+        if self.is_mounted:
+            self.recompose()
+
+    # `role` is read per render rather than stored, so a theme change needs no
+    # invalidation step here.
+
+    # -- the link ---------------------------------------------------------
+
+    def section_for(self, table_id: str) -> Section | None:
+        if self.overview is None or not table_id.startswith("overview-section-"):
+            return None
+        index = int(table_id.rsplit("-", 1)[1])
+        if index >= len(self.overview.sections):
+            return None
+        return self.overview.sections[index]
+
+    def target_for(self, section: Section, row_key: str) -> tuple[str | None, str | None]:
+        """The tab a row links to, and the repository it names, if any.
+
+        Returns `(None, None)` for a section with no facet -- an org-only view
+        has no per-repository tab to open, and inventing one would send a
+        reader somewhere that does not answer their question.
+        """
+        facet = FACET_BY_TITLE.get(section.title)
+        if facet is None:
+            return None, None
+        try:
+            _, row_index = (int(part) for part in row_key.split(":"))
+        except (ValueError, AttributeError):
+            return facet.tab, None
+        if row_index >= len(section.rows):
+            return facet.tab, None
+        row = section.rows[row_index]
+        repo = row[0] if section.headers and section.headers[0] in REPO_FIRST else None
+        return facet.tab, repo

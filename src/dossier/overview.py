@@ -274,145 +274,9 @@ def _deltas(session: Any, now: datetime, ids: list[int] | None) -> Section:
     )
 
 
-def _on_deck(session: Any, now: datetime, limit: int, ids: list[int] | None) -> Section:
-    stmt = (
-        select(ProjectDelta, Project.name)
-        .join(Project, Project.id == ProjectDelta.project_id)
-        .where(ProjectDelta.phase.notin_(CLOSED_PHASES))
-        .order_by(ProjectDelta.updated_at.desc())
-        .limit(limit)
-    )
-    stmt = _in_scope(stmt, ProjectDelta.project_id, ids)
-    rows = []
-    for delta, project in session.exec(stmt):
-        rows.append((
-            _trim(project, 18),
-            _trim(delta.title, 40),
-            getattr(delta.phase, "value", str(delta.phase)),
-            delta.priority or "--",
-            delta.delta_type or "--",
-            _trim(delta.branch_name, 24),
-            _ago(_age_days(delta.updated_at, now)),
-        ))
-    return Section(
-        "On deck",
-        ("repo", "delta", "phase", "priority", "type", "branch", "moved"),
-        tuple(rows),
-        note=("Open deltas, most recently moved first. An empty branch column is work "
-              "with no branch yet, not work with no home."),
-    )
 
 
-def _activity(session: Any, now: datetime, limit: int, ids: list[int] | None) -> Section:
-    prs = dict(session.exec(_in_scope(
-        select(ProjectPullRequest.project_id, func.count())
-        .where(ProjectPullRequest.state == "open")
-        .group_by(ProjectPullRequest.project_id),
-        ProjectPullRequest.project_id, ids)).all())
-    issues = dict(session.exec(_in_scope(
-        select(ProjectIssue.project_id, func.count())
-        .where(ProjectIssue.state == "open")
-        .group_by(ProjectIssue.project_id),
-        ProjectIssue.project_id, ids)).all())
-    branches = dict(session.exec(_in_scope(
-        select(ProjectBranch.project_id, func.count()).group_by(ProjectBranch.project_id),
-        ProjectBranch.project_id, ids)).all())
-    releases = dict(session.exec(_in_scope(
-        select(ProjectRelease.project_id, func.count()).group_by(ProjectRelease.project_id),
-        ProjectRelease.project_id, ids)).all())
 
-    scored = []
-    in_scope = _in_scope(select(Project).where(Project.last_synced_at.isnot(None)),
-                         Project.id, ids)
-    for project in session.exec(in_scope):
-        open_pr, open_issue = prs.get(project.id, 0), issues.get(project.id, 0)
-        score = open_pr * 3 + open_issue + branches.get(project.id, 0) * 0.5
-        if score:
-            scored.append((score, project, open_pr, open_issue))
-    scored.sort(key=lambda item: -item[0])
-
-    rows = tuple(
-        (
-            _trim(project.get_full_name(), 30),
-            project.github_language or "--",
-            str(project.github_stars or 0),
-            str(open_pr),
-            str(open_issue),
-            str(branches.get(project.id, 0)),
-            str(releases.get(project.id, 0)),
-            _ago(_age_days(project.last_synced_at, now)),
-        )
-        for _, project, open_pr, open_issue in scored[:limit]
-    )
-    return Section(
-        "Where the work is",
-        ("repo", "language", "stars", "open PRs", "open issues", "branches", "releases", "synced"),
-        rows,
-        note=("Ordered by open PRs weighted over issues and branches. It ranks visible "
-              "activity, which is not the same as importance."),
-    )
-
-
-def _languages(session: Any, limit: int, ids: list[int] | None) -> Section:
-    seen = list(session.exec(_in_scope(
-        select(ProjectLanguage.language, func.count(), func.sum(ProjectLanguage.bytes_count))
-        .group_by(ProjectLanguage.language)
-        .order_by(func.sum(ProjectLanguage.bytes_count).desc())
-        .limit(limit), ProjectLanguage.project_id, ids)))
-    total = sum(int(b or 0) for _, _, b in seen) or 1
-    rows = tuple(
-        (_trim(name, 18), str(repo_count), f"{int(b or 0) / 1_000_000:.1f}MB",
-         f"{100 * int(b or 0) / total:.0f}%",
-         "#" * max(1, round(24 * int(b or 0) / total)))
-        for name, repo_count, b in seen
-    )
-    return Section(
-        "Language mix",
-        ("language", "repos", "bytes", "share", ""),
-        rows,
-        note=("Share is of the bytes in this table, not of the org: languages past the "
-              "cut are not in the denominator."),
-    )
-
-
-def _dependencies(session: Any, limit: int, ids: list[int] | None) -> Section:
-    rows = tuple(
-        (_trim(name, 28), str(repos), "#" * min(int(repos), 24))
-        for name, repos in session.exec(_in_scope(
-            select(ProjectDependency.name, func.count(func.distinct(ProjectDependency.project_id)))
-            .group_by(ProjectDependency.name)
-            .order_by(func.count(func.distinct(ProjectDependency.project_id)).desc())
-            .limit(limit), ProjectDependency.project_id, ids)
-        )
-    )
-    return Section(
-        "Shared dependencies",
-        ("package", "repos", ""),
-        rows,
-        note=("How many synced repositories declare each package. A high count is a "
-              "blast radius, not an endorsement."),
-    )
-
-
-def _people(session: Any, limit: int, ids: list[int] | None) -> Section:
-    rows = tuple(
-        (_trim(login, 24), str(repos), f"{int(commits or 0):,}")
-        for login, repos, commits in session.exec(_in_scope(
-            select(ProjectContributor.username,
-                   func.count(func.distinct(ProjectContributor.project_id)),
-                   func.sum(ProjectContributor.contributions))
-            .group_by(ProjectContributor.username)
-            .order_by(func.count(func.distinct(ProjectContributor.project_id)).desc())
-            .limit(limit), ProjectContributor.project_id, ids)
-        )
-    )
-    return Section(
-        "Contributors by reach",
-        ("login", "repos", "commits"),
-        rows,
-        note=("Ordered by repositories touched. Commit counts are as GitHub reports "
-              "them and include merges."),
-    )
 
 
 def _attention(session: Any, now: datetime, limit: int, ids: list[int] | None) -> Section:
@@ -465,6 +329,12 @@ def build(session: Any, limit: int = 12, now: datetime | None = None,
     `now` is injectable so a test can assert an age rather than assert around
     one: a clock read inside this function would make every age untestable.
     """
+    # Imported here rather than at module scope: `facets` reads `Section` and
+    # the helpers from this module, and a top-level import both ways is a
+    # cycle. The registry is the single definition of each kind of fact; this
+    # module owns only the sections that exist at org scope alone.
+    from dossier.facets import FACETS
+
     now = now or datetime.now(timezone.utc)
     ids = scope_ids(session, owner, include_forks=include_forks)
     horizon = _one(session, _in_scope(
@@ -473,12 +343,8 @@ def build(session: Any, limit: int = 12, now: datetime | None = None,
         masthead=_masthead(session, now, ids),
         sections=(
             _governance(session, now),
-            _on_deck(session, now, limit, ids),
+            *(facet.at(session, ids=ids, limit=limit) for facet in FACETS),
             _deltas(session, now, ids),
-            _activity(session, now, limit, ids),
-            _languages(session, limit, ids),
-            _dependencies(session, limit, ids),
-            _people(session, limit, ids),
             _attention(session, now, limit, ids),
         ),
         generated_from=_horizon_phrase(_age_days(horizon, now)) if horizon

@@ -61,19 +61,6 @@ TREE_ENTITY_LIMIT = 20  # Max entities to show per section in tree
 # five references to it survived, pointing at a tab nothing composes. They were
 # dormant until something took that path, and then failed as
 # "No Tab with id '--content-tab-tab-projects'" -- nowhere near the cause.
-MAIN_TABS = {"tab-dossier", "tab-details", "tab-deltas"}
-PROJECT_TABS = {
-    "tab-details",
-    "tab-docs",
-    "tab-languages",
-    "tab-branches",
-    "tab-dependencies",
-    "tab-contributors",
-    "tab-issues",
-    "tab-prs",
-    "tab-releases",
-    "tab-components",
-}
 
 
 def extract_file_path(source_file: str | None) -> str | None:
@@ -100,6 +87,7 @@ def extract_file_path(source_file: str | None) -> str | None:
     return source_file
 
 
+from dossier.facets import BY_TAB as FACET_BY_TAB, BY_TITLE as FACET_BY_TITLE
 from dossier.tui.delta_board import DeltaBoard
 from dossier.tui.intersections_panel import IntersectionsPanel
 
@@ -900,7 +888,13 @@ class DossierApp(App):
                 with Container(id="delta-board-container"):
                     yield DeltaBoard(self.session_factory, id="delta-board")
                 with Container(id="project-list-container"):
-                    yield Tree("Projects", id="project-tree")
+                    # `auto_expand` toggles a node when it is *selected*, so
+                    # clicking an owner collapsed its repositories and the
+                    # selection read as "nothing happened". Expansion is the
+                    # toggle arrow's job.
+                    project_tree = Tree("Projects", id="project-tree")
+                    project_tree.auto_expand = False
+                    yield project_tree
                 with Vertical(id="sidebar-controls"):
                     with Horizontal(id="filter-bar-2"):
                         yield Select(
@@ -1019,6 +1013,11 @@ class DossierApp(App):
     # attribute rather than an __init__ line, so it exists however the app was
     # constructed -- this app has more than one construction path.
     _rad = None
+
+    # Which scope the tabs are describing: an owner, or None for whichever
+    # project is selected. A class attribute so a tab loader that runs before
+    # any selection reads a value rather than raising.
+    _scope_owner = None
 
     # Actions the ring can commit that map onto a view this app already has.
     RAD_VIEWS = {
@@ -2598,16 +2597,13 @@ class DossierApp(App):
             main_tabs = self.query_one("#project-tabs", TabbedContent)
         except Exception:
             return
-        if tab_id in MAIN_TABS:
+        # There is one `TabbedContent`. The two-step routing this replaced was
+        # left over from a nested-tab design that was not adopted: it set the
+        # active tab to `tab-details` and then to the requested one on the same
+        # widget, and it listed neither `tab-overview` nor `tab-governance` --
+        # so activating either silently did nothing.
+        if any(pane.id == tab_id for pane in main_tabs.query(TabPane)):
             main_tabs.active = tab_id
-            return
-        if tab_id in PROJECT_TABS:
-            main_tabs.active = "tab-details"
-            try:
-                project_tabs = self.query_one("#project-tabs", TabbedContent)
-                project_tabs.active = tab_id
-            except Exception:
-                pass
 
     def _get_active_tab_id(self) -> Optional[str]:
         """Return the active tab id across main and project tabs."""
@@ -2630,6 +2626,7 @@ class DossierApp(App):
         with lazy loading for other tabs when they're activated.
         """
         # Store current project ID for lazy loading
+        self._scope_owner = None
         self._current_project_id = project.id
         self._current_project = project
 
@@ -2711,6 +2708,14 @@ class DossierApp(App):
 
         if tab_id == "tab-governance":
             self._load_governance_tab()
+            return
+
+        # A facet reads the same table at either scope, so the tab does not
+        # need to know which one it is showing -- only which facet it holds.
+        facet = FACET_BY_TAB.get(tab_id)
+        owner = getattr(self, "_scope_owner", None)
+        if facet is not None and owner:
+            self._render_facet_at_org(facet, owner)
             return
 
         project = getattr(self, "_current_project", None)
@@ -2820,226 +2825,68 @@ class DossierApp(App):
                         }
     
     def _load_languages_tab(self, project: Project) -> None:
-        """Load languages tab."""
-        langs_table = self.query_one("#languages-table", DataTable)
-        langs_table.clear()
-        
-        with self.session_factory() as session:
-            languages = session.exec(
-                select(ProjectLanguage)
-                .where(ProjectLanguage.project_id == project.id)
-                .order_by(ProjectLanguage.bytes_count.desc())
-            ).all()
-            
-            if not languages:
-                langs_table.add_row("(No language data - sync to fetch)", "-", "-", "-", "-", key="empty")
-            else:
-                for lang in languages:
-                    langs_table.add_row(
-                        lang.language,
-                        lang.file_extensions or "-",
-                        lang.encoding or "-",
-                        f"{lang.bytes_count:,}",
-                        f"{lang.percentage:.1f}%",
-                        key=f"lang-{lang.id}",
-                    )
-    
+        """Render the `languages` facet for one repository.
+
+        The query lives in `dossier.facets`, which the overview reads
+        too. Two queries over one table drift into two vocabularies for
+        the same column, and nothing fails when they do.
+        """
+        self._render_facet_for_project(FACET_BY_TAB["tab-languages"], project)
+
     def _load_branches_tab(self, project: Project) -> None:
-        """Load branches tab."""
-        branches_table = self.query_one("#branches-table", DataTable)
-        branches_table.clear()
-        
-        with self.session_factory() as session:
-            branches = session.exec(
-                select(ProjectBranch)
-                .where(ProjectBranch.project_id == project.id)
-                .order_by(ProjectBranch.is_default.desc(), ProjectBranch.name)
-            ).all()
-            
-            if not branches:
-                branches_table.add_row("(No branch data - sync to fetch)", "-", "-", "-", "-", key="empty")
-            else:
-                for branch in branches:
-                    branch_url = project.github_branch_url(branch.name)
-                    if branch_url:
-                        branch_link = f"[link={branch_url}]🌿 {branch.name}[/]"
-                    else:
-                        branch_link = f"🌿 {branch.name}"
-                    
-                    default_icon = "✓" if branch.is_default else ""
-                    protected_icon = "🔒" if branch.is_protected else ""
-                    commit_msg = branch.commit_message[:40] + "..." if branch.commit_message and len(branch.commit_message) > 40 else (branch.commit_message or "-")
-                    
-                    branches_table.add_row(
-                        branch_link,
-                        default_icon,
-                        protected_icon,
-                        commit_msg,
-                        branch.commit_author or "-",
-                        key=f"branch-{branch.id}",
-                    )
-    
+        """Render the `branches` facet for one repository.
+
+        The query lives in `dossier.facets`, which the overview reads
+        too. Two queries over one table drift into two vocabularies for
+        the same column, and nothing fails when they do.
+        """
+        self._render_facet_for_project(FACET_BY_TAB["tab-branches"], project)
+
     def _load_dependencies_tab(self, project: Project) -> None:
-        """Load dependencies tab."""
-        deps_table = self.query_one("#dependencies-table", DataTable)
-        deps_table.clear()
-        
-        with self.session_factory() as session:
-            dependencies = session.exec(
-                select(ProjectDependency)
-                .where(ProjectDependency.project_id == project.id)
-                .order_by(ProjectDependency.dep_type, ProjectDependency.name)
-            ).all()
-            
-            if not dependencies:
-                deps_table.add_row("(No dependencies - sync to fetch)", "-", "-", "-", key="empty")
-            else:
-                for dep in dependencies:
-                    type_icon = {"runtime": "📦", "dev": "🔧", "optional": "❔", "peer": "🔗"}.get(dep.dep_type, "•")
-                    
-                    if dep.source in ("pyproject.toml", "requirements.txt"):
-                        pkg_link = f"[link=https://pypi.org/project/{dep.name}/]{dep.name}[/]"
-                    elif dep.source == "package.json":
-                        pkg_link = f"[link=https://www.npmjs.com/package/{dep.name}]{dep.name}[/]"
-                    else:
-                        pkg_link = dep.name
-                    
-                    deps_table.add_row(pkg_link, dep.version_spec or "*", f"{type_icon} {dep.dep_type}", dep.source, key=f"dep-{dep.id}")
-    
+        """Render the `dependencies` facet for one repository.
+
+        The query lives in `dossier.facets`, which the overview reads
+        too. Two queries over one table drift into two vocabularies for
+        the same column, and nothing fails when they do.
+        """
+        self._render_facet_for_project(FACET_BY_TAB["tab-dependencies"], project)
+
     def _load_contributors_tab(self, project: Project) -> None:
-        """Load contributors tab."""
-        contrib_table = self.query_one("#contributors-table", DataTable)
-        contrib_table.clear()
-        
-        with self.session_factory() as session:
-            contributors = session.exec(
-                select(ProjectContributor)
-                .where(ProjectContributor.project_id == project.id)
-                .order_by(ProjectContributor.contributions.desc())
-            ).all()
-            
-            if not contributors:
-                contrib_table.add_row("(No contributors - sync to fetch)", "-", "-", key="empty")
-            else:
-                for contrib in contributors:
-                    contrib_table.add_row(
-                        f"👤 {contrib.username}",
-                        str(contrib.contributions),
-                        f"[link={contrib.profile_url}]🔗 GitHub[/]" if contrib.profile_url else "-",
-                        key=f"contrib-{contrib.id}",
-                    )
-    
+        """Render the `contributors` facet for one repository.
+
+        The query lives in `dossier.facets`, which the overview reads
+        too. Two queries over one table drift into two vocabularies for
+        the same column, and nothing fails when they do.
+        """
+        self._render_facet_for_project(FACET_BY_TAB["tab-contributors"], project)
+
     def _load_issues_tab(self, project: Project) -> None:
-        """Load issues tab."""
-        issues_table = self.query_one("#issues-table", DataTable)
-        issues_table.clear()
-        
-        with self.session_factory() as session:
-            issues = session.exec(
-                select(ProjectIssue)
-                .where(ProjectIssue.project_id == project.id)
-                .order_by(ProjectIssue.issue_number.desc())
-            ).all()
-            
-            if not issues:
-                issues_table.add_row("(No issues - sync to fetch)", "-", "-", "-", "-", key="empty")
-            else:
-                for issue in issues:
-                    state_icon = "🟢" if issue.state == "open" else "⚫"
-                    issue_url = project.github_issues_url(issue.issue_number)
-                    issue_link = f"[link={issue_url}]#{issue.issue_number}[/]" if issue_url else f"#{issue.issue_number}"
-                    issues_table.add_row(
-                        issue_link,
-                        issue.title[:50] + ("..." if len(issue.title) > 50 else ""),
-                        f"{state_icon} {issue.state}",
-                        issue.author or "-",
-                        issue.labels[:30] if issue.labels else "-",
-                        key=f"issue-{issue.issue_number}",
-                    )
-    
+        """Render the `issues` facet for one repository.
+
+        The query lives in `dossier.facets`, which the overview reads
+        too. Two queries over one table drift into two vocabularies for
+        the same column, and nothing fails when they do.
+        """
+        self._render_facet_for_project(FACET_BY_TAB["tab-issues"], project)
+
     def _load_prs_tab(self, project: Project) -> None:
-        """Load pull requests tab."""
-        prs_table = self.query_one("#prs-table", DataTable)
-        prs_table.clear()
-        
-        with self.session_factory() as session:
-            prs = session.exec(
-                select(ProjectPullRequest)
-                .where(ProjectPullRequest.project_id == project.id)
-                .order_by(ProjectPullRequest.pr_number.desc())
-            ).all()
-            
-            if not prs:
-                prs_table.add_row("(No PRs - sync to fetch)", "-", "-", "-", "-", "-", key="empty")
-            else:
-                for pr in prs:
-                    if pr.is_merged:
-                        state_display = "🟣 merged"
-                    elif pr.state == "open":
-                        state_display = "🟢 open"
-                    else:
-                        state_display = "🔴 closed"
-                    
-                    if pr.is_draft:
-                        state_display += " 📝"
-                    
-                    pr_url = project.github_pulls_url(pr.pr_number)
-                    pr_link = f"[link={pr_url}]#{pr.pr_number}[/]" if pr_url else f"#{pr.pr_number}"
-                    branch_info = f"{pr.base_branch} ← {pr.head_branch}" if pr.base_branch and pr.head_branch else "-"
-                    if len(branch_info) > 25:
-                        branch_info = branch_info[:22] + "..."
-                    
-                    additions = pr.additions or 0
-                    deletions = pr.deletions or 0
-                    diff_display = f"[green]+{additions}[/] [red]-{deletions}[/]"
-                    
-                    prs_table.add_row(
-                        pr_link, 
-                        pr.title[:40] + ("..." if len(pr.title) > 40 else ""), 
-                        state_display, 
-                        pr.author or "-", 
-                        branch_info, 
-                        diff_display,
-                        key=f"pr-{pr.pr_number}",
-                    )
-    
+        """Render the `prs` facet for one repository.
+
+        The query lives in `dossier.facets`, which the overview reads
+        too. Two queries over one table drift into two vocabularies for
+        the same column, and nothing fails when they do.
+        """
+        self._render_facet_for_project(FACET_BY_TAB["tab-prs"], project)
+
     def _load_releases_tab(self, project: Project) -> None:
-        """Load releases tab."""
-        releases_table = self.query_one("#releases-table", DataTable)
-        releases_table.clear()
-        
-        with self.session_factory() as session:
-            releases = session.exec(
-                select(ProjectRelease)
-                .where(ProjectRelease.project_id == project.id)
-                .order_by(ProjectRelease.release_published_at.desc())
-            ).all()
-            
-            if not releases:
-                releases_table.add_row("(No releases - sync to fetch)", "-", "-", "-", "-", key="empty")
-            else:
-                for release in releases:
-                    release_url = project.github_releases_url(release.tag_name)
-                    tag_link = f"[link={release_url}]🏷️ {release.tag_name}[/]" if release_url else f"🏷️ {release.tag_name}"
-                    
-                    if release.is_draft:
-                        type_display = "📝 draft"
-                    elif release.is_prerelease:
-                        type_display = "⚠️ prerelease"
-                    else:
-                        type_display = "✅ release"
-                    
-                    published = release.release_published_at.strftime("%Y-%m-%d %H:%M") if release.release_published_at else "-"
-                    
-                    releases_table.add_row(
-                        tag_link,
-                        (release.name or release.tag_name)[:35] + ("..." if release.name and len(release.name) > 35 else ""),
-                        release.author or "-",
-                        type_display,
-                        published,
-                        key=f"release-{release.id}",
-                    )
-    
+        """Render the `releases` facet for one repository.
+
+        The query lives in `dossier.facets`, which the overview reads
+        too. Two queries over one table drift into two vocabularies for
+        the same column, and nothing fails when they do.
+        """
+        self._render_facet_for_project(FACET_BY_TAB["tab-releases"], project)
+
     @staticmethod
     def _disk_size(count) -> str:
         """Bytes at a readable scale, never rounded to nothing.
@@ -5993,11 +5840,99 @@ class DossierApp(App):
         except Exception:
             pass
 
+    @on(DataTable.RowSelected, ".overview-section")
+    def on_overview_row_selected(self, event: DataTable.RowSelected) -> None:
+        """A row in the overview opens the tab holding its detail.
+
+        This is the link between the two axes: the overview says how much of
+        something there is across the org, and the tab says what it is for one
+        repository. Without the route they are two readings a person has to
+        reconcile by hand.
+        """
+        table_id = event.data_table.id or ""
+        panel = self.query_one(OverviewPanel)
+        section = panel.section_for(table_id)
+        if section is None:
+            return
+        tab, repo = panel.target_for(section, str(event.row_key.value))
+        if tab is None:
+            return
+
+        # The tab is activated before the project is selected. Selecting first
+        # and activating second looked more natural and did not work: selecting
+        # runs a refresh that settles after this handler returns, and the tab
+        # set during it was overwritten by the state the refresh had captured.
+        self._activate_tab(tab)
+        if repo:
+            with self.session_factory() as session:
+                project = session.exec(
+                    select(Project).where(
+                        (Project.full_name == repo) | (Project.name == repo)
+                    )
+                ).first()
+                if project is not None:
+                    session.expunge(project)
+                    self.selected_project = project
+                    self.show_project_details(project)
+        self._load_tab_data(tab)
+
+        # Focus follows the reader to the destination. Without this the tab
+        # switches and switches back: focus is still on the overview's table,
+        # which lives in the overview pane, and the pane holding focus wins.
+        facet = FACET_BY_TAB.get(tab)
+        if facet is not None:
+            try:
+                self.query_one(f"#{facet.table}", DataTable).focus()
+            except Exception:
+                pass
+
+    def _render_section(self, table_id: str, section) -> None:
+        """Draw a `Section` into a `DataTable`, whatever scope produced it.
+
+        Columns are reset rather than assumed: the same table shows an org
+        reading and a project reading of one facet, and those have different
+        widths. A table whose columns are declared once can only ever show one
+        of them.
+        """
+        table = self.query_one(f"#{table_id}", DataTable)
+        table.clear(columns=True)
+        table.add_columns(*section.headers)
+        if not section.rows:
+            table.add_row(*["--"] * len(section.headers), key="empty")
+            return
+        for index, row in enumerate(section.rows):
+            table.add_row(*row, key=f"{table_id}-{index}")
+
+    def _render_facet_at_org(self, facet, owner: str) -> None:
+        from dossier.overview import scope_ids
+
+        with self.session_factory() as session:
+            ids = scope_ids(session, owner)
+            section = facet.at(session, ids=ids)
+        self._render_section(facet.table, section)
+
+    def _render_facet_for_project(self, facet, project) -> None:
+        with self.session_factory() as session:
+            section = facet.at(session, project=project)
+        self._render_section(facet.table, section)
+
     def show_org_overview(self, owner: str) -> None:
-        """Scope the overview to one owner and bring it to the front."""
+        """Select the organisation itself, and show it.
+
+        An owner is a scope, not a heading: every facet tab can be read across
+        it exactly as it can be read for one repository, and they read it
+        through the same facet. So selecting an owner clears the project
+        selection rather than leaving the tabs describing whichever repository
+        was chosen before.
+        """
+        self._scope_owner = owner
+        self._current_project = None
+        self._current_project_id = None
+        self._tabs_loaded = set()
         panel = self.query_one(OverviewPanel)
         panel.set_owner(owner)
         self._activate_tab("tab-overview")
+        self._load_tab_data("tab-overview")
 
     def _filter_matches_anything(self) -> bool:
         """Whether the current filters select at least one project."""
