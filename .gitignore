@@ -85,6 +85,11 @@ temp/
 *.temp
 
 docs/screenshots/*
+# The ring's recordings are written by the ordinary test run and committed, so
+# a change to the ring shows up in `git status` rather than silently diverging
+# from the README that embeds them. The other screenshots here are force-added
+# by hand, which means a regenerated one is invisible until somebody remembers.
+!docs/screenshots/rad_ring_*.svg
 !docs/screenshots/dashboard_help.svg
 !docs/screenshots/dashboard_settings.svg
 !docs/screenshots/tab_dossier_wide.svg

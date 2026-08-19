@@ -53,6 +53,42 @@ uv run dossier github sync-user YOUR_USERNAME && uv run dossier dashboard
 - **Keyboard-driven speed** - Consistent TUI layouts you can navigate blindfolded
 
 
+## One menu, everywhere: the rad ring
+
+Press **`m`** anywhere in the dashboard. A ring opens over whatever you were
+looking at, with the same four verbs every time:
+
+**Go** somewhere · **Do** something · **Show** a different slice · **Reach** into another system
+
+<p align="center">
+  <img src="docs/screenshots/rad_ring_top_level.svg" alt="The rad ring open over the dashboard, showing Go, Do, Show and Reach" width="800">
+</p>
+
+The four verbs never change. What sits under them does — `Go` offers the views
+this screen has, `Do` offers what you can do to the thing selected. So you learn
+the menu once instead of learning each screen's menu.
+
+<p align="center">
+  <img src="docs/screenshots/rad_ring_one_level_in.svg" alt="One level into Go, showing Overview, Deltas and the other views" width="800">
+</p>
+
+Arrow keys or `Tab` move around the ring, `Enter` or `Space` chooses, `Escape`
+backs out a level and then closes. The
+dashboard stays visible behind it, because a menu that hides the thing you are
+acting on makes you remember what you were looking at.
+
+It counts what it costs you. Every choice records how many keystrokes it took
+from opening the menu to committing, so a menu that grows awkward shows up as a
+number rather than as a vague feeling.
+
+This is an implementation of [rad](https://github.com/quaternionmedia/rad),
+Quaternion Media's interaction contract, in a terminal. The same four verbs are
+meant to work the same way in a browser.
+
+**Both screenshots above are produced by the test suite**, by the tests that
+assert the ring behaves — so they cannot show something the code stopped doing.
+
+
 ## ✨ Features
 
 | Feature | Description |
