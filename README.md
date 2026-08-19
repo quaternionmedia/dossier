@@ -1,7 +1,11 @@
 # Dossier
 
-> **Decentralized project tracking and delta-centric change management for cross-domain teams.** Replace proprietary tools like Jira with a data-modeled, cache-merge architecture that works offline-first and syncs across repos, teams, and organizations.
-> Primary goal: standardize the flow of project information. Secondary goal: manage deltas through linking, composition, and human-in-the-loop updates.
+> **Keep track of what every project is doing, without asking anybody.**
+> Dossier reads your repositories directly and shows one view of them: what is in
+> flight, who is working where, and where two systems disagree about the same thing.
+>
+> It runs on your machine and keeps its own database, so it works whether or not
+> anybody remembered to update a ticket, and whether or not you are online.
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
