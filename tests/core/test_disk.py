@@ -129,6 +129,24 @@ def test_a_checkout_without_the_tooling_names_what_is_absent(tmp_path: Path) -> 
     assert "branch without the disk tooling" in reason
 
 
+def corpus_checkout() -> Path:
+    """The corpus this repository can actually reach.
+
+    Preferring a sibling checkout and skipping without one made these tests
+    depend on how somebody arranged their directories. In a fresh clone they
+    skipped -- and a skipped test blocks a version tag, because a test that
+    skips contributes nothing to the automated-validation claim. The clone
+    always carries the corpus as a submodule at `governance/qm`, so there is a
+    copy to read whatever else is on the machine.
+    """
+    from tests.structural import repo_root
+
+    sibling = repo_root().parent / "qm"
+    if (sibling / disk.TOOLS["reclaim"]).exists():
+        return sibling
+    return repo_root() / "governance" / "qm"
+
+
 def test_a_complete_checkout_is_permitted(tmp_path: Path) -> None:
     assert disk.can_measure(fake_corpus(tmp_path)) is None
 
@@ -140,11 +158,8 @@ def test_the_real_corpus_beside_this_one_carries_the_tooling() -> None:
     the tooling: that is a true state of somebody's machine, not a defect in
     this suite.
     """
-    root = Path("..") / "qm"
-    if not root.exists():
-        pytest.skip("no corpus checkout beside this one")
-    if disk.can_measure(root) is not None:
-        pytest.skip(f"the corpus beside this one cannot run it: {disk.can_measure(root)}")
+    root = corpus_checkout()
+    assert disk.can_measure(root) is None, disk.can_measure(root)
     assert all((root / name).exists() for name in CORPUS_TOOLS)
 
 
@@ -269,10 +284,7 @@ def test_the_cheapest_tier_is_the_default_on_this_side_too(tmp_path: Path) -> No
 def test_the_corpus_reclaimer_also_defaults_to_a_dry_run() -> None:
     """The other half of the pair. If the corpus ever flips its default, the
     wrapper's caution becomes decorative and this is where that is noticed."""
-    root = Path("..") / "qm"
-    reclaimer = root / disk.TOOLS["reclaim"]
-    if not reclaimer.exists():
-        pytest.skip("no corpus checkout beside this one")
+    reclaimer = corpus_checkout() / disk.TOOLS["reclaim"]
     result = subprocess.run(
         [sys.executable, str(reclaimer), "--help"],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
