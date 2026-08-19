@@ -368,3 +368,24 @@ class ScreenshotHelper:
 def screenshot_helper(screenshots_enabled):
     """Fixture providing screenshot helper for TUI tests."""
     return ScreenshotHelper(screenshots_enabled, SCREENSHOTS_DIR)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_dossier_home(tmp_path_factory):
+    """Keep the suite out of the operator's `~/.dossier`.
+
+    The TUI tests drive the real app, and the app writes its view state on
+    exit. Without this the suite rewrote a real person's dashboard: last
+    project, active tab, and a synced filter that afterwards matched nothing,
+    so their sidebar came up empty with no visible cause. Autouse and
+    session-scoped because the leak is in the app, not in any one test -- an
+    opt-in fixture only protects the tests that remember it.
+    """
+    home = tmp_path_factory.mktemp("dossier-home")
+    previous = os.environ.get("DOSSIER_HOME")
+    os.environ["DOSSIER_HOME"] = str(home)
+    yield home
+    if previous is None:
+        os.environ.pop("DOSSIER_HOME", None)
+    else:
+        os.environ["DOSSIER_HOME"] = previous

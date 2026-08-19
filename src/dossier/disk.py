@@ -73,7 +73,9 @@ DOCUMENT_NAME = "disk-status.json"
 
 def document_path() -> Path:
     """The machine-scoped path the document is written to and read from."""
-    return Path.home() / ".dossier" / DOCUMENT_NAME
+    from dossier.config import dossier_home
+
+    return dossier_home() / DOCUMENT_NAME
 
 
 def inside_a_repository(path: Path) -> Optional[Path]:

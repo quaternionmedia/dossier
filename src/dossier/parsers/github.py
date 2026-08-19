@@ -195,6 +195,11 @@ class GitHubRepo:
     topics: list[str] | None = None
     language: Optional[str] = None
     stars: int = 0
+    # A fork carries upstream's whole history: its contributors, branches and
+    # dependencies are real, and none of them are the org's. Without this the
+    # aggregates counted a fork's upstream authors as organisation members.
+    is_fork: bool = False
+    is_archived: bool = False
     
     @property
     def full_name(self) -> str:
@@ -384,6 +389,8 @@ class GitHubClient:
             topics=data.get("topics", []),
             language=data.get("language"),
             stars=data.get("stargazers_count", 0),
+            is_fork=data.get("fork", False),
+            is_archived=data.get("archived", False),
         )
     
     def get_repo_from_url(self, url: str) -> GitHubRepo:
@@ -541,6 +548,8 @@ class GitHubClient:
                     topics=item.get("topics", []),
                     language=item.get("language"),
                     stars=item.get("stargazers_count", 0),
+                    is_fork=item.get("fork", False),
+                    is_archived=item.get("archived", False),
                 )
             )
         
@@ -593,6 +602,8 @@ class GitHubClient:
                         topics=item.get("topics", []),
                         language=item.get("language"),
                         stars=item.get("stargazers_count", 0),
+                        is_fork=item.get("fork", False),
+                        is_archived=item.get("archived", False),
                     )
                 )
             
@@ -650,6 +661,8 @@ class GitHubClient:
                         topics=item.get("topics", []),
                         language=item.get("language"),
                         stars=item.get("stargazers_count", 0),
+                        is_fork=item.get("fork", False),
+                        is_archived=item.get("archived", False),
                     )
                 )
             

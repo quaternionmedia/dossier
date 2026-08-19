@@ -60,6 +60,13 @@ class Project(SQLModel, table=True):
     github_repo: Optional[str] = None   # Repository name
     github_stars: Optional[int] = None
     github_language: Optional[str] = None
+
+    # A fork's contributors, branches and dependencies are upstream's. They are
+    # real rows and they are not this organisation's work, so org aggregates
+    # exclude forks by default rather than deleting the data.
+    is_fork: bool = Field(default=False)
+    is_archived: bool = Field(default=False)
+
     last_synced_at: Optional[datetime] = None
     
     created_at: datetime = Field(default_factory=utcnow)

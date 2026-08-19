@@ -1,0 +1,136 @@
+"""The org overview: the same facts the tabs hold, read across every repository.
+
+WHY THE SECTIONS ARE TABLES AND NOT A PICTURE. Each one comes from a facet in
+`dossier.facets`, and that facet also fills a tab. Rendering the section as a
+`DataTable` means a row can be selected, and selecting it opens the tab holding
+that row's detail -- the vertical axis of the screen and the horizontal one are
+then the same data with a route between them, rather than two readings that
+happen to agree.
+
+Sections with no facet -- governance posture, the phase board, what wants
+attention -- exist only at org scope and are drawn the same way. Selecting one
+of their rows does nothing, which is honest: there is no per-repository tab
+that holds a phase board.
+
+COLOURS COME FROM RAD'S TOKENS. Nothing here names a colour; it asks
+`dossier.rad.tokens` for its default, and the section renderer used by the
+intersections panel asks it for roles.
+"""
+
+from __future__ import annotations
+
+from textual.containers import VerticalScroll
+from textual.widgets import DataTable, Static
+
+from dossier.facets import BY_TITLE as FACET_BY_TITLE
+from dossier.overview import OrgOverview, Section, build
+from dossier.rad.tokens import DEFAULT_THEME
+
+# The column a row's repository is found in, when it has one. Facets put the
+# repository first by convention; a section whose first column is not a repo
+# declares so by not appearing here.
+REPO_FIRST = {"repo"}
+
+
+class OverviewPanel(VerticalScroll):
+    """Reads on mount and on demand, never on a timer.
+
+    A timer would re-query behind a reader part way down the page, and every
+    figure is `as last synced` regardless -- so an unasked-for refresh buys
+    nothing and moves the page under them.
+    """
+
+    def __init__(self, session_factory, theme: str = DEFAULT_THEME,
+                 owner: str | None = None, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.session_factory = session_factory
+        self.theme_name = theme
+        self.owner = owner
+        self.overview: OrgOverview | None = None
+
+    # -- content ----------------------------------------------------------
+
+    def compose(self):
+        # Read here rather than in `on_mount`: compose runs first, so a panel
+        # that waited for mount would draw an empty page and fill it a frame
+        # later -- which is what a reader sees, and what a test sees too.
+        if self.overview is None:
+            self.overview = self._read()
+
+        yield Static(
+            f"[bold]{self.overview.scope}[/bold]   [dim]{self.overview.generated_from}[/dim]",
+            id="overview-scope",
+        )
+        yield Static(self._masthead_markup(), id="overview-masthead")
+
+        for index, section in enumerate(self.overview.sections):
+            linked = section.title in FACET_BY_TITLE
+            suffix = "   [dim](select a row to open it)[/dim]" if linked else ""
+            yield Static(f"[bold]{section.title.upper()}[/bold]{suffix}",
+                         classes="overview-heading")
+            table = DataTable(id=f"overview-section-{index}", zebra_stripes=False,
+                              classes="overview-section")
+            table.cursor_type = "row"
+            # Filled before yielding: the rows are known now, and populating on
+            # mount means one frame of an empty table for every section.
+            table.add_columns(*section.headers)
+            for row_index, row in enumerate(section.rows):
+                table.add_row(*row, key=f"{index}:{row_index}")
+            yield table
+            if section.note:
+                yield Static(f"[dim]{section.note}[/dim]", classes="overview-note")
+
+    def _masthead_markup(self) -> str:
+        cells = []
+        for cell in self.overview.masthead:
+            note = f"  [dim]{cell.note}[/dim]" if cell.note else ""
+            cells.append(f"[bold]{cell.value}[/bold] {cell.label}{note}")
+        return "\n".join(cells)
+
+    def _read(self) -> OrgOverview:
+        with self.session_factory() as session:
+            return build(session, owner=self.owner)
+
+    def set_owner(self, owner: str | None) -> None:
+        """Scope to one owner and redraw. Unscoped when `owner` is None."""
+        self.owner = owner
+        self.refresh_overview()
+
+    def refresh_overview(self) -> None:
+        """Rebuild from the database. Safe to call from a binding or a button."""
+        self.overview = self._read()
+        if self.is_mounted:
+            self.recompose()
+
+    # `role` is read per render rather than stored, so a theme change needs no
+    # invalidation step here.
+
+    # -- the link ---------------------------------------------------------
+
+    def section_for(self, table_id: str) -> Section | None:
+        if self.overview is None or not table_id.startswith("overview-section-"):
+            return None
+        index = int(table_id.rsplit("-", 1)[1])
+        if index >= len(self.overview.sections):
+            return None
+        return self.overview.sections[index]
+
+    def target_for(self, section: Section, row_key: str) -> tuple[str | None, str | None]:
+        """The tab a row links to, and the repository it names, if any.
+
+        Returns `(None, None)` for a section with no facet -- an org-only view
+        has no per-repository tab to open, and inventing one would send a
+        reader somewhere that does not answer their question.
+        """
+        facet = FACET_BY_TITLE.get(section.title)
+        if facet is None:
+            return None, None
+        try:
+            _, row_index = (int(part) for part in row_key.split(":"))
+        except (ValueError, AttributeError):
+            return facet.tab, None
+        if row_index >= len(section.rows):
+            return facet.tab, None
+        row = section.rows[row_index]
+        repo = row[0] if section.headers and section.headers[0] in REPO_FIRST else None
+        return facet.tab, repo
