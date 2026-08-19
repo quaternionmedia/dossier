@@ -210,3 +210,38 @@ def test_the_isolation_is_active_for_this_suite():
     # directory lives *inside* it, so that question answers no for a correctly
     # isolated run. The claim is that the suite is not using the real config.
     assert DossierConfig.get_config_path() != Path.home() / ".dossier" / "config.json"
+
+
+# --- routing around the tag policy -------------------------------------------
+
+
+def test_the_determinism_half_of_the_tag_claim_is_wired():
+    """`tag-claims.yml` reads the annotation and says in its own header that it
+    does not run the tests. Without a project-owned job doing that, the third
+    claim a tag makes -- deterministic automated validation passed -- has
+    nothing behind it, and the repository looks gated because two of three
+    checks exist."""
+    workflows = Path(".github/workflows")
+    wired = [
+        path for path in workflows.glob("*.yml")
+        if "--test-output" in path.read_text(encoding="utf-8")
+    ]
+    assert wired, "no workflow feeds a captured run to check_tag_claims.py"
+
+
+def test_the_captured_run_is_redirected_and_not_piped():
+    """A pipe replaces the exit code with the last command's, so a failing
+    suite would reach the checker as a file to read rather than a failure."""
+    for path in Path(".github/workflows").glob("*.yml"):
+        text = path.read_text(encoding="utf-8")
+        if "--test-output" not in text:
+            continue
+        assert "| tee" not in text, f"{path.name} pipes the run through tee"
+
+
+def test_the_seed_tag_workflow_is_not_forked():
+    """It is copied verbatim so a fix to the shared rule arrives on the next pin
+    bump. A local edit would be clobbered by propagation or refuse it."""
+    ours = Path(".github/workflows/tag-claims.yml").read_text(encoding="utf-8")
+    seed = Path("governance/qm/project-seed/ci/tag-claims.yml").read_text(encoding="utf-8")
+    assert ours == seed, "tag-claims.yml has diverged from the seed"
