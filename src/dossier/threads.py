@@ -38,7 +38,19 @@ from typing import Any
 # be pointed at another *machine* is how "served to this machine only" stops
 # being true. `DOSSIER_HARNESS_PORT` moves the port; nothing moves the host.
 HOST = "127.0.0.1"
-DEFAULT_PORT = 8000
+# THE PORT THE HARNESS ACTUALLY SERVES ON, and it is a second copy of a
+# constant this repository does not own -- `qmcp/config.py` has `port: int =
+# 3333`. It cannot be imported: the two are separate repositories with no
+# dependency between them, and giving the panel one would put the harness's
+# code in the panel's install for the sake of an integer.
+#
+# It was 8000, and nothing noticed. The panel reported "the harness is not
+# answering on http://127.0.0.1:8000" while the harness was serving 203 threads
+# on 3333, and the message was accurate about the address it tried and useless
+# about the problem. `tests/e2e/test_seam_port.py` reads qmcp's own config when
+# the sibling clone is present and fails when these two disagree, which is the
+# only way a copied constant stays true.
+DEFAULT_PORT = 3333
 
 
 def base_url() -> str:

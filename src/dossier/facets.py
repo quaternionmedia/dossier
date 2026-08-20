@@ -569,30 +569,64 @@ def waiting_project(session: Any, project: Any, limit: int) -> Section:
 
 # --- the harness's thread archive --------------------------------------------
 
-THREADS_COLUMNS = ("thread", "source", "turns", "last seen", "state")
+THREADS_COLUMNS = ("delta", "title", "speaks as", "phase", "turns", "state")
+
+
+def _thread_state(row: Any) -> str:
+    """What has happened to a conversation since it was first archived.
+
+    `disagrees` is a finding rather than an inventory entry: an export that
+    contradicts an earlier record of itself means one of the two readings is
+    wrong, and nothing here can say which.
+    """
+    if row.get("diverged"):
+        return "disagrees"
+    return "grew" if (row.get("changes") or 0) > 1 else "new"
+
+
+def _delta_name(row: Any) -> str:
+    """The delta a thread is, named by the harness that owns it.
+
+    **NOT DERIVED HERE.** The address arrives on the row because
+    `qmcp.threads.service.as_delta_row` builds it from the same function that
+    builds the delta payload. Recomputing `thread-{id}` on this side would be a
+    second copy of somebody else's naming rule, and the two would agree right
+    up until the day the prefix changed.
+
+    A harness that predates the field sends nothing, and that reads as `--`
+    rather than as a name this side invented. Unknown is a value.
+    """
+    address = row.get("address")
+    return address.rsplit("/", 1)[-1] if address else "--"
 
 
 def _threads_rows(archive: Any) -> tuple[tuple[str, ...], ...]:
-    """Conversations the harness has archived, ones that disagree first.
+    """Conversations the harness has archived, as deltas, disagreements first.
+
+    **THE DELTA VOCABULARY, NOT AN INVENTORY.** A thread is a delta -- that is
+    `governance/qm/records/DRAFT-deltas-compose.md` and the thread-archive work
+    that followed it -- so this reads in the same words as every other board:
+    an address, the level it speaks at, a phase, and the evidence under it.
 
     A thread whose export contradicts an earlier record of itself is the only
-    row here that is a finding rather than an inventory entry, so it sorts
-    first. A page that buried it under four hundred rows would be an inventory
-    with a finding hidden in it.
+    row here that is a finding rather than an entry, so it sorts first. A page
+    that buried it under four hundred rows would be an inventory with a finding
+    hidden in it.
     """
-    rows = sorted(
-        archive.threads,
-        key=lambda row: (not row.get("diverged"), row.get("last_seen") or ""),
-        reverse=False,
-    )
-    rows = sorted(rows, key=lambda row: not row.get("diverged"))
+    rows = sorted(archive.threads, key=lambda row: not row.get("diverged"))
     return tuple(
         (
-            _trim(row.get("title") or row.get("id"), 40),
-            _trim(row.get("source"), 12),
+            # THE NAME IS NOT TRIMMED AND THE TITLE IS. What is addressable
+            # stays whole; what is descriptive gets cut. A delta name trimmed
+            # to `thread-0ced522c-69a1-428c...` cannot be copied, related or
+            # looked up, which is the whole of what a name is for -- whereas a
+            # cut title still reads as the conversation it names.
+            _delta_name(row),
+            _trim(row.get("title") or row.get("id"), 30),
+            _trim(row.get("perspective") or "--", 20),
+            _trim(row.get("phase") or "--", 12),
             str(row.get("turns", 0)),
-            _trim(row.get("last_seen"), 19),
-            "disagrees" if row.get("diverged") else "",
+            _thread_state(row),
         )
         for row in rows
     )
@@ -615,9 +649,12 @@ def threads_org(session: Any, ids, limit: int) -> Section:
 
     return Section(
         "Thread archive", THREADS_COLUMNS, _threads_rows(archive)[:limit],
-        note=(archive.note + " Conversations that disagree with an earlier "
-              "record of themselves are listed first and have not been "
-              "repaired."),
+        note=(archive.note + " Every thread enters at `brainstorm` and stays "
+              "there: nothing automatic can establish that a conversation was "
+              "read and acted on, so advancing one is a person's act. The "
+              "address and the phase are the harness's, not this panel's. "
+              "Conversations that disagree with an earlier record of "
+              "themselves are listed first and have not been repaired."),
     )
 
 

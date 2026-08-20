@@ -144,14 +144,19 @@ def test_threads_that_disagree_are_listed_first(monkeypatch):
         "generated_at": "2026-08-20T00:00:00Z",
         "totals": {"threads": 3},
         "threads": [
-            {"id": "a", "source": "claude", "turns": 1, "last_seen": "2026-08-20"},
+            {"id": "a", "source": "claude", "turns": 1, "last_seen": "2026-08-20",
+             "address": "org/qmcp/delta/thread-a", "title": "Ordinary"},
             {"id": "b", "source": "claude", "turns": 1, "last_seen": "2026-08-19",
+             "address": "org/qmcp/delta/thread-b", "title": "Contradicts itself",
              "diverged": True},
-            {"id": "c", "source": "claude", "turns": 1, "last_seen": "2026-08-18"},
+            {"id": "c", "source": "claude", "turns": 1, "last_seen": "2026-08-18",
+             "address": "org/qmcp/delta/thread-c", "title": "Also ordinary"},
         ],
     }))
     section = threads_org(None, None, 10)
-    assert section.rows[0][0] == "b"
+    # Column 0 is the delta's name, not its title: this table reads in the
+    # delta vocabulary now. The name comes from the address the harness sends.
+    assert section.rows[0][0] == "thread-b"
     assert section.rows[0][-1] == "disagrees"
 
 
