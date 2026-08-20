@@ -6,7 +6,7 @@ invocations, each one addressed as `owner/repo/invocation/<id>`. Nothing here
 imports qmcp and nothing there imports dossier -- coupling them would mean
 neither ships without the other, which is the opposite of a pair.
 
-TWO TABLES, BECAUSE THEY ARE TWO DIFFERENT CLAIMS.
+THREE TABLES, BECAUSE THEY ARE THREE DIFFERENT CLAIMS.
 
   * `HarnessSnapshot` holds the figures the harness reported *about itself* at
     one moment: how many invocations it has run, how many failed, how many
@@ -15,6 +15,12 @@ TWO TABLES, BECAUSE THEY ARE TWO DIFFERENT CLAIMS.
     because the payload carries only the recent ones.
   * `HarnessInvocation` holds the rows themselves, keyed by address, so an
     invocation seen twice updates rather than duplicating.
+
+  * `HarnessAsk` holds the human-in-the-loop queue, keyed by address. The
+    snapshot's `human_requests` says *how many* are outstanding; this says
+    *which*, with the prompt and the options, so a person reading the control
+    panel can see the question rather than a number. Until this existed the
+    count was all that crossed, and a count is not something anybody can answer.
 
 Storing the totals and calling them derived would be a second, wrong figure;
 storing only the rows would silently shrink every count to the size of the
@@ -84,3 +90,49 @@ class HarnessInvocation(SQLModel, table=True):
     ran_at: Optional[str] = None
 
     loaded_at: datetime = Field(default_factory=utcnow)
+
+
+class HarnessAsk(SQLModel, table=True):
+    """One question the harness put to a person.
+
+    Answered rows are kept rather than deleted: what was asked and what was
+    said is the audit trail, and a queue that forgets its answers cannot show
+    anybody why something was decided.
+
+    NOTHING HERE ANSWERS ANYTHING. This is the control panel's copy of a queue
+    the harness owns. Writing an answer into this table would make two systems
+    believe they hold the same authority over one row -- the answer goes back
+    across the seam as a payload, exactly as the question came.
+    """
+
+    __tablename__ = "harness_ask"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    # The join. `owner/repo/ask/<id>` is the same string on both sides.
+    address: str = Field(index=True, unique=True)
+    project: str = Field(index=True)
+
+    request_id: str = Field(index=True)
+    request_type: Optional[str] = None
+    prompt: Optional[str] = None
+
+    # Stored as the payload sent them, newline-joined. A list column would be
+    # a second encoding to keep in step for a field nothing queries.
+    options: Optional[str] = None
+
+    status: Optional[str] = None
+    asked_at: Optional[str] = None
+
+    # None while outstanding. The presence of an answer is what `outstanding`
+    # means here -- not the status string, which is the harness's own word and
+    # can lag.
+    answered_with: Optional[str] = None
+    answered_by: Optional[str] = None
+    answered_at: Optional[str] = None
+
+    loaded_at: datetime = Field(default_factory=utcnow)
+
+    @property
+    def outstanding(self) -> bool:
+        return self.answered_with is None

@@ -266,29 +266,110 @@ def test_loading_a_list_is_refused(tmp_path: Path):
 # --- the exit status, which a scheduler is the only reader of ----------------
 
 
-def _ingest(tmp_path, entry) -> int:
-    """Run the real CLI against one contract case; return its exit status."""
+def _ingest(tmp_path, entry, monkeypatch) -> int:
+    """Run the real CLI against one contract case, in a database of its own.
+
+    THE FIRST VERSION OF THIS HELPER NAMED NO DATABASE, so it ran against
+    whichever `dossier.db` was in the working directory -- the operator's own.
+    It passed for a while because that database happened to have every table
+    the reader touches, and went red the moment one of them did not. A test
+    that reads real data is wrong even when it only reads.
+    """
+    import importlib
+
     from click.testing import CliRunner
 
-    from dossier.cli import cli
+    monkeypatch.setenv("DOSSIER_DATABASE_URL",
+                       f"sqlite:///{(tmp_path / 'ingest.db').as_posix()}")
+    from dossier import cli as cli_module
+    cli_module = importlib.reload(cli_module)
+
+    runner = CliRunner()
+    assert runner.invoke(cli_module.cli, ["db", "upgrade"]).exit_code == 0
+    assert runner.invoke(
+        cli_module.cli, ["projects", "add", "quaternionmedia/qmcp"]).exit_code == 0
 
     payload_file = tmp_path / "payload.json"
     payload_file.write_text(json.dumps(entry["payload"]), encoding="utf-8")
-    return CliRunner().invoke(
-        cli, ["harness", "ingest", str(payload_file)]).exit_code
+    try:
+        return runner.invoke(
+            cli_module.cli, ["harness", "ingest", str(payload_file)]).exit_code
+    finally:
+        monkeypatch.delenv("DOSSIER_DATABASE_URL", raising=False)
+        importlib.reload(cli_module)
 
 
-def test_a_refused_payload_exits_non_zero(tmp_path):
+def test_a_refused_payload_exits_non_zero(tmp_path, monkeypatch):
     """It exited 0, printed the refusal, and reported success to its caller.
 
     Nothing was written, which was right. But a scheduled ingest of an
     unreadable harness is exactly the case nobody is watching, and an exit
     status of 0 is what that caller records.
     """
-    assert _ingest(tmp_path, case("unrelated tables", whole=True)) == 1
+    assert _ingest(tmp_path, case("unrelated tables", whole=True), monkeypatch) == 1
 
 
-def test_a_readable_payload_exits_zero(tmp_path):
+def test_a_readable_payload_exits_zero(tmp_path, monkeypatch):
     """The other half of the pair. A refusal that fired on everything would be
     as useless as one that fired on nothing."""
-    assert _ingest(tmp_path, case("has run things", whole=True)) == 0
+    assert _ingest(tmp_path, case("has run things", whole=True), monkeypatch) == 0
+
+
+# --- the queue, which used to cross as a count -------------------------------
+
+
+def test_the_queue_crosses_as_addressed_rows(session):
+    """`human_requests: 1` said one thing waited; it never said which.
+
+    A count is not something anybody can answer, so a control panel built on it
+    could report the queue and never show it.
+    """
+    document = payload()
+    rows = harness.asks_of(document)
+    assert rows, "the contract's busy case carries questions"
+    assert all(row["address"].split("/")[2] == "ask" for row in rows)
+    assert all(row["prompt"] for row in rows)
+
+
+def test_outstanding_is_read_from_the_answer_not_the_status(session):
+    """The status is the harness's own word and can lag a response.
+
+    Mutation: filter on `status == "PENDING"` instead and this fails, because
+    the contract carries an answered row whose status the harness never moved.
+    """
+    document = payload()
+    outstanding = harness.outstanding_of(document)
+    assert outstanding, "the contract carries one unanswered question"
+    assert all(row["answered_with"] is None for row in outstanding)
+    assert len(outstanding) < len(harness.asks_of(document)), (
+        "and one answered, so the two are not the same list"
+    )
+
+
+def test_a_question_without_an_address_is_not_stored(session):
+    """Same rule as an invocation: an invented identity will not match itself."""
+    document = dict(payload(), waiting=[{"prompt": "no address"},
+                                        {"address": "a/b/ask/x", "prompt": "ok"}])
+    assert [row["address"] for row in harness.asks_of(document)] == ["a/b/ask/x"]
+
+
+def test_a_payload_with_no_queue_is_read_as_before(session):
+    """Absent is not empty. A schema-2 payload predates the queue entirely."""
+    document = dict(payload())
+    document.pop("waiting", None)
+    assert harness.asks_of(document) == []
+    assert [v.state for v in harness.plan(document, lookup_for(session))][0] == "new"
+
+
+def test_the_queue_is_only_planned_when_the_caller_can_look_it_up(session):
+    """`lookup_ask` is optional so an older database keeps working.
+
+    Without it the rows are reported on by nobody, which is honest; the failure
+    to avoid is a caller that could have stored them and silently did not.
+    """
+    document = payload()
+    without = harness.plan(document, lookup_for(session))
+    with_queue = harness.plan(document, lookup_for(session), lambda address: None)
+    assert len(with_queue) > len(without)
+    assert any("/ask/" in v.subject for v in with_queue)
+    assert not any("/ask/" in v.subject for v in without)

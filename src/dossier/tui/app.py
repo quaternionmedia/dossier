@@ -950,6 +950,12 @@ class DossierApp(App):
                     # both sides.
                     with TabPane("Harness", id="tab-harness"):
                         yield DataTable(id="harness-table")
+                    # Its own tab rather than a second table under Harness:
+                    # this is the one thing on the screen that is waiting for
+                    # the reader, and a queue somebody has to go looking for is
+                    # a queue nobody empties.
+                    with TabPane("Waiting", id="tab-waiting"):
+                        yield DataTable(id="waiting-table")
                     with TabPane("Governance", id="tab-governance"):
                         with Vertical():
                             yield Static("", id="governance-age")

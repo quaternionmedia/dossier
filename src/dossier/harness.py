@@ -20,6 +20,13 @@ NOTHING IS WRITTEN WITHOUT `--write`, and nothing is ever deleted. An
 invocation absent from a payload is one this payload did not mention, not one
 that was removed -- the payload is an excerpt by construction.
 
+THE QUEUE CROSSES AS ROWS. `waiting` carries one entry per question the
+harness put to a person, addressed as `owner/repo/ask/<id>`, with its prompt,
+its options and its answer if it has one. Before that only the counts crossed,
+so this side could say one thing was outstanding and never which -- and a count
+is not something anybody can answer. A payload without `waiting` is a schema-2
+payload and is read as before; the rows are absent, not empty.
+
 A TOTAL THE HARNESS COULD NOT TAKE IS REFUSED, NOT STORED AS ZERO. Schema 2
 carries `{"unknown": "<reason>"}` where a count could not be established, and
 this reader refuses the whole payload rather than recording a harness that has
@@ -106,6 +113,25 @@ def unknown_totals(payload: dict) -> list[str]:
     return found
 
 
+def asks_of(payload: dict) -> list[dict]:
+    """The queue rows, ignoring any without an address.
+
+    Same rule as `invocations_of`: a row that cannot be named cannot be matched
+    to itself next time, and an invented identity is worse than a dropped row.
+    """
+    return [row for row in payload.get("waiting") or [] if row.get("address")]
+
+
+def outstanding_of(payload: dict) -> list[dict]:
+    """The questions still waiting on a person.
+
+    Read from whether an answer is present, not from the harness's `status`
+    string. The status is the harness's own word for it and can lag a response
+    that has already arrived; the answer either is there or is not.
+    """
+    return [row for row in asks_of(payload) if not row.get("answered_with")]
+
+
 def totals_of(payload: dict) -> dict[str, int]:
     """The counts, verbatim.
 
@@ -119,7 +145,7 @@ def totals_of(payload: dict) -> dict[str, int]:
     return {name: int(totals[name]) for name in COUNTS if name in totals}
 
 
-def plan(payload: dict, lookup_invocation) -> list[Verdict]:
+def plan(payload: dict, lookup_invocation, lookup_ask=None) -> list[Verdict]:
     """What ingesting this payload would do. No writes."""
     problem = check_schema(payload)
     if problem:
@@ -158,6 +184,28 @@ def plan(payload: dict, lookup_invocation) -> list[Verdict]:
         verdicts.append(Verdict(row["address"],
                                 "differs" if differences else "same",
                                 differences))
+
+    # The queue. `lookup_ask` is optional so that a caller with no queue table
+    # -- an older database, or a test of the invocation half alone -- keeps
+    # working and simply reports nothing about it, rather than the rows being
+    # silently swallowed by a caller that could have stored them.
+    if lookup_ask is not None:
+        for row in asks_of(payload):
+            existing = lookup_ask(row["address"])
+            if existing is None:
+                verdicts.append(Verdict(row["address"], "new"))
+                continue
+            differences = []
+            for column, key in (("answered_with", "answered_with"),
+                                ("status", "status")):
+                incoming = row.get(key)
+                current = getattr(existing, column, None)
+                if incoming is not None and incoming != current:
+                    differences.append(
+                        f"{column}: here {current!r}, payload {incoming!r}")
+            verdicts.append(Verdict(row["address"],
+                                    "differs" if differences else "same",
+                                    differences))
     return verdicts
 
 

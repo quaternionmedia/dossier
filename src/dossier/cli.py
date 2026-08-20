@@ -85,6 +85,19 @@ def _alembic_config():
     # command that is otherwise fine.
     config = Config(str(project_root() / "alembic.ini"), stdout=sys.stdout)
     config.set_main_option("script_location", str(project_root() / "alembic"))
+
+    # The database this process is actually using, not the one `alembic.ini`
+    # names. Without this the migration commands read `sqlalchemy.url` from the
+    # ini file -- `sqlite:///dossier.db`, relative to the working directory --
+    # so `db upgrade` migrated whichever database was underfoot while every
+    # query ran against the one the caller asked for, and reported success.
+    #
+    # That is the two-databases failure `dossier/health.py` exists for, and it
+    # survived two earlier repairs: the engine learned about the override, then
+    # `health.candidate_databases` did, and this third path did not. Three
+    # resolvers, one answer.
+    config.set_main_option("sqlalchemy.url", DATABASE_URL)
+
     config.attributes["configure_logger"] = False
     return config
 
@@ -4529,13 +4542,14 @@ def harness_ingest(payload: Path, write: bool) -> None:
     from sqlmodel import select
 
     from dossier.harness import (
+        asks_of,
         invocations_of,
         load,
         plan,
         render,
         totals_of,
     )
-    from dossier.models.harness import HarnessInvocation, HarnessSnapshot
+    from dossier.models.harness import HarnessAsk, HarnessInvocation, HarnessSnapshot
 
     document = load(payload)
 
@@ -4545,7 +4559,12 @@ def harness_ingest(payload: Path, write: bool) -> None:
                 select(HarnessInvocation).where(HarnessInvocation.address == address)
             ).first()
 
-        verdicts = plan(document, lookup)
+        def lookup_ask(address: str):
+            return session.exec(
+                select(HarnessAsk).where(HarnessAsk.address == address)
+            ).first()
+
+        verdicts = plan(document, lookup, lookup_ask)
         click.echo(render(verdicts, written=write))
 
         # A refusal exits non-zero whether or not --write was passed. It used
@@ -4574,6 +4593,26 @@ def harness_ingest(payload: Path, write: bool) -> None:
             target.error = row.get("error")
             target.ran_at = row.get("created_at")
             session.add(target)
+
+        # The queue. Updated in place rather than appended: a question seen
+        # twice is the same question, and its answer arriving is a change to
+        # that row rather than a second one.
+        for row in asks_of(document):
+            existing = lookup_ask(row["address"])
+            target = existing or HarnessAsk(
+                address=row["address"], project=document["project"],
+                request_id=row.get("id") or row["address"].rsplit("/", 1)[-1])
+            target.request_type = row.get("request_type")
+            target.prompt = row.get("prompt")
+            options = row.get("options") or []
+            target.options = "\n".join(str(option) for option in options) or None
+            target.status = row.get("status")
+            target.asked_at = row.get("created_at")
+            target.answered_with = row.get("answered_with")
+            target.answered_by = row.get("answered_by")
+            target.answered_at = row.get("answered_at")
+            session.add(target)
+
         session.commit()
 
 

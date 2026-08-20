@@ -504,6 +504,69 @@ def harness_project(session: Any, project: Any, limit: int) -> Section:
 
 # --- the registry ------------------------------------------------------------
 
+# --- what is waiting on a person ---------------------------------------------
+
+WAITING_COLUMNS = ("harness", "question", "asked", "options", "answer")
+
+
+def _waiting_row(row: Any) -> tuple[str, ...]:
+    return (
+        _trim(row.project, 22),
+        _trim(row.address.rsplit("/", 1)[-1], 22),
+        _trim(row.prompt, 44),
+        _trim((row.options or "").replace("\n", "/"), 18),
+        row.answered_with or "-- waiting --",
+    )
+
+
+def _waiting_rows(session: Any, limit: int, project: str | None = None):
+    """Outstanding first, because that is the order somebody acts in.
+
+    Answered rows are kept and shown after them: what was asked and what was
+    said is the audit trail, and a queue that hides its answers cannot show
+    anybody why a thing was decided.
+
+    Sorted here rather than in SQL. `answered_with IS NULL` orders correctly in
+    sqlite and this has to hold for whatever a reader points it at, so the rule
+    lives with the reason for it.
+    """
+    from dossier.models.harness import HarnessAsk
+
+    query = select(HarnessAsk)
+    if project is not None:
+        query = query.where(HarnessAsk.project == project)
+    rows = list(session.exec(query).all())
+    rows.sort(key=lambda row: (row.answered_with is not None, row.asked_at or ""))
+    return tuple(_waiting_row(row) for row in rows[:limit])
+
+
+def waiting_org(session: Any, ids, limit: int) -> Section:
+    """Every question a harness has put to a person.
+
+    Not scoped by `ids`, for the same reason the harness facet is not: a
+    harness is named by `owner/repo` in its own payload and is not a row in
+    `project`.
+    """
+    return Section(
+        "Waiting on a person", WAITING_COLUMNS,
+        _waiting_rows(session, limit),
+        note=("Questions a harness could not answer for itself. This panel "
+              "shows them; it does not answer them -- the answer goes back "
+              "across the seam as a payload, the same way the question came, "
+              "because two systems believing they own one row is how a queue "
+              "starts disagreeing with itself."),
+    )
+
+
+def waiting_project(session: Any, project: Any, limit: int) -> Section:
+    return Section(
+        "Waiting on a person", WAITING_COLUMNS,
+        _waiting_rows(session, limit, project.full_name or project.name),
+        note=("Questions this repository's harness has put to a person, "
+              "outstanding first."),
+    )
+
+
 FACETS: tuple[Facet, ...] = (
     Facet("deltas", "On deck", "Deltas", "tab-deltas", "deltas-table",
           deltas_org, deltas_project),
@@ -525,6 +588,8 @@ FACETS: tuple[Facet, ...] = (
           "tab-releases", "releases-table", releases_org, releases_project),
     Facet("harness", "Harness invocations", "Harness invocations",
           "tab-harness", "harness-table", harness_org, harness_project),
+    Facet("waiting", "Waiting on a person", "Waiting",
+          "tab-waiting", "waiting-table", waiting_org, waiting_project),
 )
 
 BY_KEY = {facet.key: facet for facet in FACETS}
