@@ -39,7 +39,26 @@ from dossier.parsers import GitHubParser, ParserRegistry
 #
 # `qmcp dashboard --database` is the same affordance on the other side of the
 # seam, and it existed first.
-DATABASE_URL = os.environ.get("DOSSIER_DATABASE_URL") or "sqlite:///dossier.db"
+def _database_url() -> str:
+    """The database URL, with `~` resolved.
+
+    No shell expands a tilde in the middle of a string, so
+    `sqlite:///~/hil/panel.db` arrives here literally. Passed through, it makes
+    a directory actually named `~` and reports success -- and `.gitignore`
+    carries `*~`, so it does not appear in `git status` either.
+    """
+    from pathlib import Path as _Path
+
+    url = os.environ.get("DOSSIER_DATABASE_URL")
+    if not url:
+        return "sqlite:///dossier.db"
+    prefix = "sqlite:///"
+    if url.startswith(prefix) and "~" in url:
+        return prefix + _Path(url[len(prefix):]).expanduser().as_posix()
+    return url
+
+
+DATABASE_URL = _database_url()
 engine = create_engine(DATABASE_URL, echo=False)
 
 

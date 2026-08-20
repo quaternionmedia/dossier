@@ -81,3 +81,35 @@ def test_the_cli_reads_it_at_import(monkeypatch, tmp_path):
     finally:
         monkeypatch.delenv("DOSSIER_DATABASE_URL", raising=False)
         importlib.reload(cli)
+
+
+def test_a_tilde_is_expanded_rather_than_taken_literally(monkeypatch):
+    """No shell expands `~` in the middle of a string.
+
+    `sqlite:///~/hil/panel.db` is what a person writes and what an onramp page
+    told them to write. Taken literally it makes a directory actually named `~`,
+    writes the database inside it, and reports success -- and `.gitignore`
+    carries `*~`, so it does not show up in `git status` either. That is the
+    write-where-nobody-asked failure this override exists to prevent, arriving
+    through the override itself.
+
+    Mutation: drop the `.expanduser()` and this fails.
+    """
+    monkeypatch.setenv("DOSSIER_DATABASE_URL", "sqlite:///~/hil/panel.db")
+    resolved = health.overridden_database()
+    assert "~" not in str(resolved)
+    assert resolved == (Path.home() / "hil" / "panel.db")
+
+
+def test_the_cli_expands_it_too(monkeypatch):
+    """Both halves resolve the same path, or the two-databases failure is back."""
+    monkeypatch.setenv("DOSSIER_DATABASE_URL", "sqlite:///~/hil/panel.db")
+    from dossier import cli
+
+    reloaded = importlib.reload(cli)
+    try:
+        assert "~" not in reloaded.DATABASE_URL
+        assert reloaded.DATABASE_URL.endswith("hil/panel.db")
+    finally:
+        monkeypatch.delenv("DOSSIER_DATABASE_URL", raising=False)
+        importlib.reload(cli)

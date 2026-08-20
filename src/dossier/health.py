@@ -108,7 +108,13 @@ def overridden_database() -> Path | None:
             f"resolves {prefix}<path> and refuses anything else rather than "
             f"falling back to the default, which would write where nobody asked."
         )
-    return Path(url[len(prefix):])
+    # `~` is expanded here because no shell will do it. A tilde is only
+    # expanded at the start of a word, so `sqlite:///~/hil/panel.db` reaches
+    # this as a literal tilde -- and without this, `db upgrade` created a
+    # directory actually named `~` inside the repository, wrote the database
+    # there, and reported success. `.gitignore` carries `*~`, so it did not
+    # even appear in `git status`.
+    return Path(url[len(prefix):]).expanduser()
 
 
 def _columns(connection: sqlite3.Connection, table: str) -> set[str]:
