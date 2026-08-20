@@ -194,6 +194,38 @@ class ContentViewerScreen(ModalScreen):
                     yield Button("◀ Prev", id="btn-prev-doc", variant="default", disabled=self.doc_index <= 0)
                     yield Button("Next ▶", id="btn-next-doc", variant="default", disabled=self.doc_index >= len(self.doc_list) - 1)
     
+    @on(Button.Pressed, "#btn-ingest-threads")
+    def on_ingest_threads_pressed(self) -> None:
+        """Ask the harness to unpack an export, then show what arrived.
+
+        THE PANEL DOES NOT WRITE THE ARCHIVE. It asks the harness, which owns
+        it. The human act -- requesting the export from the service -- happened
+        before this button existed, and everything after it may be automated.
+        """
+        from dossier.threads import request_import, summarise_import
+
+        field = self.query_one("#thread-export-path", Input)
+        path = (field.value or "").strip().strip('"')
+        if not path:
+            self.notify("Give the path to an export first.",
+                        severity="warning", title="Nothing to ingest")
+            return
+
+        self.notify(f"Asking the harness to unpack {path}...",
+                    title="Ingesting")
+        result = request_import(path)
+        line = summarise_import(result)
+
+        if not result.get("ok"):
+            self.notify(line, severity="error", title="Ingest refused")
+            return
+
+        # Refresh before reporting, so the count in the message and the rows on
+        # the screen are the same reading. Reporting first and refreshing after
+        # is how a panel comes to say one number and show another.
+        self.action_refresh()
+        self.notify(line, title="Ingested")
+
     @on(Button.Pressed, "#btn-close")
     def on_close_pressed(self) -> None:
         self.dismiss()
@@ -962,6 +994,13 @@ class DossierApp(App):
                     # beside it is for machines and for debugging.
                     with TabPane("Threads", id="tab-threads"):
                         yield DataTable(id="threads-table")
+                        with Horizontal(id="thread-buttons"):
+                            yield Input(placeholder="path to an export "
+                                                    "(conversations.json or the "
+                                                    "folder holding it)",
+                                        id="thread-export-path")
+                            yield Button("Ingest", id="btn-ingest-threads",
+                                         variant="primary")
                     with TabPane("Governance", id="tab-governance"):
                         with Vertical():
                             yield Static("", id="governance-age")

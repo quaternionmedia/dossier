@@ -188,15 +188,54 @@ def test_the_project_view_shows_the_whole_archive(monkeypatch):
 # --- what it cannot do --------------------------------------------------------
 
 
-def test_the_client_never_writes(monkeypatch):
-    """The archive is built by the harness from files it reads. A control panel
-    that could edit it would be a second author of a record whose whole value
-    is being one."""
+def test_the_client_never_authors_the_archive(monkeypatch):
+    """The property is authorship, not the HTTP verb.
+
+    THE FIRST VERSION OF THIS ASSERTED NO `.post(` ANYWHERE, which is a proxy
+    for the rule rather than the rule -- and it fired on asking the harness to
+    import an export, which is the harness doing its own job. A panel that
+    cannot ask the archive's owner to do anything is not safer, only less
+    useful. What must never happen is the panel writing a thread row, a digest
+    or a history entry.
+    """
     from pathlib import Path
 
     source = Path(client.__file__).read_text(encoding="utf-8")
-    for verb in (".post(", ".put(", ".patch(", ".delete("):
-        assert verb not in source, f"{verb} would make this a writer"
+    for verb in (".put(", ".patch(", ".delete("):
+        assert verb not in source, f"{verb} would make this an author"
+    # The one write it may ask for, and it is a request rather than an edit.
+    assert source.count(".post(") == 1
+    assert "/v1/threads/import" in source
+
+
+def test_asking_for_an_import_is_a_state_not_an_exception(monkeypatch):
+    """It runs in a button handler. A raise there takes the panel with it."""
+    def refuse(request):
+        raise httpx.ConnectError("nothing listening", request=request)
+
+    with_response(monkeypatch, refuse)
+    result = client.request_import("/somewhere/export.zip")
+    assert result["ok"] is False
+    assert "not answering" in client.summarise_import(result)
+
+
+def test_an_import_summary_names_what_changed(monkeypatch):
+    with_response(monkeypatch, ok({
+        "written": 94, "identical": 0, "replaced": 0, "unreadable": [],
+        "positional": 0,
+        "indexed": {"threads": 203, "diverged": 0, "changed": 94},
+    }))
+    line = client.summarise_import(client.request_import("/x"))
+    assert "94 new" in line
+    assert "203 thread(s)" in line
+
+
+def test_a_refusal_carries_the_harness_reason(monkeypatch):
+    with_response(monkeypatch, lambda request: httpx.Response(
+        400, json={"detail": "holds no conversations.json"}))
+    result = client.request_import("/x")
+    assert result["ok"] is False
+    assert "conversations.json" in result["reason"]
 
 
 def test_nothing_here_imports_the_harness():

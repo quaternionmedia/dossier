@@ -18,10 +18,12 @@ a panel that shows an empty table when the truth is that nobody answered.
 every caller renders that rather than zero rows -- the same distinction the
 harness payload makes between a count of zero and a count nobody took.
 
-WHAT IT CANNOT DO. Write. There is no route to write and none is wanted: the
-archive is built by the harness from files it reads, and a control panel that
-could edit it would be a second author of a record whose whole value is being
-one.
+WHAT IT CANNOT DO. Author. It never writes a thread row, a digest or a history
+entry -- the archive stays one record with one author, and a panel editing it
+would be a second. **Asking the harness to import an export is not that.** The
+harness does the writing, from a file the operator points at, and this only
+asks. The distinction is between authoring a record and calling the thing that
+owns it.
 """
 
 from __future__ import annotations
@@ -162,3 +164,68 @@ def deltas_for(source: str, identifier: str, base: str | None = None,
         return (response.json() or {}).get("deltas") or []
     except ValueError:
         return None
+
+
+def request_import(path: str, source: str | None = None,
+                   base: str | None = None,
+                   timeout: float = 120.0) -> dict[str, Any]:
+    """Ask the harness to unpack an export and re-index.
+
+    **THIS DOES NOT WRITE THE ARCHIVE.** It asks the harness to, which is the
+    harness doing its own job. The panel never authors a thread row.
+
+    A long timeout, because unpacking a real export is tens of megabytes and
+    re-indexing reads every session afterwards. The two-second timeout the
+    listing uses would turn a working import into a panel that said it failed.
+
+    Every failure is a returned state with a sentence. Nothing raises into a
+    button handler.
+    """
+    import httpx
+
+    base = base or base_url()
+    try:
+        with httpx.Client(base_url=base, timeout=timeout) as client:
+            response = client.post("/v1/threads/import",
+                                   json={"path": path, "source": source})
+    except Exception as exc:                      # noqa: BLE001
+        return {"ok": False,
+                "reason": f"The harness is not answering on {base} "
+                          f"({type(exc).__name__}).",
+                "fix": "Start it: uv run python -m qmcp serve"}
+
+    if response.status_code != 200:
+        detail = ""
+        try:
+            detail = (response.json() or {}).get("detail", "")
+        except ValueError:
+            detail = response.text[:200]
+        return {"ok": False,
+                "reason": f"The harness refused: {detail or response.status_code}"}
+
+    try:
+        body = response.json()
+    except ValueError:
+        return {"ok": False,
+                "reason": "The harness answered with something that is not JSON."}
+    return {"ok": True, **body}
+
+
+def summarise_import(result: dict[str, Any]) -> str:
+    """One line for a notification, whatever happened."""
+    if not result.get("ok"):
+        return f"{result.get('reason', 'Import failed.')} {result.get('fix', '')}".strip()
+
+    indexed = result.get("indexed") or {}
+    parts = [f"{result.get('written', 0)} new"]
+    if result.get("replaced"):
+        parts.append(f"{result['replaced']} replaced")
+    if result.get("identical"):
+        parts.append(f"{result['identical']} unchanged")
+    if result.get("unreadable"):
+        parts.append(f"{len(result['unreadable'])} unreadable")
+    if result.get("positional"):
+        parts.append(f"{result['positional']} named by position")
+
+    return (f"{', '.join(parts)}. Archive now {indexed.get('threads', '?')} "
+            f"thread(s), {indexed.get('diverged', 0)} disagreeing.")
