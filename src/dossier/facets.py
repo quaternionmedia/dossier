@@ -567,6 +567,70 @@ def waiting_project(session: Any, project: Any, limit: int) -> Section:
     )
 
 
+# --- the harness's thread archive --------------------------------------------
+
+THREADS_COLUMNS = ("thread", "source", "turns", "last seen", "state")
+
+
+def _threads_rows(archive: Any) -> tuple[tuple[str, ...], ...]:
+    """Conversations the harness has archived, ones that disagree first.
+
+    A thread whose export contradicts an earlier record of itself is the only
+    row here that is a finding rather than an inventory entry, so it sorts
+    first. A page that buried it under four hundred rows would be an inventory
+    with a finding hidden in it.
+    """
+    rows = sorted(
+        archive.threads,
+        key=lambda row: (not row.get("diverged"), row.get("last_seen") or ""),
+        reverse=False,
+    )
+    rows = sorted(rows, key=lambda row: not row.get("diverged"))
+    return tuple(
+        (
+            _trim(row.get("title") or row.get("id"), 40),
+            _trim(row.get("source"), 12),
+            str(row.get("turns", 0)),
+            _trim(row.get("last_seen"), 19),
+            "disagrees" if row.get("diverged") else "",
+        )
+        for row in rows
+    )
+
+
+def threads_org(session: Any, ids, limit: int) -> Section:
+    """The archive, read from the harness over the seam.
+
+    Not scoped by `ids` and not read from disk. dossier does not know where the
+    archive keeps its files, deliberately: what crosses is HTTP and a schema,
+    the same trade the delta and harness payloads make.
+    """
+    from dossier.threads import fetch
+
+    archive = fetch()
+    if not archive.reachable or not archive.indexed:
+        # An empty table would say the archive is empty. Nobody answered, or
+        # nobody has indexed -- different facts, and neither is zero threads.
+        return Section("Thread archive", THREADS_COLUMNS, (), note=archive.note)
+
+    return Section(
+        "Thread archive", THREADS_COLUMNS, _threads_rows(archive)[:limit],
+        note=(archive.note + " Conversations that disagree with an earlier "
+              "record of themselves are listed first and have not been "
+              "repaired."),
+    )
+
+
+def threads_project(session: Any, project: Any, limit: int) -> Section:
+    """The archive is not scoped to one project.
+
+    A conversation belongs to no repository. What a session *produced* is
+    addressed to one and appears under Deltas; the conversation itself stays
+    here, whole.
+    """
+    return threads_org(session, None, limit)
+
+
 FACETS: tuple[Facet, ...] = (
     Facet("deltas", "On deck", "Deltas", "tab-deltas", "deltas-table",
           deltas_org, deltas_project),
@@ -590,6 +654,8 @@ FACETS: tuple[Facet, ...] = (
           "tab-harness", "harness-table", harness_org, harness_project),
     Facet("waiting", "Waiting on a person", "Waiting",
           "tab-waiting", "waiting-table", waiting_org, waiting_project),
+    Facet("threads", "Thread archive", "Threads",
+          "tab-threads", "threads-table", threads_org, threads_project),
 )
 
 BY_KEY = {facet.key: facet for facet in FACETS}

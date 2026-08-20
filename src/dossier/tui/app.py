@@ -956,6 +956,12 @@ class DossierApp(App):
                     # a queue nobody empties.
                     with TabPane("Waiting", id="tab-waiting"):
                         yield DataTable(id="waiting-table")
+                    # The harness's thread archive, read over the seam. This is
+                    # the only human surface for it: a second one would be a
+                    # second definition of what a figure means, and the CLI
+                    # beside it is for machines and for debugging.
+                    with TabPane("Threads", id="tab-threads"):
+                        yield DataTable(id="threads-table")
                     with TabPane("Governance", id="tab-governance"):
                         with Vertical():
                             yield Static("", id="governance-age")
