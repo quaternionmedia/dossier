@@ -27,7 +27,19 @@ from dossier.parsers import GitHubParser, ParserRegistry
 
 
 # Database setup
-DATABASE_URL = "sqlite:///dossier.db"
+# Where the database is, and the one way to point this somewhere else.
+#
+# `sqlite:///dossier.db` is relative to the working directory, so which database
+# you get depends on where you launched from -- `dossier/health.py` records the
+# failure that came out of exactly that. Until this override existed there was
+# no other way to redirect it, so anything that wanted a scratch database had to
+# change directory, and anything that forgot wrote into whichever `dossier.db`
+# was underfoot. A demo, an experiment or a walkthrough run in the repository
+# root wrote into the operator's own data, which is how this was found.
+#
+# `qmcp dashboard --database` is the same affordance on the other side of the
+# seam, and it existed first.
+DATABASE_URL = os.environ.get("DOSSIER_DATABASE_URL") or "sqlite:///dossier.db"
 engine = create_engine(DATABASE_URL, echo=False)
 
 
@@ -206,6 +218,41 @@ def deltas() -> None:
     pass
 
 
+def _store_links(session, delta, links: list[dict]) -> None:
+    """Write a payload's links, without writing one twice.
+
+    Re-ingesting the same payload is ordinary -- a harness emits its state on
+    every run -- so a link is matched on what identifies it rather than
+    appended. `(delta, link_type, target_name)` is that identity: two links of
+    the same type at the same target are one link, however many runs mentioned
+    it.
+    """
+    from sqlmodel import select
+
+    from dossier.models.schemas import DeltaLink
+
+    for link in links:
+        link_type = link.get("link_type")
+        target_name = link.get("target_name")
+        if not link_type:
+            continue
+        existing = session.exec(
+            select(DeltaLink)
+            .where(DeltaLink.delta_id == delta.id)
+            .where(DeltaLink.link_type == str(link_type))
+            .where(DeltaLink.target_name == (
+                None if target_name is None else str(target_name)))
+        ).first()
+        if existing is not None:
+            continue
+        session.add(DeltaLink(
+            delta_id=delta.id,
+            link_type=str(link_type),
+            target_id=link.get("target_id"),
+            target_name=None if target_name is None else str(target_name),
+        ))
+
+
 @deltas.command("ingest")
 @click.argument("payload", type=click.Path(exists=True, path_type=Path))
 @click.option("--write", is_flag=True,
@@ -246,17 +293,32 @@ def deltas_ingest(payload: Path, write: bool) -> None:
             for item in payloads:
                 row = item.get("delta") or {}
                 verdict = by_name.get(str(row.get("name") or ""))
-                if verdict is None or verdict.action not in ("create", "update"):
+                # `unchanged` reaches the link pass too. A delta whose own
+                # fields are identical can still have gained a link -- a second
+                # run of the same failing check produces the same delta and a
+                # new invocation -- and skipping it would drop exactly the rows
+                # that accumulate.
+                if verdict is None or verdict.action == "refused":
                     continue
                 project = lookup_project(item["project"])
                 fields = {k: row[k] for k in WRITABLE if k in row}
                 if verdict.action == "create":
-                    session.add(ProjectDelta(project_id=project.id, **fields))
+                    delta = ProjectDelta(project_id=project.id, **fields)
+                    session.add(delta)
                 else:
-                    existing = lookup_delta(project.id, fields["name"])
-                    for key, value in fields.items():
-                        setattr(existing, key, value)
-                    session.add(existing)
+                    delta = lookup_delta(project.id, fields["name"])
+                    if verdict.action == "update":
+                        for key, value in fields.items():
+                            setattr(delta, key, value)
+                        session.add(delta)
+
+                # `links` used to be read for the address and then dropped, so
+                # the row that names what a delta points at -- the invocation
+                # that found it, and the address that joins it to the other
+                # view -- was never stored. Both sides believed the join
+                # existed and nothing held it.
+                session.flush()   # the delta needs its id before a link can cite it
+                _store_links(session, delta, item.get("links") or [])
             session.commit()
 
         click.echo(render(verdicts, write))
