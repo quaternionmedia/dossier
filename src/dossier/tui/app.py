@@ -742,6 +742,49 @@ class DossierApp(App):
     DataTable {
         height: 1fr;
     }
+
+    /* The overview stacks many tables in one scroll. `height: 1fr` above makes
+       each one flex to fill, so they compete for the same space and every
+       section ends up squashed against its neighbours -- which is what a
+       reader sees as the page having lost its shape. Here each table is as
+       tall as its rows and the panel scrolls. */
+    /* NO `max-height` HERE, DELIBERATELY. Capping a table inside a page that
+       already scrolls gives the table its own scrollbar, and a reader who
+       scrolls the page past a capped section never sees its last rows -- text
+       that is present, rendered, and unreachable without noticing there was a
+       second scroll region. The page is the only scroll axis; a section that
+       grows makes the page longer. Measured against the real database: the
+       tallest section is 17 rows, so a cap of 20 would not have bound today
+       and would have bound silently later. */
+    .overview-section {
+        height: auto;
+        margin: 0 0 1 0;
+    }
+
+    .overview-heading {
+        margin: 1 0 0 0;
+        padding: 0 1;
+        color: $accent;
+    }
+
+    /* The note explains what the numbers above it do and do not mean. It sits
+       with that table rather than floating between two, so the margin is under
+       it and not over. */
+    .overview-note {
+        margin: 0 0 1 0;
+        padding: 0 2;
+        color: $text-muted;
+    }
+
+    #overview-scope {
+        padding: 1 1 0 1;
+    }
+
+    #overview-masthead {
+        padding: 0 1 1 1;
+        border-bottom: solid $primary-darken-2;
+        margin: 0 0 1 0;
+    }
     
     TabPane {
         padding: 1;
@@ -5814,30 +5857,11 @@ class DossierApp(App):
         status = "starred only" if self.filter_starred is True else "no stars" if self.filter_starred is False else "all"
         self.notify(f"Filter: {status}")
     
-    @on(Button.Pressed, "#btn-sort-stars")
-    def on_sort_stars_pressed(self) -> None:
-        """Sort by stars."""
-        self.sort_by = "stars"
-        self._update_sort_ui()
-        search_input = self.query_one("#search-input", Input)
-        self.load_projects(search=search_input.value)
-    
-    @on(Button.Pressed, "#btn-sort-name")
-    def on_sort_name_pressed(self) -> None:
-        """Sort by name."""
-        self.sort_by = "name"
-        self._update_sort_ui()
-        search_input = self.query_one("#search-input", Input)
-        self.load_projects(search=search_input.value)
-    
-    @on(Button.Pressed, "#btn-sort-synced")
-    def on_sort_synced_pressed(self) -> None:
-        """Sort by recently synced."""
-        self.sort_by = "synced"
-        self._update_sort_ui()
-        search_input = self.query_one("#search-input", Input)
-        self.load_projects(search=search_input.value)
-    
+    # Sorting is a Select (`#select-sort`), not buttons. Three
+    # `@on(Button.Pressed, "#btn-sort-*")` handlers outlived the buttons they
+    # were written for and are gone: a handler for a widget that does not exist
+    # reads like a feature to anybody grepping for one.
+
     @on(Select.Changed, "#select-language")
     def on_language_changed(self, event: Select.Changed) -> None:
         """Handle language filter change."""
@@ -8185,19 +8209,19 @@ Set `GITHUB_TOKEN` environment variable for:
             EXPORT_FORMAT_OPTIONS,
         )
         
-        # Get database path and stats
-        from dossier.config import dossier_home
+        # Which stores this installation is reading, and which it merely might.
+        # Gathered here rather than in `compose` so a slow answer -- the archive
+        # is an HTTP call -- happens once while the screen is being built.
+        from dossier.sources import all_sources
 
-        db_path = dossier_home() / "dossier.db"
-        db_size = "N/A"
-        if db_path.exists():
-            size_bytes = db_path.stat().st_size
-            if size_bytes < 1024:
-                db_size = f"{size_bytes} B"
-            elif size_bytes < 1024 * 1024:
-                db_size = f"{size_bytes / 1024:.1f} KB"
-            else:
-                db_size = f"{size_bytes / (1024 * 1024):.1f} MB"
+        try:
+            data_sources = all_sources()
+        except Exception as exc:                      # noqa: BLE001
+            # A settings screen that will not open because one source is
+            # unreachable is worse than one that says so in a row.
+            from dossier.sources import Source
+            data_sources = [Source("data sources", "could not be read",
+                                   str(exc), in_use=False, present=False)]
         
         # Get project count
         project_count = 0
@@ -8325,18 +8349,33 @@ Set `GITHUB_TOKEN` environment variable for:
                                 yield Static("Platform:", classes="info-label")
                                 yield Static(f"{platform.system()} {platform.release()}", classes="info-value")
                             with Horizontal(classes="info-row"):
-                                yield Static("Database:", classes="info-label")
-                                yield Static(f"{db_path}", classes="info-value")
-                            with Horizontal(classes="info-row"):
-                                yield Static("DB Size:", classes="info-label")
-                                yield Static(f"{db_size}", classes="info-value")
-                            with Horizontal(classes="info-row"):
                                 yield Static("Projects:", classes="info-label")
                                 yield Static(f"{project_count}", classes="info-value")
-                            with Horizontal(classes="info-row"):
-                                yield Static("Config:", classes="info-label")
-                                yield Static(f"{DossierConfig.get_config_path()}", classes="info-value")
-                        
+
+                        yield Rule()
+
+                        # Data sources. This replaced a single "Database:" row
+                        # showing `dossier_home()/dossier.db` -- a path this
+                        # application does not necessarily open. It was a real
+                        # number about the wrong file, which is worse than none:
+                        # a reader checks it, sees a plausible size, and stops
+                        # looking. Every candidate is listed and the live one is
+                        # marked, because two databases with nothing on screen
+                        # saying which is live is the failure `health.py` exists
+                        # for.
+                        yield Static("🗄  Data sources", classes="settings-label")
+                        with Vertical(classes="settings-section"):
+                            for source in data_sources:
+                                with Horizontal(classes="info-row"):
+                                    mark = f" [{source.marker}]" if source.marker else ""
+                                    yield Static(f"{source.label}{mark}:",
+                                                 classes="info-label")
+                                    yield Static(source.where, classes="info-value")
+                                with Horizontal(classes="info-row"):
+                                    yield Static("", classes="info-label")
+                                    yield Static(source.detail,
+                                                 classes="info-value")
+
                         yield Rule()
                         
                         # Theme Section

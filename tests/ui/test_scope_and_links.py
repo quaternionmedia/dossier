@@ -11,10 +11,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 from textual.widgets import DataTable, Tree
 
 from dossier.facets import BY_TAB, FACETS
+from dossier.models.governance import GovernanceRepository
 from dossier.models.schemas import (
     Project,
     ProjectContributor,
@@ -219,3 +220,84 @@ def test_an_org_only_section_links_nowhere(session):
     assert "Deltas by phase" not in BY_TITLE
     assert "Governance posture" not in BY_TITLE
     assert "Wants attention" not in BY_TITLE
+
+
+# --- the page is the only scroll axis ----------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_no_overview_section_scrolls_inside_the_page(session):
+    """THE FAILURE THIS IS AGAINST IS TEXT THAT IS RENDERED AND UNREACHABLE.
+
+    The overview is one `VerticalScroll` holding a stack of tables. Capping a
+    table's height inside it gives that table its own scrollbar, and a reader
+    scrolling the page moves past the capped section without ever seeing its
+    last rows -- present, correct, and invisible, with no cue that a second
+    scroll region existed.
+
+    So a section is as tall as its rows, and a section that grows makes the
+    page longer.
+
+    THE SECTION GROWN HERE IS GOVERNANCE POSTURE, AND THAT IS NOT ARBITRARY.
+    `build` passes `limit` to every facet, so piling rows into one of those
+    leaves the table exactly as tall and this test passes without ever
+    exercising a cap. Two drafts did that -- forty contributors, then forty
+    repositories -- and both were caught by the precondition below rather than
+    by reading the code. `_governance` is the one section that takes no limit,
+    one row per roster entry, so those are what grow it.
+
+    Mutation: put `max-height` back on `.overview-section` and this fails.
+    """
+    for index in range(40):
+        session.add(GovernanceRepository(name=f"org/repo-{index:02d}",
+                                         phase="implementation"))
+    session.commit()
+
+    app = app_for(session)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.pause()
+        panel = app.query_one(OverviewPanel)
+        tables = list(panel.query(DataTable))
+        assert tables, "the overview drew no sections, so this asserts nothing"
+        assert any(t.row_count > 12 for t in tables), (
+            "no section grew past a plausible cap, so this test would pass "
+            "even with one in place")
+        for table in tables:
+            assert table.virtual_size.height <= table.size.height, (
+                f"{table.id} holds {table.row_count} rows in "
+                f"{table.size.height} lines -- it scrolls inside the page")
+
+
+@pytest.mark.asyncio
+async def test_scoping_to_an_owner_redraws_what_is_on_screen(session):
+    """THE FIELD CHANGING IS NOT THE SCREEN CHANGING.
+
+    `refresh_overview` called `recompose()`, a coroutine, from a synchronous
+    handler -- so it built an awaitable and dropped it. Python warned;
+    the tests did not, because every one of them asserted `panel.owner`
+    rather than what a reader would see.
+
+    This reads the rendered masthead, which is the thing a person looks at.
+
+    Mutation: put `self.recompose()` back and this fails.
+    """
+    session.add(Project(name="other/solo", full_name="other/solo",
+                        github_owner="other", description="elsewhere",
+                        github_language="Go", last_synced_at=NOW))
+    session.commit()
+
+    app = app_for(session)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        panel = app.query_one(OverviewPanel)
+        before = app.query_one("#overview-scope").render().plain
+
+        panel.set_owner("other")
+        await pilot.pause()
+        await pilot.pause()
+
+        after = app.query_one("#overview-scope").render().plain
+        assert before != after, (
+            f"the screen still reads {after!r} after scoping to another owner")
+        assert "other" in after

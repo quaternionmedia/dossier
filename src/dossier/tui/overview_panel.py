@@ -80,6 +80,38 @@ class OverviewPanel(VerticalScroll):
             if section.note:
                 yield Static(f"[dim]{section.note}[/dim]", classes="overview-note")
 
+    def on_mount(self) -> None:
+        # After the refresh, not during mount: the stylesheet is applied on the
+        # way through, and anything set before it is overwritten.
+        self.call_after_refresh(self._let_the_page_be_the_only_scroll)
+
+    def _let_the_page_be_the_only_scroll(self) -> None:
+        """Give every section exactly the lines its rows need.
+
+        A `DataTable` is itself a scroll view, so `height: auto` clamps it to
+        the space available rather than to its content: a section taller than
+        the viewport gets its own scrollbar inside a page that already scrolls,
+        and a reader scrolling the page moves past it without ever seeing its
+        last rows -- text that is rendered, correct, and unreachable, with no
+        cue that a second scroll region was there.
+
+        This runs on mount rather than in `compose` because the stylesheet is
+        applied at mount and overwrites anything set before it. Most sections
+        take a top-N and never reach the viewport; `overview._governance` takes
+        none, one row per roster entry, so it is the one that grows.
+
+        `max_height` is set to the same figure, and that is the part that does
+        the work: `ScrollView` carries `max-height: 100%`, so a stated height of
+        forty-one lines was still being served twenty-seven. Assigning `None`
+        does not help -- it clears the inline layer and re-exposes the `100%`
+        underneath, which reads as having worked and does not. Both are stated,
+        in lines, from the row count.
+        """
+        for table in self.query(DataTable):
+            lines = table.row_count + (1 if table.show_header else 0)
+            table.styles.height = lines
+            table.styles.max_height = lines
+
     def _masthead_markup(self) -> str:
         cells = []
         for cell in self.overview.masthead:
@@ -102,10 +134,22 @@ class OverviewPanel(VerticalScroll):
         self.refresh_overview()
 
     def refresh_overview(self) -> None:
-        """Rebuild from the database. Safe to call from a binding or a button."""
+        """Rebuild from the database. Safe to call from a binding or a button.
+
+        `refresh(recompose=True)` and not `recompose()`: the latter is a
+        coroutine, so calling it from a synchronous handler built the awaitable
+        and dropped it. Python said so -- `RuntimeWarning: coroutine
+        'Widget.recompose' was never awaited` -- and the tests did not, because
+        they asserted `panel.owner` rather than what was drawn. Scoping to an
+        owner changed the field and left the screen showing the org.
+        """
         self.overview = self._read()
         if self.is_mounted:
-            self.recompose()
+            self.refresh(recompose=True)
+            # A recompose builds new tables, so the heights are stated again.
+            # Without this the redraw a reader asked for is the one that
+            # reintroduces the inner scrollbars.
+            self.call_after_refresh(self._let_the_page_be_the_only_scroll)
 
     # `role` is read per render rather than stored, so a theme change needs no
     # invalidation step here.
