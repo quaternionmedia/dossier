@@ -98,6 +98,17 @@ It counts what it costs you. Every choice records how many keystrokes it took
 from opening the menu to committing, so a menu that grows awkward shows up as a
 number rather than as a vague feeling. A digit press is two: open, choose.
 
+**Every command has a number, and the number is the route.** `6.2` is sync:
+`6` opens Do, `2` is the third thing under it. So it is `m` `6` `2` from
+anywhere. [docs/rad-commands.md](docs/rad-commands.md) is the full sheet —
+generated from the menu itself, marking which commands are wired and which are
+in the menu but not applied yet.
+
+**`m` `6` `2` makes what you are looking at current.** The tab decides what
+gets refreshed rather than whatever happens to be selected, anything already
+current is left alone, and a large fetch states what it would do and waits for
+you to press it again.
+
 This is an implementation of [rad](https://github.com/quaternionmedia/rad),
 Quaternion Media's interaction contract, in a terminal. The same four verbs are
 meant to work the same way in a browser.

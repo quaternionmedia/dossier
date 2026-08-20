@@ -1119,31 +1119,140 @@ class DossierApp(App):
     _scope_owner = None
 
     # Actions the ring can commit that map onto a view this app already has.
+    # `view.harness` was here and no wedge in the palette names it, so nothing
+    # could ever commit it -- a dead entry that made the dispatch look wider
+    # than the menu. `tab-harness` is still reachable by its tab; only the
+    # unreachable mapping is gone. `test_rad_sync.py` checks the direction.
     RAD_VIEWS = {
         "view.overview": "tab-overview",
-        "view.harness": "tab-harness",
         "view.deltas": "tab-deltas",
         "view.governance": "tab-governance",
         "view.disk": "tab-disk",
         "view.details": "tab-details",
     }
 
+    # Every ring action this app actually does something with. Declared rather
+    # than inferred, and read by `dossier.rad.index.applied_by` so the command
+    # sheet marks what is wired instead of implying everything is.
+    RAD_HANDLED = frozenset(RAD_VIEWS) | {"project.sync"}
+
+    # How many repositories `6.2` will fetch off two keystrokes without asking
+    # again. Above this it states the plan and waits for the same two keys a
+    # second time. The threshold is not about danger -- it is that a hundred
+    # requests is a thing somebody should have meant, and repeating the route
+    # is the cheapest possible way to mean it.
+    SYNC_WITHOUT_CONFIRMING = 5
+
+    # Set by a `6.2` that asked for confirmation, cleared by anything else.
+    # A class attribute so it reads as absent however the app was constructed.
+    _sync_pending = None
+
     def _apply_rad_intent(self, intent) -> None:
         """Apply one committed intent, and say so where a reader can see it."""
         tab = self.RAD_VIEWS.get(intent.action)
         if tab is not None:
+            self._sync_pending = None
             try:
                 self.query_one("#project-tabs").active = tab
             except Exception:
                 pass
             self.notify(f"{intent.action}  (ipa {intent.ipa})", timeout=3)
             return
+        if intent.action == "project.sync":
+            self._sync_current_view()
+            return
+        self._sync_pending = None
         # Named in the palette and not yet handled here. Reported, because a
         # wedge that quietly does nothing teaches a reader the menu is broken.
         self.notify(
             f"{intent.action}: not applied yet (ipa {intent.ipa})",
             severity="warning", timeout=4,
         )
+
+    def sync_plan(self):
+        """What refreshing the view currently on screen would touch.
+
+        Scope comes from the screen rather than from a selection the ring
+        cannot see: a chosen repository first, then the owner the tabs are
+        scoped to, then everything. `action_sync` refuses without a selection,
+        which is right for a command about repositories and wrong for one about
+        the view -- the org overview is the view most often stale and the one
+        with nothing selected.
+        """
+        from dossier.freshness import plan_for
+
+        try:
+            tab = self.query_one("#project-tabs").active
+        except Exception:
+            tab = None
+
+        # THE TAB DECIDES THE SCOPE, NOT THE SELECTION. The app selects the
+        # first repository on mount, so `_current_project` is set even on a
+        # screen showing the whole organisation -- reading it here would scope
+        # the org overview's refresh to one repository nobody chose. The
+        # overview is an org view whatever is selected behind it, and the
+        # panel's own `owner` is what it is drawn from.
+        owner, project = self._scope_owner, self._current_project
+        if tab == "tab-overview":
+            try:
+                owner, project = self.query_one(OverviewPanel).owner, None
+            except Exception:
+                project = None
+
+        with self.session_factory() as session:
+            row = None if project is None else session.get(Project, project.id)
+            return plan_for(session, tab=tab, owner=owner, project=row)
+
+    def _sync_current_view(self) -> None:
+        """`6.2`. Make what is on screen current, or say why it is not stale.
+
+        Every branch here ends in the reader being told something. A refresh
+        that finds nothing to do and says nothing is indistinguishable from one
+        that did not run, and the second time that happens a person stops
+        trusting the key.
+        """
+        plan = self.sync_plan()
+
+        if plan.inapplicable:
+            self._sync_pending = None
+            self.notify(plan.summary(), severity="warning", timeout=6)
+            return
+        if plan.is_current:
+            self._sync_pending = None
+            self.notify(plan.summary(), title="Already current", timeout=4)
+            return
+        if not plan.subjects:
+            self._sync_pending = None
+            self.notify(plan.summary(), severity="warning", timeout=4)
+            return
+
+        wanted = plan.wanted
+        confirming = self._sync_pending == plan.scope
+        if len(wanted) > self.SYNC_WITHOUT_CONFIRMING and not confirming:
+            self._sync_pending = plan.scope
+            self.notify(
+                f"{plan.summary()}. Press 6.2 again to fetch {len(wanted)}.",
+                title="Confirm", severity="warning", timeout=10,
+            )
+            return
+
+        self._sync_pending = None
+        names = {subject.name for subject in wanted}
+        with self.session_factory() as session:
+            rows = [p for p in session.exec(select(Project)).all()
+                    if (p.full_name or p.name) in names]
+        if not rows:
+            # The plan named subjects and the database has no rows for them.
+            # Reported rather than passed to a sync that would silently do
+            # nothing, because those two look identical from the outside.
+            self.notify(f"{plan.scope}: nothing to fetch for "
+                        f"{len(names)} named subject(s)",
+                        severity="error", timeout=6)
+            return
+
+        self.notify(f"Syncing {len(rows)} of {len(plan.subjects)} in "
+                    f"{plan.scope}", title="Sync started", timeout=4)
+        self.run_sync_batch(rows)
 
     def on_mount(self) -> None:
         # Setup docs tree
