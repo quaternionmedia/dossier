@@ -39,27 +39,27 @@ PALETTES: dict[str, dict[str, str]] = {
     # The house mood: neon accents on a soft deep-indigo ground.
     "radical": {
         "bg": "#14111f", "surface": "#1d1930",
-        "ink": "#f4eeff", "ink_dim": "#bdb2d9",
+        "ink": "#f4eeff", "ink_dim": "#bdb2d9", "ink_faint": "#6f6689",
         "accent": "#5cf0ff", "signal": "#ff7aa8",
         "calm": "#4ae3d0", "gold": "#ffc861",
     },
     # The same family pulled back for long sessions.
     "dark": {
         "bg": "#0d0f16", "surface": "#161a24",
-        "ink": "#eaeef7", "ink_dim": "#a3adc2",
+        "ink": "#eaeef7", "ink_dim": "#a3adc2", "ink_faint": "#5e6675",
         "accent": "#56d8ff", "signal": "#ff7d94",
         "calm": "#4fd8c4", "gold": "#f0c35c",
     },
     "light": {
         "bg": "#f6f4fb", "surface": "#ffffff",
-        "ink": "#16131f", "ink_dim": "#514a63",
+        "ink": "#16131f", "ink_dim": "#514a63", "ink_faint": "#8f8a9e",
         "accent": "#0060a8", "signal": "#b01248",
         "calm": "#0d6b64", "gold": "#74540a",
     },
     # Every pair at >= 7:1, and no decorative transparency.
     "contrast": {
         "bg": "#000000", "surface": "#000000",
-        "ink": "#ffffff", "ink_dim": "#f0f0f0",
+        "ink": "#ffffff", "ink_dim": "#f0f0f0", "ink_faint": "#f0f0f0",
         "accent": "#ffffff", "signal": "#ffffff",
         "calm": "#ffffff", "gold": "#ffffff",
     },
@@ -74,6 +74,23 @@ class Roles:
     hub_stroke: str
     wedge_label: str
     wedge_label_selected: str
+    wedge_label_unavailable: str
+    """A wedge in the menu that this host cannot act on.
+
+    A COLOUR LIKE EVERY OTHER ROLE. The first attempt made this a style string
+    -- `dim #bdb2d9` -- so that one token could carry both the colour and the
+    dimming. Two guards said no, and between them they said why: one asserts
+    every role resolves to a colour, and the other extracts `[bold? #hex]` from
+    the rendered markup and checks it against the role layer. A style string
+    failed the first and *slipped past* the second, which is the worse half --
+    a colour reaching the screen that the guard could no longer see. So the
+    dimming moved into the palette as `ink_faint`, where a theme can set it.
+
+    `contrast` sets it equal to `ink_dim`: >= 7:1 is that theme's whole point
+    and a fainter ink would break it. The dotted border is what says
+    "unavailable" there, and it is what says it on a sixteen-colour terminal
+    too -- which is why the state was never left to colour in the first place.
+    """
     focus_ring: str
     submenu_mark: str
     hint: str
@@ -95,6 +112,7 @@ def roles(theme: str = DEFAULT_THEME) -> Roles:
         hub_stroke=p["accent"],
         wedge_label=p["ink_dim"],
         wedge_label_selected=p["ink"],
+        wedge_label_unavailable=p["ink_faint"],
         focus_ring=p["accent"],
         submenu_mark=p["calm"],
         hint=p["ink_dim"],

@@ -77,7 +77,13 @@ reporting nothing to do:
 - `tab-threads` -- the thread archive is the harness's, reached over HTTP
 - `tab-waiting` -- questions are raised by a harness run, not fetched
 
-A command marked **not yet** is in the menu and reachable; pressing it
-reports that it is not applied rather than doing nothing quietly.
+**A command marked not yet is greyed out and cannot be chosen.** Its
+cell is still there and still numbered -- dropping it would renumber
+every command after it, and these numbers are written down. The digit
+is refused, arrows and diagonals step over it, and a verb whose every
+child is unavailable is greyed too rather than opening onto a level of
+dead cells. It is drawn with a dotted border as well as a dimmer ink,
+so the state survives a theme with no dim colour and a terminal that
+approximates.
 
 Not yet applied: `6.8` Advance phase, `6.6` Add note, `2.8` All, `2.6` Synced only, `2.2` Drifting, `4.8` Open in qmcp, `4.6` Ingest deltas, `4.2` Reconcile.

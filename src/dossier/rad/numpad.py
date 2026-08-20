@@ -142,7 +142,8 @@ def direction_of(key: str) -> str | None:
     return DIRECTION_KEYS.get(key)
 
 
-def step_to_item(cell: int, direction: str, placement: Placement) -> int:
+def step_to_item(cell: int, direction: str, placement: Placement,
+                 allowed: set[int] | None = None) -> int:
     """The item nearest the pressed direction, or the current cell.
 
     Not a walk along the row or column. A menu of four sits at the cardinals,
@@ -157,6 +158,12 @@ def step_to_item(cell: int, direction: str, placement: Placement) -> int:
 
     The centre is never a candidate. It backs out, and it is reached by
     pressing `5` rather than by wandering into it.
+
+    `allowed`, when given, is the only set of cells the cursor may land on --
+    a host greys out what it cannot act on, and a cursor that steps onto a
+    greyed cell reads as the arrow keys being broken. `None` means every
+    occupied cell is a candidate, which is the case where nobody declared
+    availability.
     """
     if direction not in STEP:
         return cell
@@ -166,6 +173,8 @@ def step_to_item(cell: int, direction: str, placement: Placement) -> int:
     best, best_score = cell, None
     for candidate in placement.by_cell:
         if candidate == cell or candidate == BACK:
+            continue
+        if allowed is not None and candidate not in allowed:
             continue
         cx, cy = POSITION[candidate]
         along = (cx - column) * dx + (cy - row) * dy

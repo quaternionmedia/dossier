@@ -97,6 +97,14 @@ class RingView:
     path: tuple[str, ...]
     context: Any = None
 
+    available: tuple[bool, ...] | None = None
+    """Which wedges this host can act on, parallel to `wedges`.
+
+    `None` means the host never said, and everything is available -- so a host
+    that does not know about availability is unchanged. It is deliberately not
+    an empty tuple: that is a real answer about a menu with no wedges in it.
+    """
+
     @property
     def placement(self) -> numpad.Placement:
         """Which numpad cell holds which wedge."""
@@ -106,6 +114,17 @@ class RingView:
     def cursor_cell(self) -> int:
         """The cell the highlight is on."""
         return self.placement.by_index.get(self.highlighted, numpad.BACK)
+
+    def is_available(self, index: int) -> bool:
+        """Whether the wedge at `index` can be chosen."""
+        if self.available is None:
+            return True
+        return bool(self.available[index])
+
+    def available_cells(self) -> tuple[int, ...]:
+        """The cells a highlight is allowed to land on."""
+        return tuple(cell for cell, index in self.placement.by_cell.items()
+                     if self.is_available(index))
 
     def wedge_at(self, cell: int) -> Wedge | None:
         """The wedge in a cell, or None for the centre and empty cells."""
@@ -195,9 +214,16 @@ class RadSession:
     """The state machine. Idle, open, or one level into a submenu."""
 
     def __init__(self, resolve: Callable[[Any], tuple[Wedge, ...]],
-                 on_intent: Callable[[Intent], None] | None = None) -> None:
+                 on_intent: Callable[[Intent], None] | None = None,
+                 available: Callable[[Wedge], bool] | None = None) -> None:
         self._resolve = resolve
         self._on_intent = on_intent
+        # AVAILABILITY IS THE HOST'S KNOWLEDGE, NOT THE PALETTE'S. The palette
+        # is content and says what the menu offers; whether this application
+        # can act on a given wedge is a fact about its dispatch, and putting it
+        # in the palette would make one host's gaps another host's menu. `None`
+        # means nobody said, and everything is available.
+        self._available = available
         self._stack: list[tuple[Wedge, ...]] = []
         self._highlight: list[int] = []
         self._path: list[str] = []
@@ -218,12 +244,45 @@ class RadSession:
     def view(self) -> RingView | None:
         if not self.is_open:
             return None
+        wedges = self._stack[-1]
         return RingView(
-            wedges=self._stack[-1],
+            wedges=wedges,
             highlighted=self._highlight[-1],
             path=tuple(self._path),
             context=self._context,
+            available=(None if self._available is None
+                       else tuple(self.is_available(w) for w in wedges)),
         )
+
+    def _first_available(self, wedges: tuple[Wedge, ...]) -> int:
+        """Where the highlight starts. Falls back to 0.
+
+        Opening onto a cell that Enter refuses is the same failure as walking
+        onto one, and it is the first thing a person sees. The fallback matters
+        only when nothing at this level is available, which cannot happen
+        through a submenu -- `is_available` refuses to open one with no
+        available descendant -- but can at the top level of a host that wires
+        nothing.
+        """
+        for index, wedge in enumerate(wedges):
+            if self.is_available(wedge):
+                return index
+        return 0
+
+    def is_available(self, wedge: Wedge) -> bool:
+        """Whether this host can act on `wedge`.
+
+        A SUBMENU IS AVAILABLE IF ANYTHING UNDER IT IS. Greying the leaves and
+        leaving the verb bright walks a reader into a level where every cell is
+        dead, which is worse than not opening: they have spent two keystrokes
+        to be told nothing is there. Recursive rather than one level deep, so a
+        deeper palette than this one behaves the same way.
+        """
+        if self._available is None:
+            return True
+        if wedge.is_submenu:
+            return any(self.is_available(child) for child in wedge.children)
+        return bool(self._available(wedge))
 
     # -- inbound API ------------------------------------------------------
 
@@ -240,7 +299,7 @@ class RadSession:
             return None
         self._context = context
         self._stack = [wedges]
-        self._highlight = [0]
+        self._highlight = [self._first_available(wedges)]
         self._path = []
         self.meter.transition()
         return self.view
@@ -261,16 +320,24 @@ class RadSession:
 
         view = self.view
         placement = view.placement
+        # `None` when nobody declared availability, which `step_to_item` reads
+        # as "every occupied cell". Building a set of all of them instead would
+        # work and would hide the difference between "all of these" and "nobody
+        # said", which is a distinction the rest of this module keeps.
+        allowed = (None if view.available is None
+                   else set(view.available_cells()))
         target = None
 
         if (now is not None and self._last_direction is not None
                 and now - self._last_direction_at <= numpad.CHORD_WINDOW):
             corner = numpad.chord(self._last_direction, direction)
-            if corner is not None and corner in placement.by_cell:
+            if (corner is not None and corner in placement.by_cell
+                    and (allowed is None or corner in allowed)):
                 target = corner
 
         if target is None:
-            target = numpad.step_to_item(view.cursor_cell, direction, placement)
+            target = numpad.step_to_item(view.cursor_cell, direction, placement,
+                                         allowed=allowed)
 
         self._last_direction = direction
         self._last_direction_at = now if now is not None else 0.0
@@ -302,6 +369,15 @@ class RadSession:
             # transition either: nothing moved and nothing was chosen.
             self.meter.raw(recognized=False)
             return None
+        if not view.is_available(index):
+            # RECOGNIZED, AND REFUSED. The key is charged because it cost the
+            # person a keystroke, and rad's IPA should say so -- a menu with
+            # dead cells in it ought to show up as a worse number rather than
+            # as a free mistake. Nothing transitions and the highlight does not
+            # move: landing the cursor on a cell that cannot be chosen is the
+            # state this whole change exists to prevent.
+            self.meter.raw(recognized=True)
+            return None
         self._highlight[-1] = index
         return self.enter()
 
@@ -312,7 +388,16 @@ class RadSession:
             return None
         self.meter.raw(recognized=True)
         count = len(self._stack[-1])
-        self._highlight[-1] = (self._highlight[-1] + delta) % count
+        # Walk in `delta`'s direction until an available wedge, at most one lap.
+        # Stopping on an unavailable one would put the cursor somewhere Enter
+        # refuses, which reads as the key being broken.
+        step = 1 if delta >= 0 else -1
+        position = self._highlight[-1]
+        for _ in range(count):
+            position = (position + (delta if _ == 0 else step)) % count
+            if self.is_available(self._stack[-1][position]):
+                self._highlight[-1] = position
+                break
         self.meter.transition()
         return self.view
 
@@ -330,9 +415,15 @@ class RadSession:
 
         if wedge is None:
             return None
+        if not self.is_available(wedge):
+            # Reachable only if a highlight ended up here anyway -- every route
+            # that moves it skips unavailable cells. Refused rather than
+            # trusted: a guard that only holds while its callers behave is one
+            # nobody can rely on.
+            return None
         if wedge.is_submenu:
             self._stack.append(wedge.children)
-            self._highlight.append(0)
+            self._highlight.append(self._first_available(wedge.children))
             self._path.append(wedge.id)
             return None
 

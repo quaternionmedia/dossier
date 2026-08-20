@@ -1098,7 +1098,8 @@ class DossierApp(App):
         from dossier.rad.session import RadSession
 
         if self._rad is None:
-            self._rad = RadSession(resolve=resolve)
+            self._rad = RadSession(resolve=resolve,
+                                   available=self.rad_can_apply)
 
         def applied(intent) -> None:
             if intent is None:
@@ -1118,6 +1119,11 @@ class DossierApp(App):
     # any selection reads a value rather than raising.
     _scope_owner = None
 
+    # The selected repository, for the same reason and found the same way: a
+    # ring opened before any selection asks for it, and `__init__` is not the
+    # only construction path this app has.
+    _current_project = None
+
     # Actions the ring can commit that map onto a view this app already has.
     # `view.harness` was here and no wedge in the palette names it, so nothing
     # could ever commit it -- a dead entry that made the dispatch look wider
@@ -1135,6 +1141,20 @@ class DossierApp(App):
     # than inferred, and read by `dossier.rad.index.applied_by` so the command
     # sheet marks what is wired instead of implying everything is.
     RAD_HANDLED = frozenset(RAD_VIEWS) | {"project.sync"}
+
+    def rad_can_apply(self, wedge) -> bool:
+        """Whether this app can act on one leaf wedge.
+
+        Passed to `RadSession`, which greys out what comes back false and
+        refuses to select it. Submenus are not asked about -- the session works
+        those out from their descendants, because a verb whose every child is
+        dead should be dead too rather than open onto a level of dead cells.
+
+        `wedge.action or wedge.id` is the same fallback `RadSession.enter` uses
+        to build the intent. Reading it differently here would grey out a wedge
+        the dispatch would in fact have handled, or the reverse.
+        """
+        return (wedge.action or wedge.id) in self.RAD_HANDLED
 
     # How many repositories `6.2` will fetch off two keystrokes without asking
     # again. Above this it states the plan and waits for the same two keys a
