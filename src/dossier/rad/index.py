@@ -212,6 +212,7 @@ def as_markdown(handled: Iterable[str] = (),
             f"{action} | {mark} |")
 
     lines += _sync_section()
+    lines += _ingest_section()
 
     unwired = [c for c, ok in marked if not ok]
     lines += [
@@ -286,3 +287,43 @@ def _sync_section() -> list[str]:
     for tab, reason in sorted(NOT_FROM_SYNC.items()):
         lines.append(f"- `{tab}` -- {reason}")
     return lines
+
+
+def _ingest_section() -> list[str]:
+    """How to get an export into the archive, from the menu.
+
+    Written because somebody could not. The button existed, its handler was on
+    another class, and the button itself sat off the right edge of the screen --
+    so the field could be filled in and submitted to nothing. `PRINCIPLES.md`
+    P14 is what turns that into a menu route rather than a repair and a shrug.
+    """
+    return [
+        "",
+        "## `4.6` -- putting an export into the archive",
+        "",
+        "Conversations are not fetched. Somebody asks the service for an export,",
+        "waits for the mail, and downloads it -- that is a human step by",
+        "construction, and this organisation would want it to be one anyway.",
+        "What follows is everything after the download.",
+        "",
+        "1. Press `m` `4` `6`. The archive opens with the cursor already in the",
+        "   path field -- you do not have to find it.",
+        "2. Type or paste the path to the export. Either the `conversations.json`",
+        "   itself or the folder holding it; surrounding double quotes are",
+        "   stripped, so Windows' *Copy as path* pastes straight in.",
+        "3. Press Enter. The button beside the field does the same thing and is",
+        "   there for a mouse -- neither is the real one.",
+        "",
+        "**The panel does not write the archive.** It asks the harness to unpack",
+        "the export, because the harness owns it. If nothing is listening, the",
+        "refusal names the address it tried and the command that starts one --",
+        "not a silent failure and not a stack trace.",
+        "",
+        "**The count is refreshed before it is reported**, so the number in the",
+        "message and the rows on the screen are one reading rather than two.",
+        "",
+        "**`m` `6` `2` will not help here.** The archive is one of the views a",
+        "sync does not feed: it is the harness's, reached over HTTP, and syncing",
+        "GitHub would not change a row of it. Pressing sync on that tab says so",
+        "rather than reporting nothing to do.",
+    ]

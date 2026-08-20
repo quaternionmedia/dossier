@@ -43,7 +43,7 @@ same cell.
 | `2.2` | `m` `2` `2` | &nbsp;&nbsp;Drifting | `filter.drifting` | **not yet** |
 | `4` | `m` `4` | Reach | *opens a submenu* | yes |
 | `4.8` | `m` `4` `8` | &nbsp;&nbsp;Open in qmcp | `reach.qmcp` | **not yet** |
-| `4.6` | `m` `4` `6` | &nbsp;&nbsp;Ingest deltas | `reach.ingest` | **not yet** |
+| `4.6` | `m` `4` `6` | &nbsp;&nbsp;Ingest deltas | `reach.ingest` | yes |
 | `4.2` | `m` `4` `2` | &nbsp;&nbsp;Reconcile | `reach.reconcile` | **not yet** |
 
 ## `6.2` -- making the view current
@@ -77,6 +77,34 @@ reporting nothing to do:
 - `tab-threads` -- the thread archive is the harness's, reached over HTTP
 - `tab-waiting` -- questions are raised by a harness run, not fetched
 
+## `4.6` -- putting an export into the archive
+
+Conversations are not fetched. Somebody asks the service for an export,
+waits for the mail, and downloads it -- that is a human step by
+construction, and this organisation would want it to be one anyway.
+What follows is everything after the download.
+
+1. Press `m` `4` `6`. The archive opens with the cursor already in the
+   path field -- you do not have to find it.
+2. Type or paste the path to the export. Either the `conversations.json`
+   itself or the folder holding it; surrounding double quotes are
+   stripped, so Windows' *Copy as path* pastes straight in.
+3. Press Enter. The button beside the field does the same thing and is
+   there for a mouse -- neither is the real one.
+
+**The panel does not write the archive.** It asks the harness to unpack
+the export, because the harness owns it. If nothing is listening, the
+refusal names the address it tried and the command that starts one --
+not a silent failure and not a stack trace.
+
+**The count is refreshed before it is reported**, so the number in the
+message and the rows on the screen are one reading rather than two.
+
+**`m` `6` `2` will not help here.** The archive is one of the views a
+sync does not feed: it is the harness's, reached over HTTP, and syncing
+GitHub would not change a row of it. Pressing sync on that tab says so
+rather than reporting nothing to do.
+
 **A command marked not yet is greyed out and cannot be chosen.** Its
 cell is still there and still numbered -- dropping it would renumber
 every command after it, and these numbers are written down. The digit
@@ -86,4 +114,4 @@ dead cells. It is drawn with a dotted border as well as a dimmer ink,
 so the state survives a theme with no dim colour and a terminal that
 approximates.
 
-Not yet applied: `6.8` Advance phase, `6.6` Add note, `2.8` All, `2.6` Synced only, `2.2` Drifting, `4.8` Open in qmcp, `4.6` Ingest deltas, `4.2` Reconcile.
+Not yet applied: `6.8` Advance phase, `6.6` Add note, `2.8` All, `2.6` Synced only, `2.2` Drifting, `4.8` Open in qmcp, `4.2` Reconcile.

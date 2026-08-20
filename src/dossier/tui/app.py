@@ -194,38 +194,6 @@ class ContentViewerScreen(ModalScreen):
                     yield Button("◀ Prev", id="btn-prev-doc", variant="default", disabled=self.doc_index <= 0)
                     yield Button("Next ▶", id="btn-next-doc", variant="default", disabled=self.doc_index >= len(self.doc_list) - 1)
     
-    @on(Button.Pressed, "#btn-ingest-threads")
-    def on_ingest_threads_pressed(self) -> None:
-        """Ask the harness to unpack an export, then show what arrived.
-
-        THE PANEL DOES NOT WRITE THE ARCHIVE. It asks the harness, which owns
-        it. The human act -- requesting the export from the service -- happened
-        before this button existed, and everything after it may be automated.
-        """
-        from dossier.threads import request_import, summarise_import
-
-        field = self.query_one("#thread-export-path", Input)
-        path = (field.value or "").strip().strip('"')
-        if not path:
-            self.notify("Give the path to an export first.",
-                        severity="warning", title="Nothing to ingest")
-            return
-
-        self.notify(f"Asking the harness to unpack {path}...",
-                    title="Ingesting")
-        result = request_import(path)
-        line = summarise_import(result)
-
-        if not result.get("ok"):
-            self.notify(line, severity="error", title="Ingest refused")
-            return
-
-        # Refresh before reporting, so the count in the message and the rows on
-        # the screen are the same reading. Reporting first and refreshing after
-        # is how a panel comes to say one number and show another.
-        self.action_refresh()
-        self.notify(line, title="Ingested")
-
     @on(Button.Pressed, "#btn-close")
     def on_close_pressed(self) -> None:
         self.dismiss()
@@ -776,6 +744,32 @@ class DossierApp(App):
         color: $text-muted;
     }
 
+    /* THE INGEST ROW HAD NO STYLESHEET, AND THE BUTTON WENT OFF THE SCREEN.
+       A Textual `Input` defaults to the full width of its container, so beside
+       a button in a `Horizontal` it takes everything and pushes the button past
+       the right edge -- measured at 140 columns, the button's region started at
+       x=138, leaving two columns of it visible. At an ordinary 80-column
+       terminal it is not on the screen at all. A person could type the path to
+       an export and have nowhere to press.
+
+       So the field flexes and the button is sized by its own label. `min-width`
+       rather than a fixed width, because the label is the thing that decides
+       how wide a button needs to be. */
+    #thread-buttons {
+        height: auto;
+        margin: 1 0 0 0;
+    }
+
+    #thread-export-path {
+        width: 1fr;
+    }
+
+    #btn-ingest-threads {
+        width: auto;
+        min-width: 12;
+        margin: 0 0 0 1;
+    }
+
     #overview-scope {
         padding: 1 1 0 1;
     }
@@ -1140,7 +1134,94 @@ class DossierApp(App):
     # Every ring action this app actually does something with. Declared rather
     # than inferred, and read by `dossier.rad.index.applied_by` so the command
     # sheet marks what is wired instead of implying everything is.
-    RAD_HANDLED = frozenset(RAD_VIEWS) | {"project.sync"}
+    RAD_HANDLED = frozenset(RAD_VIEWS) | {"project.sync", "reach.ingest"}
+
+    @on(Button.Pressed, "#btn-ingest-threads")
+    def on_ingest_threads_pressed(self) -> None:
+        """Ask the harness to unpack an export, then show what arrived.
+
+        **ON THIS CLASS BECAUSE THIS CLASS COMPOSES THE BUTTON.** It lived on
+        `ContentViewerScreen`, a modal document viewer that is not an ancestor
+        of the Threads tab, so the press had nowhere to land and the field
+        could be filled in and submitted to nothing. Textual routes
+        `Button.Pressed` up the widget tree it was pressed in; a handler on an
+        unrelated screen is not on that path and is never called.
+
+        THE PANEL DOES NOT WRITE THE ARCHIVE. It asks the harness, which owns
+        it. The human act -- requesting the export from the service -- happened
+        before this button existed, and everything after it may be automated.
+        """
+        self.ingest_threads_from(self.query_one("#thread-export-path", Input).value)
+
+    def _begin_thread_ingest(self) -> None:
+        """`4.6`. Open the archive and put the cursor where the path goes.
+
+        **THE RING CANNOT ASK FOR THE PATH ITSELF.** It commits an intent and
+        closes -- that is what makes a keystroke count mean anything -- so a
+        command needing free text has to hand off to a surface that can hold
+        one. Handing off is not a lesser outcome: the tab it opens is where the
+        result appears, so a reader ends up looking at the thing they changed.
+
+        The field is focused rather than merely visible. A route that leaves
+        somebody hunting for where to type has moved the work rather than done
+        it, which is the whole complaint `PRINCIPLES.md` P13 is about.
+        """
+        try:
+            self.query_one("#project-tabs").active = "tab-threads"
+        except Exception:
+            pass
+
+        def focus_the_field() -> None:
+            try:
+                field = self.query_one("#thread-export-path", Input)
+            except Exception:
+                return
+            field.focus()
+            self.notify("Type the path to an export, then press Enter.",
+                        title="Ingest an export", timeout=8)
+
+        # After the refresh: the tab's contents are mounted on the way through,
+        # and focusing before that finds nothing and fails silently.
+        self.call_after_refresh(focus_the_field)
+
+    @on(Input.Submitted, "#thread-export-path")
+    def on_thread_export_submitted(self, event) -> None:
+        """Enter in the field does what the button does.
+
+        Without this the keyboard route ends one key short: `4.6` focuses a
+        field that only a mouse can submit, which is a worse outcome than not
+        having the route.
+        """
+        self.ingest_threads_from(event.value)
+
+    def ingest_threads_from(self, path: str | None) -> None:
+        """The ingest itself, reachable without a button.
+
+        Split out so the keyboard route and the mouse route are the same code
+        rather than two implementations that agree until one is edited.
+        """
+        from dossier.threads import request_import, summarise_import
+
+        path = (path or "").strip().strip('"')
+        if not path:
+            self.notify("Give the path to an export first.",
+                        severity="warning", title="Nothing to ingest")
+            return
+
+        self.notify(f"Asking the harness to unpack {path}...",
+                    title="Ingesting")
+        result = request_import(path)
+        line = summarise_import(result)
+
+        if not result.get("ok"):
+            self.notify(line, severity="error", title="Ingest refused")
+            return
+
+        # Refresh before reporting, so the count in the message and the rows on
+        # the screen are the same reading. Reporting first and refreshing after
+        # is how a panel comes to say one number and show another.
+        self.action_refresh()
+        self.notify(line, title="Ingested")
 
     def rad_can_apply(self, wedge) -> bool:
         """Whether this app can act on one leaf wedge.
@@ -1180,6 +1261,10 @@ class DossierApp(App):
             return
         if intent.action == "project.sync":
             self._sync_current_view()
+            return
+        if intent.action == "reach.ingest":
+            self._sync_pending = None
+            self._begin_thread_ingest()
             return
         self._sync_pending = None
         # Named in the palette and not yet handled here. Reported, because a
