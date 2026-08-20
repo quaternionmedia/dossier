@@ -136,3 +136,39 @@ class HarnessAsk(SQLModel, table=True):
     @property
     def outstanding(self) -> bool:
         return self.answered_with is None
+
+
+class DeltaRelation(SQLModel, table=True):
+    """One relation between two deltas, both named by address.
+
+    ADDRESSES ON BOTH SIDES, NOT ROW IDS. A relation crosses repositories and
+    threads by construction, and either end may name a delta this database has
+    never ingested -- an address denotes without existing, and the row may
+    arrive later. A foreign key would make the common case impossible.
+
+    THE VOCABULARY IS CLOSED and lives in `dossier.composition.RELATIONS`. It is
+    not enforced by the column, because a database constraint would make adding
+    the sixth relation a migration rather than a decision; it is enforced at
+    every write, and `governance/qm/records/DRAFT-deltas-compose.md` is what a
+    sixth would change.
+
+    NOTHING HERE FORBIDS A CYCLE. That is the record's clause 7 and the reason
+    this table has no acyclicity check: refusing to store a tangle does not
+    untangle the work, it deletes the evidence that the work is tangled.
+    """
+
+    __tablename__ = "delta_relation"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    source_address: str = Field(index=True)
+    relation: str = Field(index=True)
+    target_address: str = Field(index=True)
+
+    # A relation is a claim, so it says who made it. A detector may propose one;
+    # proposing is not asserting, which is what `proposed` distinguishes.
+    stated_by: Optional[str] = None
+    proposed: bool = False
+
+    note: Optional[str] = None
+    created_at: datetime = Field(default_factory=utcnow)

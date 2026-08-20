@@ -285,6 +285,138 @@ def _store_links(session, delta, links: list[dict]) -> None:
         ))
 
 
+@deltas.command("relate")
+@click.argument("source")
+@click.argument("relation")
+@click.argument("target")
+@click.option("--by", default=None, help="who is stating this")
+@click.option("--proposed", is_flag=True,
+              help="a detector suggests it; proposing is not asserting")
+@click.option("--note", default=None)
+def deltas_relate(source: str, relation: str, target: str, by: str | None,
+                  proposed: bool, note: str | None) -> None:
+    """State that two deltas compose.
+
+    SOURCE and TARGET are addresses -- `<owner>/<repo>/delta/<id>` -- so a
+    relation crosses repositories and threads. Either may name a delta this
+    database has not ingested; an address denotes without existing.
+
+    \b
+    part-of       closing the whole requires closing this
+    same-as       two addresses denote one strand
+    blocks        this must close before that can start
+    crosses       both must happen, they interact at one point, and neither
+                  contains the other
+    derived-from  this strand came out of that one and both continue
+
+    `crosses` is not a weak `blocks`. A block orders whole strands; a crossing
+    orders them at one place and leaves the rest independent. Recording a
+    crossing as a block is how a board comes to say nothing can start.
+    """
+    from sqlmodel import select
+
+    from dossier.composition import RELATIONS, check_address, check_relation
+    from dossier.models.harness import DeltaRelation
+
+    for problem in (check_relation(relation), check_address(source),
+                    check_address(target)):
+        if problem:
+            raise SystemExit(problem)
+    if source == target and relation not in ("same-as", "crosses"):
+        raise SystemExit(
+            f"a delta cannot be {relation!r} itself. Only the symmetric "
+            f"relations are meaningful reflexively, and even those say nothing."
+        )
+
+    with get_session() as session:
+        existing = session.exec(
+            select(DeltaRelation)
+            .where(DeltaRelation.source_address == source)
+            .where(DeltaRelation.relation == relation)
+            .where(DeltaRelation.target_address == target)
+        ).first()
+        if existing is not None:
+            click.echo(f"  [=] already stated"
+                       + (f" by {existing.stated_by}" if existing.stated_by else ""))
+            return
+        session.add(DeltaRelation(
+            source_address=source, relation=relation, target_address=target,
+            stated_by=by, proposed=proposed, note=note))
+        session.commit()
+
+    click.echo(f"  [+] {source}")
+    click.echo(f"      {relation}  ({RELATIONS[relation]})")
+    click.echo(f"      {target}")
+    if proposed:
+        click.echo("      Proposed, not asserted. A detector suggested it.")
+
+
+@deltas.command("tangles")
+def deltas_tangles() -> None:
+    """Every cycle the relations form. Reports, and changes nothing.
+
+    Other trackers refuse a cycle as invalid input. What happens then is that
+    somebody deletes whichever relation the tool complained about, so the tool
+    is consistent and the record is false. A tangle is a fact about the work.
+    """
+    from sqlmodel import select
+
+    from dossier.composition import Edge, render_tangles, tangles
+    from dossier.models.harness import DeltaRelation
+
+    with get_session() as session:
+        edges = [
+            Edge(row.source_address, row.relation, row.target_address,
+                 row.stated_by)
+            for row in session.exec(select(DeltaRelation)).all()
+        ]
+    click.echo(render_tangles(tangles(edges)))
+
+
+@deltas.command("compose")
+@click.argument("address")
+def deltas_compose(address: str) -> None:
+    """What one delta is made of, and what else is the same strand."""
+    from sqlmodel import select
+
+    from dossier.composition import Edge, check_address, parts_of, strands
+    from dossier.models.harness import DeltaRelation
+
+    problem = check_address(address)
+    if problem:
+        raise SystemExit(problem)
+
+    with get_session() as session:
+        edges = [
+            Edge(row.source_address, row.relation, row.target_address,
+                 row.stated_by)
+            for row in session.exec(select(DeltaRelation)).all()
+        ]
+
+    click.echo(f"  {address}")
+    parts, truncated = parts_of(address, edges)
+    if parts:
+        click.echo("")
+        click.echo("  made of")
+        for part in parts:
+            click.echo(f"    {part}")
+        if truncated:
+            click.echo("    ... and deeper. This walk stopped at its bound "
+                       "rather than running on: the relations are allowed to "
+                       "contain a cycle, so an unbounded walk is a hang.")
+    else:
+        click.echo("  Nothing states it is made of anything.")
+
+    same = strands(address, edges)
+    if same:
+        click.echo("")
+        click.echo("  the same strand as")
+        for other in same:
+            click.echo(f"    {other}")
+        click.echo("    Both names are kept. Neither is retired, because "
+                   "documents already cite each of them.")
+
+
 @deltas.command("ingest")
 @click.argument("payload", type=click.Path(exists=True, path_type=Path))
 @click.option("--write", is_flag=True,
