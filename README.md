@@ -220,6 +220,28 @@ uv run dossier github sync-user yourname --limit 1
 | [Extending](docs/extending.md) | Customize for your needs |
 | [Contributing](docs/contributing.md) | Development guide |
 
+### Pages that execute
+
+These run under the ordinary test command, so an example that stops being true
+fails the build instead of misleading you. They are the shortest honest route in.
+
+| Page | What it shows |
+|------|---------------|
+| [01 — First run](walkthrough/01-first-run.md) | what `dossier dashboard` does on your behalf before it opens |
+| [02 — Filling it](walkthrough/02-filling-it.md) | getting real repositories into it |
+| [03 — Before a pull request](walkthrough/03-before-a-pull-request.md) | the gates, and what each one cannot see |
+| [04 — The pair](walkthrough/04-the-pair.md) | dossier beside a harness: two views of one dataset, joined by an address |
+
+**The pair.** dossier is the control panel; [qmcp](https://github.com/quaternionmedia/qmcp)
+is the harness that runs things. Neither imports the other — what crosses is a
+schema, and an address names the same row on both sides. When the two disagree
+about a row, neither wins: the disagreement is itself a unit of work.
+
+**Pointing it at a scratch database.** `DOSSIER_DATABASE_URL=sqlite:///somewhere.db`
+overrides the default, which is otherwise relative to the working directory.
+Use it for anything experimental; it is the difference between a demo and an
+edit to your own data.
+
 ## 📄 Dossier File Format
 
 Export standardized project overviews to `.dossier` files (YAML format):
