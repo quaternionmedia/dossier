@@ -45,6 +45,11 @@ def resolve(context: Any = None) -> tuple[Wedge, ...]:
             Wedge("do.advance", "Advance phase", action="delta.advance"),
             Wedge("do.note", "Add note", action="delta.note"),
             Wedge("do.sync", "Sync project", action="project.sync"),
+            # Fourth, so it lands on a cardinal rather than a corner. `Do` was
+            # three children and is now four, which costs nothing: rad's budget
+            # is 1 + ceil(N/2) + 1, and that is 4 for both three children and
+            # four. A fifth would be the one that costs.
+            Wedge("do.sweep", "Sweep a dependency", action="sweep.review"),
         )),
         Wedge(SHOW, "Show", children=(
             Wedge("show.all", "All", action="filter.all"),

@@ -1104,6 +1104,15 @@ class DossierApp(App):
                     # the only human surface for it: a second one would be a
                     # second definition of what a figure means, and the CLI
                     # beside it is for machines and for debugging.
+                    # One sweep: what may be approved together, and what may
+                    # not. Its own tab rather than a modal, because a person
+                    # comes back to a review and a modal is a thing you are
+                    # inside of rather than a thing you can leave and return to.
+                    with TabPane("Sweep", id="tab-sweep"):
+                        with Vertical():
+                            yield Static("", id="sweep-summary")
+                            yield DataTable(id="sweep-table")
+                            yield Static("", id="sweep-note")
                     with TabPane("Threads", id="tab-threads"):
                         yield DataTable(id="threads-table")
                         with Horizontal(id="thread-buttons"):
@@ -1210,7 +1219,8 @@ class DossierApp(App):
     # Every ring action this app actually does something with. Declared rather
     # than inferred, and read by `dossier.rad.index.applied_by` so the command
     # sheet marks what is wired instead of implying everything is.
-    RAD_HANDLED = frozenset(RAD_VIEWS) | {"project.sync", "reach.ingest"}
+    RAD_HANDLED = frozenset(RAD_VIEWS) | {"project.sync", "reach.ingest",
+                                          "sweep.review"}
 
     @on(Button.Pressed, "#btn-ingest-threads")
     def on_ingest_threads_pressed(self) -> None:
@@ -1349,6 +1359,64 @@ class DossierApp(App):
             loaded.discard(tab_id)
         self._load_tab_data(tab_id)
 
+    # Which dependency `6.4` reviews when nobody has said. The widest-shared
+    # one is not a default so much as the only starting point that is not
+    # arbitrary: it is where one decision saves the most repeated ones, and
+    # where getting it wrong costs the most, and those are the same number.
+    #
+    # It is still a guess about intent, so the screen says which it picked.
+    SWEEP_DEFAULT_TO = "0.116.0"
+
+    def _begin_sweep_review(self) -> None:
+        """`6.4`. Review the widest-shared dependency across the organisation.
+
+        Opens the tab first and fills it from a worker: the sweep reads every
+        declared dependency in the database and runs a worker per share, which
+        is not something to do on the loop a person is looking at.
+        """
+        try:
+            self.query_one("#project-tabs").active = "tab-sweep"
+        except Exception:
+            pass
+        self._progress_start("working out what a sweep would touch")
+        self._run_sweep_review()
+
+    @work(thread=True, exclusive=True, group="sweep-review")
+    def _run_sweep_review(self) -> None:
+        from dossier.approval import review as arrange
+        from dossier.sweep import find, plan, shared_needs
+
+        try:
+            with self.session_factory() as session:
+                widest = shared_needs(session, at_least=2)
+                if not widest:
+                    self.call_from_thread(
+                        self._sweep_review_failed,
+                        "nothing is declared by two repositories, so there is "
+                        "nothing to sweep")
+                    return
+                package, _ = widest[0]
+                planned = plan(find(session, package), self.SWEEP_DEFAULT_TO)
+        except Exception as exc:                  # noqa: BLE001
+            self.call_from_thread(self._sweep_review_failed,
+                                  f"{type(exc).__name__}: {exc}")
+            return
+
+        outcomes = _dispatch(planned, self.SWEEP_DEFAULT_TO)
+        found = arrange(planned.address,
+                        f"{package} to {self.SWEEP_DEFAULT_TO}", outcomes)
+        self.call_from_thread(self._sweep_review_ready, found)
+
+    def _sweep_review_ready(self, found) -> None:
+        self._sweep_review = found
+        self._progress_finish(found.summary())
+        self.reload_tab("tab-sweep")
+        self.notify(found.summary(), title="Sweep", timeout=8)
+
+    def _sweep_review_failed(self, said: str) -> None:
+        self._progress_finish(said)
+        self.notify(said, severity="error", title="Sweep", timeout=8)
+
     # --- progress, wherever the panel happens to be --------------------------
     #
     # A worker calls these through `call_from_thread` and never touches a widget
@@ -1420,6 +1488,10 @@ class DossierApp(App):
         if intent.action == "reach.ingest":
             self._sync_pending = None
             self._begin_thread_ingest()
+            return
+        if intent.action == "sweep.review":
+            self._sync_pending = None
+            self._begin_sweep_review()
             return
         self._sync_pending = None
         # Named in the palette and not yet handled here. Reported, because a
@@ -3187,6 +3259,19 @@ class DossierApp(App):
             self._render_facet_at_org(facet, owner)
             return
 
+        # TABS THAT ARE NOT ABOUT A REPOSITORY LOAD BEFORE THE SELECTION GATE.
+        # A sweep spans the organisation and the archive belongs to the harness;
+        # neither is scoped to a project, and both drew blank on a fresh
+        # installation because the gate below returned first. The gate is right
+        # for the repository tabs and wrong for these.
+        unscoped = {
+            "tab-sweep": self._load_sweep_tab,
+            "tab-threads": self._load_threads_tab,
+        }
+        if tab_id in unscoped:
+            unscoped[tab_id](getattr(self, "_current_project", None))
+            return
+
         project = getattr(self, "_current_project", None)
         if not project:
             return
@@ -3206,6 +3291,9 @@ class DossierApp(App):
             # Reads the harness over HTTP rather than the database, so it takes
             # no project -- the archive is not scoped to one repository.
             "tab-threads": self._load_threads_tab,
+            # Reads no database of its own: a review is arranged from a
+            # dispatcher run, and is empty until somebody asks for one.
+            "tab-sweep": self._load_sweep_tab,
         }
         
         loader = loaders.get(tab_id)
@@ -3934,6 +4022,55 @@ class DossierApp(App):
             
             if not has_components:
                 components_table.add_row("", "(No component relationships)", "", "", key="empty")
+
+    # The sweep a person is reviewing. None until one is asked for: a screen
+    # that invented a default sweep would be proposing work nobody chose.
+    _sweep_review = None
+
+    def _load_sweep_tab(self, project=None) -> None:
+        """Draw the review: every batch, then everything waiting.
+
+        BATCHES FIRST AND THE QUEUE LAST, WITH THE COUNT OF THE QUEUE AT THE
+        TOP. A reader scans down and stops when they have what they came for,
+        so the thing they must not miss goes where they start rather than where
+        they stop.
+        """
+        table = self.query_one("#sweep-table", DataTable)
+        table.clear(columns=True)
+        table.add_columns("repo", "change", "asking")
+
+        review = self._sweep_review
+        if review is None:
+            table.add_row("--", "no sweep asked for yet", "--", key="empty")
+            self.query_one("#sweep-summary", Static).update(
+                "Press [b]m 6 4[/b] to review a sweep.")
+            self.query_one("#sweep-note", Static).update("")
+            return
+
+        self.query_one("#sweep-summary", Static).update(review.summary())
+
+        from dossier.approval import batch_is_uniform
+
+        for index, batch in enumerate(review.batches):
+            uniform = "one approval" if batch_is_uniform(batch) else "NOT UNIFORM"
+            table.add_row(f"[b]batch {index + 1}[/b]", batch.change, uniform,
+                          key=f"batch-{index}")
+            for row_index, row in enumerate(batch.rows()):
+                table.add_row(*row, key=f"batch-{index}-{row_index}")
+
+        if review.queue:
+            table.add_row("[b]queue[/b]",
+                          f"{len(review.queue)} waiting on a person",
+                          "one at a time", key="queue")
+            for row_index, item in enumerate(review.queue):
+                table.add_row(item.repo, item.detail[:60], item.asking,
+                              key=f"queue-{row_index}")
+
+        self.query_one("#sweep-note", Static).update(
+            "A batch is approvable only while every edit in it is identical. "
+            "The queue is not a failure list: it is work waiting on a person, "
+            "each row carrying why. Approving is a person's act -- "
+            "governance/qm/ci/attested-registry.yaml.")
 
     def _load_threads_tab(self, project=None) -> None:
         """Fill the archive table from the same facet the overview reads.
@@ -8947,3 +9084,46 @@ def run_tui() -> None:
 
 if __name__ == "__main__":
     run_tui()
+
+
+def _dispatch(planned, to_version):
+    """Run a sweep's shares, through the harness if it is installed.
+
+    **THE PANEL DOES NOT DEPEND ON THE HARNESS, AND THIS IS WHERE THAT SHOWS.**
+    `qmcp` is a separate repository with no dependency between them, so it may
+    simply not be importable -- and a review that raised in that case would make
+    the seam a requirement rather than a seam. The fallback runs the same
+    contract this side, and says so on every row it produces.
+    """
+    shares = [{"project": s.project, "shape": s.shape,
+               "declared": s.declared, "why": s.why} for s in planned.shares]
+    try:
+        from qmcp.sweep import run as harness_run
+
+        return harness_run(shares, to_version).outcomes
+    except ImportError:
+        return [_locally(share, to_version) for share in shares]
+
+
+class _Outcome:
+    """Shaped like the harness's, for when the harness is not installed."""
+
+    __slots__ = ("project", "state", "detail", "edit")
+
+    def __init__(self, project, state, detail="", edit=None):
+        self.project, self.state, self.detail, self.edit = (
+            project, state, detail, edit)
+
+
+def _locally(share, to_version):
+    from dossier.sweep import MECHANICAL, bump
+
+    if share.get("shape") != MECHANICAL:
+        return _Outcome(share["project"], "needs a worker",
+                        share.get("why") or "needs judgement")
+    edit = bump(share.get("declared"), to_version)
+    if edit is None:
+        return _Outcome(share["project"], "refused",
+                        f"{share.get('declared')!r} is not a single constraint")
+    return _Outcome(share["project"], "done",
+                    f"{share.get('declared')} -> {edit}", edit)
