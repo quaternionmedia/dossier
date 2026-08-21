@@ -241,3 +241,60 @@ def summarise_import(result: dict[str, Any]) -> str:
 
     return (f"{', '.join(parts)}. Archive now {indexed.get('threads', '?')} "
             f"thread(s), {indexed.get('diverged', 0)} disagreeing.")
+
+
+def request_reindex(base: str | None = None,
+                    timeout: float = 120.0) -> dict[str, Any]:
+    """Ask the harness to rebuild its index from what it already holds.
+
+    **NOT AN IMPORT, AND THAT IS THE WHOLE POINT.** Refreshing through
+    `/v1/threads/import` would need a path to an export somebody may no longer
+    have, and would re-unpack megabytes to answer a question about what is
+    already unpacked. This asks for the reading, not the ingest.
+
+    A long timeout: re-indexing reads every session on the machine. The two
+    seconds the listing uses would turn a working refresh into a panel that
+    said it failed.
+
+    Every failure is a returned state with a sentence. Nothing raises into a
+    key handler.
+    """
+    import httpx
+
+    base = base or base_url()
+    try:
+        with httpx.Client(base_url=base, timeout=timeout) as client:
+            response = client.post("/v1/threads/reindex", json={})
+    except Exception as exc:                      # noqa: BLE001
+        return {"ok": False,
+                "reason": f"The harness is not answering on {base} "
+                          f"({type(exc).__name__}).",
+                "fix": "Start it: uv run python -m qmcp serve"}
+
+    if response.status_code == 404:
+        return {"ok": False,
+                "reason": "This harness has no reindex route.",
+                "fix": "It predates the route; update it, or use Ingest."}
+    if response.status_code != 200:
+        return {"ok": False,
+                "reason": f"The harness refused: {response.status_code}"}
+    try:
+        body = response.json()
+    except ValueError:
+        return {"ok": False,
+                "reason": "The harness answered with something that is not JSON."}
+    return {"ok": True, **body}
+
+
+def summarise_reindex(result: dict[str, Any]) -> str:
+    """One line for a notification, whatever happened."""
+    if not result.get("ok"):
+        return f"{result.get('reason', 'Reindex failed.')} {result.get('fix', '')}".strip()
+    indexed = result.get("indexed") or {}
+    threads = indexed.get("threads")
+    diverged = indexed.get("diverged", 0)
+    # `unknown` rather than 0: a harness that did not say how many it holds has
+    # not told us it holds none.
+    return (f"Reindexed. Archive holds "
+            f"{'unknown' if threads is None else threads} thread(s), "
+            f"{diverged} disagreeing.")

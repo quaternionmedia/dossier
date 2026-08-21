@@ -45,7 +45,7 @@ same cell.
 | `4` | `m` `4` | Reach | *opens a submenu* | yes |
 | `4.8` | `m` `4` `8` | &nbsp;&nbsp;Open in qmcp | `reach.qmcp` | **not yet** |
 | `4.6` | `m` `4` `6` | &nbsp;&nbsp;Ingest deltas | `reach.ingest` | yes |
-| `4.2` | `m` `4` `2` | &nbsp;&nbsp;Reconcile | `reach.reconcile` | **not yet** |
+| `4.2` | `m` `4` `2` | &nbsp;&nbsp;Reconcile | `reach.reconcile` | yes |
 
 ## `6.2` -- making the view current
 
@@ -115,4 +115,4 @@ dead cells. It is drawn with a dotted border as well as a dimmer ink,
 so the state survives a theme with no dim colour and a terminal that
 approximates.
 
-Not yet applied: `6.8` Advance phase, `6.6` Add note, `2.8` All, `2.6` Synced only, `2.2` Drifting, `4.8` Open in qmcp, `4.2` Reconcile.
+Not yet applied: `6.8` Advance phase, `6.6` Add note, `2.8` All, `2.6` Synced only, `2.2` Drifting, `4.8` Open in qmcp.

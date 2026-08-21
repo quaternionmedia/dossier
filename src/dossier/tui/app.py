@@ -1220,7 +1220,7 @@ class DossierApp(App):
     # than inferred, and read by `dossier.rad.index.applied_by` so the command
     # sheet marks what is wired instead of implying everything is.
     RAD_HANDLED = frozenset(RAD_VIEWS) | {"project.sync", "reach.ingest",
-                                          "sweep.review"}
+                                          "sweep.review", "reach.reconcile"}
 
     @on(Button.Pressed, "#btn-ingest-threads")
     def on_ingest_threads_pressed(self) -> None:
@@ -1417,6 +1417,82 @@ class DossierApp(App):
         self._progress_finish(said)
         self.notify(said, severity="error", title="Sweep", timeout=8)
 
+    # The stages of a refresh, in the order they have to happen. Named here
+    # because a person watching wants to know which part is slow, and because a
+    # stage that silently did nothing would otherwise be indistinguishable from
+    # one that was quick.
+    RECONCILE_STAGES = (
+        ("reindex", "asking the harness to rebuild its index"),
+        ("refetch", "reading the archive back over the seam"),
+        ("redraw", "clearing the panel's own caches and drawing again"),
+    )
+
+    def _begin_reconcile(self) -> None:
+        """`4.2`. Refresh every cache and reconcile the panel with the harness.
+
+        **THIS IS NOT AN IMPORT.** Nothing is unpacked and no export is needed:
+        the harness rebuilds its index from what it already holds, and the panel
+        throws away what it had cached and reads again. That is the difference
+        between "get me a fresh reading" and "take in this new thing", and
+        having only the second is what made refreshing require a path to an
+        export somebody might not still have.
+        """
+        try:
+            self.query_one("#project-tabs").active = "tab-threads"
+            self._load_tab_data("tab-threads")
+        except Exception:
+            pass
+        self._progress_start(self.RECONCILE_STAGES[0][1],
+                             total=len(self.RECONCILE_STAGES))
+        self._run_reconcile()
+
+    @work(thread=True, exclusive=True, group="reconcile")
+    def _run_reconcile(self) -> None:
+        """Off the loop: re-indexing reads every session on the machine.
+
+        Each stage reports before it starts rather than after it finishes, so
+        the label names what is happening now and not what just did.
+        """
+        from dossier.threads import fetch, request_reindex, summarise_reindex
+
+        result = request_reindex()
+        line = summarise_reindex(result)
+        if not result.get("ok"):
+            self.call_from_thread(self._reconcile_failed, line)
+            return
+
+        self.call_from_thread(self._progress_advance, 1,
+                              len(self.RECONCILE_STAGES),
+                              self.RECONCILE_STAGES[1][1])
+        archive = fetch()
+
+        self.call_from_thread(self._progress_advance, 2,
+                              len(self.RECONCILE_STAGES),
+                              self.RECONCILE_STAGES[2][1])
+        self.call_from_thread(self._reconcile_finished, line, archive)
+
+    def _reconcile_finished(self, line: str, archive) -> None:
+        # Every cache the panel keeps, not just the tab in front of somebody.
+        # A refresh that left the other tabs stale would be a refresh a person
+        # has to remember the scope of.
+        loaded = getattr(self, "_tabs_loaded", None)
+        if loaded is not None:
+            loaded.clear()
+        try:
+            self.query_one(OverviewPanel).refresh_overview()
+        except Exception:
+            pass
+        self.action_refresh()
+        self.reload_tab("tab-threads")
+
+        reachable = "" if archive.reachable else "  (the archive did not answer)"
+        self._progress_finish(line + reachable)
+        self.notify(line, title="Reconciled", timeout=6)
+
+    def _reconcile_failed(self, said: str) -> None:
+        self._progress_finish(said)
+        self.notify(said, severity="error", title="Reconcile", timeout=8)
+
     # --- progress, wherever the panel happens to be --------------------------
     #
     # A worker calls these through `call_from_thread` and never touches a widget
@@ -1492,6 +1568,10 @@ class DossierApp(App):
         if intent.action == "sweep.review":
             self._sync_pending = None
             self._begin_sweep_review()
+            return
+        if intent.action == "reach.reconcile":
+            self._sync_pending = None
+            self._begin_reconcile()
             return
         self._sync_pending = None
         # Named in the palette and not yet handled here. Reported, because a

@@ -203,14 +203,29 @@ def test_the_client_never_authors_the_archive(monkeypatch):
     useful. What must never happen is the panel writing a thread row, a digest
     or a history entry.
     """
+    import re
     from pathlib import Path
 
     source = Path(client.__file__).read_text(encoding="utf-8")
     for verb in (".put(", ".patch(", ".delete("):
         assert verb not in source, f"{verb} would make this an author"
-    # The one write it may ask for, and it is a request rather than an edit.
-    assert source.count(".post(") == 1
-    assert "/v1/threads/import" in source
+
+    # WHAT THE PANEL MAY ASK FOR, NAMED. A count of `.post(` was the previous
+    # assertion, and it is the same proxy this docstring warns about one
+    # paragraph up: it fired when a second request was added -- asking the
+    # harness to rebuild its own index -- which authors nothing. Counting posts
+    # measures how many requests exist; the rule is about what they ask for.
+    MAY_ASK = {
+        "/v1/threads/import",    # unpack an export the operator pointed at
+        "/v1/threads/reindex",   # rebuild the index from what is already held
+    }
+    posted = set(re.findall(r'client\.post\(\s*"([^"]+)"', source))
+    assert len(posted) >= 2, (
+        f"only found {posted}; the pattern is not matching the real calls, so "
+        f"this would pass a panel that posted anywhere")
+    assert posted <= MAY_ASK, (
+        f"the panel asks for {sorted(posted - MAY_ASK)}, which is not a route "
+        f"where the harness does its own job")
 
 
 def test_asking_for_an_import_is_a_state_not_an_exception(monkeypatch):
