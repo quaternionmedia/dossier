@@ -382,6 +382,81 @@ def wired_actions_exist_in_the_menu() -> Result:
                   f"by a wedge", because)
 
 
+def the_database_being_read_is_the_one_with_the_data() -> Result:
+    """The live database, against every other one this installation might open.
+
+    **THE ONLY CHECK HERE THAT LOOKS AT RUNTIME STATE RATHER THAN SOURCE.** The
+    other eight read files in the repository and would give the same answer on
+    any machine. This one cannot: it is about which database *this process*
+    resolved, which is a property of the working directory and nothing else.
+
+    A DEFECT NEEDS SOMEBODY TO BE WRONG, AND HERE NOTHING IS. `sqlite:///dossier.db`
+    is relative, sqlite creates what is missing, and every panel then truthfully
+    reports what it read. The failure is that an empty database and a quiet
+    week render identically, which is the thing this corpus keeps saying is not
+    allowed: unknown is a value, never zero.
+    """
+    because = ("a command run from the wrong directory created an empty "
+               "`dossier.db` beside it and every view read zero. Nothing was "
+               "broken and nothing said so -- the panel reported the counts of "
+               "a database created seconds earlier by the act of reading it")
+    try:
+        from dossier.health import candidate_databases
+        from dossier.sources import open_database
+    except Exception as error:                     # noqa: BLE001
+        return Result("live-database", UNKNOWN, f"cannot ask: {error}", because)
+
+    live = open_database()
+    if live is None:
+        return Result("live-database", UNKNOWN,
+                      "this installation is not on sqlite", because)
+
+    populated = [(path, rows) for path, rows in
+                 ((p, _rows_in(p)) for p in candidate_databases())
+                 if rows > 0]
+    live_rows = _rows_in(live)
+
+    if live_rows > 0:
+        return Result("live-database", PASS,
+                      f"reading {live.name} with {live_rows} project row(s)",
+                      because)
+    if populated:
+        where = ", ".join(str(path) for path, _ in populated)
+        return Result("live-database", FAIL,
+                      f"reading an empty {live} while a populated database "
+                      f"exists at {where}", because)
+    # **NOT "nothing has been ingested".** `candidate_databases` searches the
+    # working directory and the home directory, so from anywhere else a
+    # populated database is not absent -- it is out of view. Saying the first
+    # would be this check committing the error it was written to catch, and it
+    # did say exactly that until somebody ran it from the wrong directory.
+    searched = ", ".join(str(p) for p in candidate_databases()) or "nothing"
+    return Result("live-database", UNKNOWN,
+                  f"{live} is empty, and the only databases visible from this "
+                  f"working directory ({searched}) are empty too. This does "
+                  f"not mean nothing is ingested -- a populated database "
+                  f"outside this directory would not be seen from here",
+                  because)
+
+
+def _rows_in(path: Path) -> int:
+    """Projects in a database, or 0 for one that cannot be read.
+
+    **DOES NOT CREATE.** `sqlite3.connect` makes a file, which is the failure
+    this check exists for -- a check that produced the defect while looking for
+    it would report every candidate present and every one empty.
+    """
+    import sqlite3
+
+    if not path.is_file():
+        return 0
+    try:
+        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
+            return db.execute("select count(*) from project").fetchone()[0]
+    except Exception:                              # noqa: BLE001
+        return 0
+
+
 CHECKS: tuple[Callable[[], Result], ...] = (
     buttons_are_handled_where_they_live,
     composed_tabs_have_loaders,
@@ -391,6 +466,7 @@ CHECKS: tuple[Callable[[], Result], ...] = (
     tests_do_not_leak_module_state,
     documented_routes_resolve,
     wired_actions_exist_in_the_menu,
+    the_database_being_read_is_the_one_with_the_data,
 )
 
 
