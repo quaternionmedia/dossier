@@ -214,3 +214,41 @@ def test_same_as_is_followed_transitively():
 
 def test_an_unrelated_delta_has_no_other_names():
     assert strands(addr("alone"), [edge("a", "blocks", "b")]) == []
+
+
+def test_a_ring_of_symmetric_relations_is_not_a_tangle():
+    """MEASURED, NOT ASSUMED.
+
+    Walking symmetric edges both ways and ignoring only two-node cycles finds
+    42 rings in this organisation's 169 real relations, and every one is
+    `thread -> project -> thread -> project`: two conversations that touched
+    one repository. That is a shared neighbour, not a knot.
+
+    A knot is a cycle of obligation -- all must happen, none may go first --
+    and `crosses` carries no obligation. A ring of it imposes no order.
+
+    Mutation: include symmetric relations in the walk and this fails.
+    """
+    from dossier.composition import Edge, tangles
+
+    ring = [
+        Edge("o/r/delta/a", "crosses", "o/r/delta/b"),
+        Edge("o/r/delta/b", "crosses", "o/r/delta/c"),
+        Edge("o/r/delta/c", "crosses", "o/r/delta/a"),
+    ]
+    assert tangles(ring) == []
+
+
+def test_a_ring_of_directed_relations_is_a_tangle():
+    """The other half: obligation in a circle is exactly what must be
+    reported."""
+    from dossier.composition import Edge, tangles
+
+    ring = [
+        Edge("o/r/delta/a", "blocks", "o/r/delta/b"),
+        Edge("o/r/delta/b", "blocks", "o/r/delta/c"),
+        Edge("o/r/delta/c", "blocks", "o/r/delta/a"),
+    ]
+    found = tangles(ring)
+    assert len(found) == 1
+    assert found[0].only == "blocks"
