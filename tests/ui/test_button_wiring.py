@@ -115,7 +115,7 @@ def test_no_handler_names_a_button_that_is_not_composed():
 
 
 @pytest.mark.asyncio
-async def test_pressing_ingest_actually_reaches_the_ingest_code():
+async def test_pressing_ingest_actually_reaches_the_ingest_code(monkeypatch):
     """The static check proves the handler is on the right class. This proves a
     press arrives, which is the thing that was broken.
 
@@ -136,7 +136,13 @@ async def test_pressing_ingest_actually_reaches_the_ingest_code():
         await pilot.pause()
         import dossier.threads as threads_module
 
-        threads_module.request_import = (
+        # `monkeypatch`, not a bare assignment. A plain assignment here leaks
+        # the stub into every test that runs afterwards in the same process --
+        # which is invisible under a fixed order and immediate under a random
+        # one. Three tests in `test_threads_client.py` failed on the first
+        # randomised run because this module had already replaced the real
+        # `request_import` and never put it back.
+        monkeypatch.setattr(threads_module, "request_import",
             lambda path, *a, **k: asked.append(path) or {"ok": False, "error": "stub"})
 
         app.query_one("#project-tabs").active = "tab-threads"
@@ -198,7 +204,7 @@ async def test_the_ingest_button_is_on_the_screen(size):
 
 
 @pytest.mark.asyncio
-async def test_enter_in_the_path_field_ingests_without_the_button():
+async def test_enter_in_the_path_field_ingests_without_the_button(monkeypatch):
     """The keyboard route has to end somewhere. `4.6` focuses this field, and a
     field only a mouse can submit would make that route one key short of
     useful.
@@ -219,7 +225,13 @@ async def test_enter_in_the_path_field_ingests_without_the_button():
         await pilot.pause()
         import dossier.threads as threads_module
 
-        threads_module.request_import = (
+        # `monkeypatch`, not a bare assignment. A plain assignment here leaks
+        # the stub into every test that runs afterwards in the same process --
+        # which is invisible under a fixed order and immediate under a random
+        # one. Three tests in `test_threads_client.py` failed on the first
+        # randomised run because this module had already replaced the real
+        # `request_import` and never put it back.
+        monkeypatch.setattr(threads_module, "request_import",
             lambda path, *a, **k: asked.append(path) or {"ok": False, "error": "stub"})
 
         app.query_one("#project-tabs").active = "tab-threads"

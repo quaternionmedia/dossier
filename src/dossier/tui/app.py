@@ -443,6 +443,81 @@ class SyncStatusWidget(Static):
         self.query_one("#rate-label", Label).update(f"Rate: {value}/{self.rate_limit}")
 
 
+class WorkProgress(Vertical):
+    """What a long operation is doing, while it is doing it.
+
+    **INDETERMINATE UNLESS SOMEBODY KNOWS THE FRACTION.** An import is one
+    request to the harness: it is sent, and later it is answered. Nothing in
+    between reports a percentage, so a bar creeping to sixty would be a number
+    this application made up -- and a made-up number is worse than no number,
+    because a reader checks it and stops looking. `start(total=N)` is for the
+    cases that genuinely count, like a batch sync over N repositories.
+
+    THE ELAPSED SECONDS ARE THE HONEST FIGURE. They are measured, they always
+    exist, and they are what tells somebody the difference between slow and
+    stuck -- which is the actual question behind wanting a progress bar.
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Label("", id="work-progress-label")
+        yield ProgressBar(total=None, show_eta=False, id="work-progress-bar")
+
+    def on_mount(self) -> None:
+        self.display = False
+        self._started = 0.0
+        self._what = ""
+        self._timer = None
+
+    def start(self, what: str, total: int | None = None) -> None:
+        """Show the panel and begin counting. `total` only when it is known."""
+        import time
+
+        self._what = what
+        self._started = time.monotonic()
+        self.display = True
+        bar = self.query_one("#work-progress-bar", ProgressBar)
+        bar.total = total
+        if total is not None:
+            bar.update(progress=0)
+        self._tick()
+        if self._timer is None:
+            # Twice a second: fast enough to read as alive, slow enough that the
+            # tick is not competing with the work for the event loop.
+            self._timer = self.set_interval(0.5, self._tick)
+
+    def advance(self, done: int, of: int, what: str | None = None) -> None:
+        """For work that really does know how far along it is."""
+        if what:
+            self._what = what
+        bar = self.query_one("#work-progress-bar", ProgressBar)
+        bar.total = of
+        bar.update(progress=done)
+        self._tick()
+
+    def finish(self, said: str) -> None:
+        """Stop, and leave the outcome on screen rather than vanishing.
+
+        A panel that disappears takes the only record of what happened with it,
+        and the reader was probably looking somewhere else when it did.
+        """
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+        self.query_one("#work-progress-label", Label).update(
+            f"{said}  ({self._elapsed():.0f}s)")
+        self.query_one("#work-progress-bar", ProgressBar).display = False
+
+    def _elapsed(self) -> float:
+        import time
+
+        return time.monotonic() - self._started
+
+    def _tick(self) -> None:
+        self.query_one("#work-progress-bar", ProgressBar).display = True
+        self.query_one("#work-progress-label", Label).update(
+            f"{self._what}  ({self._elapsed():.0f}s)")
+
+
 class ProjectDetailPanel(Vertical):
     """Panel showing detailed project information."""
     
@@ -1038,6 +1113,7 @@ class DossierApp(App):
                                         id="thread-export-path")
                             yield Button("Ingest", id="btn-ingest-threads",
                                          variant="primary")
+                        yield WorkProgress(id="thread-progress")
                     with TabPane("Governance", id="tab-governance"):
                         with Vertical():
                             yield Static("", id="governance-age")
@@ -1168,6 +1244,10 @@ class DossierApp(App):
         """
         try:
             self.query_one("#project-tabs").active = "tab-threads"
+            # Filled on arrival rather than left to whatever fires on a tab
+            # change: a person routed here by `4.6` should see the archive they
+            # are about to add to, not an empty table.
+            self._load_tab_data("tab-threads")
         except Exception:
             pass
 
@@ -1200,18 +1280,45 @@ class DossierApp(App):
         Split out so the keyboard route and the mouse route are the same code
         rather than two implementations that agree until one is edited.
         """
-        from dossier.threads import request_import, summarise_import
-
         path = (path or "").strip().strip('"')
         if not path:
             self.notify("Give the path to an export first.",
                         severity="warning", title="Nothing to ingest")
             return
 
-        self.notify(f"Asking the harness to unpack {path}...",
-                    title="Ingesting")
+        # **OFF THE EVENT LOOP, AND THAT IS THE POINT.** This used to call
+        # `request_import` here. A real export is twenty-five megabytes and the
+        # harness reindexes every session afterwards, so the whole application
+        # stopped repainting and stopped taking keys for the duration -- and a
+        # progress bar would have been frozen too, which is the one thing worse
+        # than not having one. The work goes to a thread; the bar is on the
+        # loop, so it can move.
+        try:
+            self.query_one("#thread-progress", WorkProgress).start(
+                f"asking the harness to unpack {path}")
+        except Exception:
+            pass
+        self._run_thread_ingest(path)
+
+    @work(thread=True, exclusive=True, group="thread-ingest")
+    def _run_thread_ingest(self, path: str) -> None:
+        """Ask the harness, then report on the loop.
+
+        Everything touching the screen goes through `call_from_thread`: a widget
+        updated from a worker thread is a race, and the kind that shows up as a
+        redraw that never happens rather than as an error.
+        """
+        from dossier.threads import request_import, summarise_import
+
         result = request_import(path)
         line = summarise_import(result)
+        self.call_from_thread(self._thread_ingest_finished, result, line)
+
+    def _thread_ingest_finished(self, result: dict, line: str) -> None:
+        try:
+            self.query_one("#thread-progress", WorkProgress).finish(line)
+        except Exception:
+            pass
 
         if not result.get("ok"):
             self.notify(line, severity="error", title="Ingest refused")
@@ -1220,8 +1327,56 @@ class DossierApp(App):
         # Refresh before reporting, so the count in the message and the rows on
         # the screen are the same reading. Reporting first and refreshing after
         # is how a panel comes to say one number and show another.
+        #
+        # **AND RELOAD THE TAB, NOT JUST THE PROJECT LIST.** `action_refresh`
+        # reloads projects; the archive is somebody else's data on a different
+        # tab, and `_load_tab_data` caches by id, so the table a person was
+        # watching stayed empty while the message said two hundred and three.
+        # Measured: rows after a real ingest were 0.
         self.action_refresh()
+        self.reload_tab("tab-threads")
         self.notify(line, title="Ingested")
+
+    def reload_tab(self, tab_id: str) -> None:
+        """Load a tab's data again, cache or no cache.
+
+        `_load_tab_data` returns immediately for a tab it has already filled,
+        which is right for switching between tabs and wrong after the data
+        underneath one has changed.
+        """
+        loaded = getattr(self, "_tabs_loaded", None)
+        if loaded is not None:
+            loaded.discard(tab_id)
+        self._load_tab_data(tab_id)
+
+    # --- progress, wherever the panel happens to be --------------------------
+    #
+    # A worker calls these through `call_from_thread` and never touches a widget
+    # itself. They find the panel rather than being handed one, so a caller does
+    # not have to know which tab is showing -- and they are quiet when there is
+    # no panel, because a sync started from the command line has no screen and
+    # should not fail for the want of one.
+
+    def _progress_panel(self):
+        try:
+            return self.query_one("#thread-progress", WorkProgress)
+        except Exception:
+            return None
+
+    def _progress_start(self, what: str, total: int | None = None) -> None:
+        panel = self._progress_panel()
+        if panel is not None:
+            panel.start(what, total)
+
+    def _progress_advance(self, done: int, of: int, what: str) -> None:
+        panel = self._progress_panel()
+        if panel is not None:
+            panel.advance(done, of, what)
+
+    def _progress_finish(self, said: str) -> None:
+        panel = self._progress_panel()
+        if panel is not None:
+            panel.finish(said)
 
     def rad_can_apply(self, wedge) -> bool:
         """Whether this app can act on one leaf wedge.
@@ -3048,6 +3203,9 @@ class DossierApp(App):
             "tab-releases": self._load_releases_tab,
             "tab-components": self._load_components_tab,
             "tab-deltas": self._load_deltas_tab,
+            # Reads the harness over HTTP rather than the database, so it takes
+            # no project -- the archive is not scoped to one repository.
+            "tab-threads": self._load_threads_tab,
         }
         
         loader = loaders.get(tab_id)
@@ -3776,6 +3934,36 @@ class DossierApp(App):
             
             if not has_components:
                 components_table.add_row("", "(No component relationships)", "", "", key="empty")
+
+    def _load_threads_tab(self, project=None) -> None:
+        """Fill the archive table from the same facet the overview reads.
+
+        **THIS DID NOT EXIST, AND THAT IS WHY NOTHING EVER APPEARED HERE.** The
+        tab was composed, the columns were defined, the facet was written and
+        the overview drew its own section from it -- and `_load_tab_data` had no
+        entry for this tab, so the table was never filled. Ingesting an export
+        reported two hundred and three threads onto an empty screen, which is
+        the shape of failure somebody reported as "I cannot get an export to
+        display in threads".
+
+        One facet, not a second query. `threads_org` is what the overview's
+        section uses, so the tab and the overview cannot disagree about what a
+        row is -- which is the property the two axes of this screen are built
+        on.
+        """
+        from dossier.facets import BY_TAB
+
+        # THROUGH THE FACET, NOT A SECOND QUERY. `_render_facet_at_org` already
+        # draws this table when an owner is in scope; the gap was only the
+        # project path, and filling it with its own query would give the same
+        # tab two ways of deciding what a row is. `threads_project` delegates to
+        # `threads_org` because an archive is not scoped to a repository, so
+        # both scopes see the same rows -- which is the honest answer and not a
+        # shortcut.
+        facet = BY_TAB.get("tab-threads")
+        if facet is None:
+            return
+        self._render_facet_for_project(facet, project)
 
     def _load_deltas_tab(self, project: Project) -> None:
         """Load deltas tab."""
@@ -6198,17 +6386,26 @@ class DossierApp(App):
         for index, row in enumerate(section.rows):
             table.add_row(*row, key=f"{table_id}-{index}")
 
-    def _render_facet_at_org(self, facet, owner: str) -> None:
+    def _render_facet_at_org(self, facet, owner: str, limit=None) -> None:
         from dossier.overview import scope_ids
 
         with self.session_factory() as session:
             ids = scope_ids(session, owner)
-            section = facet.at(session, ids=ids)
+            section = facet.at(session, ids=ids,
+                               limit=self.TAB_ROWS if limit is None else limit)
         self._render_section(facet.table, section)
 
-    def _render_facet_for_project(self, facet, project) -> None:
+    # How many rows a facet tab shows. The overview's sections take twelve
+    # because they are summaries with a whole page to share; a tab is where
+    # somebody went to see the thing, and twelve of two hundred and three shown
+    # without a word is the "board quietly showing thirty-seven of forty"
+    # failure this corpus keeps naming.
+    TAB_ROWS = 500
+
+    def _render_facet_for_project(self, facet, project, limit=None) -> None:
         with self.session_factory() as session:
-            section = facet.at(session, project=project)
+            section = facet.at(session, project=project,
+                               limit=self.TAB_ROWS if limit is None else limit)
         self._render_section(facet.table, section)
 
     def show_org_overview(self, owner: str) -> None:
@@ -6501,11 +6698,18 @@ class DossierApp(App):
         token = os.environ.get("GITHUB_TOKEN")
         success_count = 0
         
+        # DETERMINATE HERE, AND ONLY HERE. This one really does know how far
+        # along it is -- N repositories, one at a time -- so the bar carries a
+        # fraction rather than a pulse. The ingest next door cannot, and does
+        # not pretend to.
+        self.call_from_thread(self._progress_start,
+                              f"syncing {len(projects)} repositories",
+                              len(projects))
+
         for i, project in enumerate(projects):
             self.call_from_thread(
-                self.notify,
-                f"Syncing {i+1}/{len(projects)}: {project.name}...",
-            )
+                self._progress_advance, i, len(projects),
+                f"syncing {i + 1} of {len(projects)}: {project.name}")
             
             if not project.github_owner or not project.github_repo:
                 continue
@@ -6547,6 +6751,9 @@ class DossierApp(App):
                     severity="error",
                 )
         
+        self.call_from_thread(
+            self._progress_finish,
+            f"synced {success_count} of {len(projects)}")
         self.call_from_thread(
             self.notify,
             f"Synced {success_count}/{len(projects)} projects",

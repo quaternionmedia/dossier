@@ -87,7 +87,7 @@ async def test_it_opens_the_archive_and_focuses_the_field():
 
 
 @pytest.mark.asyncio
-async def test_typing_a_path_and_pressing_enter_completes_the_route():
+async def test_typing_a_path_and_pressing_enter_completes_the_route(monkeypatch):
     """End to end from the menu, with nothing reaching the harness.
 
     This is the whole reported failure, run as a test: open the menu route,
@@ -99,7 +99,13 @@ async def test_typing_a_path_and_pressing_enter_completes_the_route():
         await pilot.pause()
         import dossier.threads as threads_module
 
-        threads_module.request_import = (
+        # `monkeypatch`, not a bare assignment. A plain assignment here leaks
+        # the stub into every test that runs afterwards in the same process --
+        # which is invisible under a fixed order and immediate under a random
+        # one. Three tests in `test_threads_client.py` failed on the first
+        # randomised run because this module had already replaced the real
+        # `request_import` and never put it back.
+        monkeypatch.setattr(threads_module, "request_import",
             lambda path, *a, **k: asked.append(path) or {"ok": False, "error": "stub"})
 
         app._apply_rad_intent(Intent("reach.ingest"))
@@ -118,7 +124,7 @@ async def test_typing_a_path_and_pressing_enter_completes_the_route():
 
 
 @pytest.mark.asyncio
-async def test_an_empty_field_says_so_rather_than_ingesting_nothing():
+async def test_an_empty_field_says_so_rather_than_ingesting_nothing(monkeypatch):
     """The first thing somebody does with a focused field is press Enter."""
     app = app_for()
     asked = []
@@ -126,7 +132,14 @@ async def test_an_empty_field_says_so_rather_than_ingesting_nothing():
         await pilot.pause()
         import dossier.threads as threads_module
 
-        threads_module.request_import = lambda path, *a, **k: asked.append(path)
+        # `monkeypatch`, not a bare assignment. A plain assignment here leaks
+        # the stub into every test that runs afterwards in the same process --
+        # which is invisible under a fixed order and immediate under a random
+        # one. Three tests in `test_threads_client.py` failed on the first
+        # randomised run because this module had already replaced the real
+        # `request_import` and never put it back.
+        monkeypatch.setattr(threads_module, "request_import",
+                            lambda path, *a, **k: asked.append(path))
 
         app._apply_rad_intent(Intent("reach.ingest"))
         await pilot.pause()
@@ -138,7 +151,7 @@ async def test_an_empty_field_says_so_rather_than_ingesting_nothing():
 
 
 @pytest.mark.asyncio
-async def test_a_quoted_path_is_accepted():
+async def test_a_quoted_path_is_accepted(monkeypatch):
     """Windows' "Copy as path" wraps the result in double quotes, and pasting
     it is the ordinary way somebody gets a path into this field. Rejecting it
     would fail on the most likely input there is."""
@@ -148,7 +161,13 @@ async def test_a_quoted_path_is_accepted():
         await pilot.pause()
         import dossier.threads as threads_module
 
-        threads_module.request_import = (
+        # `monkeypatch`, not a bare assignment. A plain assignment here leaks
+        # the stub into every test that runs afterwards in the same process --
+        # which is invisible under a fixed order and immediate under a random
+        # one. Three tests in `test_threads_client.py` failed on the first
+        # randomised run because this module had already replaced the real
+        # `request_import` and never put it back.
+        monkeypatch.setattr(threads_module, "request_import",
             lambda path, *a, **k: asked.append(path) or {"ok": False, "error": "stub"})
 
         app._apply_rad_intent(Intent("reach.ingest"))
