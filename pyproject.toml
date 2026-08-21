@@ -59,6 +59,12 @@ dev = [
     "pytest-cov>=6.0.0",
     "respx>=0.22.0",
     "ruff>=0.9.0",
+    # Randomises test order every run. This suite has produced two
+    # order-dependent failures that a fixed order hid: a module reload that
+    # broke sixty-three unrelated tests, and a recording that another test in
+    # the same file had to have written first. A fixed order does not make
+    # those go away, it makes them somebody else's problem later.
+    "pytest-randomly>=4.1.0",
 ]
 
 [tool.pytest.ini_options]
