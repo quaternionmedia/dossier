@@ -24,7 +24,9 @@ from textual.widgets import DataTable, Static
 
 from dossier.facets import BY_TITLE as FACET_BY_TITLE
 from dossier.overview import OrgOverview, Section, build, dominant_owner
-from dossier.rad.tokens import DEFAULT_THEME
+# Through `dossier.palette` -- see the note in that module on why
+# rad's menu is optional and rad's palette had accidentally not been.
+from dossier.palette import DEFAULT_THEME
 
 # The column a row's repository is found in, when it has one. Facets put the
 # repository first by convention; a section whose first column is not a repo
