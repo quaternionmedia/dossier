@@ -50,7 +50,31 @@ HOST = "127.0.0.1"
 # about the problem. `tests/e2e/test_seam_port.py` reads qmcp's own config when
 # the sibling clone is present and fails when these two disagree, which is the
 # only way a copied constant stays true.
-DEFAULT_PORT = 3333
+# WHERE THE HARNESS ANSWERS: PI. Three services, three constants somebody can
+# recall without looking -- 3141 the harness, 1618 this panel when it serves,
+# 2718 the code maps. The joke port `1337` was already in use on the machine
+# this was chosen on, which is the argument against the port everybody thinks
+# of first.
+#
+# **THIS IS STILL A SECOND COPY OF SOMEBODY ELSE'S CONSTANT.** `qmcp/config.py`
+# holds `port: int = 3141` and the two repositories cannot import each other.
+# `tests/e2e/test_seam_port.py` reads qmcp's own source and fails when they
+# disagree, which is the only thing that keeps a copied number true -- it is
+# what caught 8000 against 3333.
+#
+# Override with `DOSSIER_HARNESS_PORT`, or `--harness-port` where a command
+# takes it. Changing this alone moves the panel and not the harness.
+DEFAULT_PORT = 3141
+
+# This panel's own port, for when it serves rather than reads. Reserved here so
+# the three are declared in one place a reader can find, and so nothing later
+# picks it by accident. Override with `DOSSIER_PORT`.
+OWN_PORT = 1618
+
+# The code maps, which are optional and not this repository's to start.
+# Declared so the allocation is written down once rather than rediscovered.
+# Override with `CODECARTO_PORT`.
+CODECARTO_PORT = 2718
 
 
 def base_url() -> str:
