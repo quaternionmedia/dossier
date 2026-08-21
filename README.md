@@ -109,6 +109,13 @@ gets refreshed rather than whatever happens to be selected, anything already
 current is left alone, and a large fetch states what it would do and waits for
 you to press it again.
 
+Two more are wired: **`m` `4` `6`** puts a conversation export into the archive,
+and **`m` `6` `4`** reviews a dependency sweep across every repository that
+declares it. The rest of the menu is greyed out and cannot be selected — an
+unavailable command keeps its cell, because dropping it would renumber every
+command after it. The sheet says which are which; this page deliberately does
+not repeat the list.
+
 This is an implementation of [rad](https://github.com/quaternionmedia/rad),
 Quaternion Media's interaction contract, in a terminal. The same four verbs are
 meant to work the same way in a browser.
