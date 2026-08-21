@@ -52,6 +52,53 @@ ARROWS = {
     "refusal": "--x",
 }
 
+# WEIGHT, AT THIS WINDOW'S RESOLUTION. A page can draw a line 3.7 times thicker
+# than another; a terminal has a handful of characters and no half-steps, so a
+# continuous weight lands in bands. That is the resolution difference doing its
+# job -- both windows draw the same edge, one of them coarsely.
+#
+# The bands are stated here rather than computed from the data, because a scale
+# that rescaled itself per graph would make two readings incomparable: the same
+# edge would look strong beside weak company and weak beside strong.
+WEIGHT_BANDS = (
+    (0.30, "==>", "strong"),
+    (0.10, "-->", "moderate"),
+    (0.00, "..>", "faint"),
+)
+
+UNMEASURED = "-?>"
+"""**NOT THE FAINT GLYPH.** An unmeasured edge drawn as faint asserts weakness
+nobody established. A reader must be able to tell "we looked and it is slight"
+from "nobody looked", because the second is a gap in the evidence and the first
+is a finding."""
+
+
+# WHAT THIS WINDOW CAN ACTUALLY CARRY, DECLARED AGAINST THE HARNESS'S MAPPING.
+#
+# The harness declares four channels: line weight for strength, line style for
+# measured, line colour for relation kind, node shape for box kind. A terminal
+# has one glyph per edge, so weight and style land in the *same* three
+# characters -- and colour cannot be relied on at all.
+#
+# **THAT COLLISION IS RESOLVED IN FAVOUR OF THE AXIS THAT MUST NOT BE LOST.**
+# `measured` wins the glyph: `-?>` is unmeasured whatever its strength, because
+# an unmeasured edge drawn as faint asserts weakness nobody established. Only
+# once an edge is known to be measured do the bands encode strength.
+#
+# Colour is dropped outright and the relation kind moves onto the glyph with
+# it -- `--x` for refusal, `<->` for feedback. Nothing is folded silently:
+# `Drawn.dropped` names every channel this window could not carry.
+CARRIES = {
+    "line_weight": "banded into three glyphs; a terminal has no half-steps",
+    "line_style": "the same glyph, and it wins when the two collide",
+    "node_shape": "the box brackets -- (input) <gate> [worker] {store}",
+}
+
+CANNOT_CARRY = {
+    "line_colour": "a terminal may have no colour and a reader may not see it; "
+                   "relation kind rides the glyph instead",
+}
+
 
 @dataclass(frozen=True)
 class Drawn:
@@ -63,6 +110,10 @@ class Drawn:
 
     lines: tuple[str, ...]
     dropped: tuple[str, ...] = ()
+    channels_dropped: tuple[str, ...] = ()
+    """Visual channels this window could not carry. Named rather than omitted:
+    a reader comparing this with the page needs to know which axes are missing
+    here, not to discover it by the two disagreeing."""
 
     def text(self) -> str:
         return "\n".join(self.lines)
@@ -104,14 +155,14 @@ def draw(payload: dict[str, Any], width: int = 76) -> Drawn:
             lines.append("  " + _box(box))
             if box.get("note"):
                 lines.append(f"      {box['note']}")
-        return Drawn(tuple(lines), tuple(dropped))
+        return Drawn(tuple(lines), tuple(dropped), tuple(CANNOT_CARRY))
 
     for arrow in arrows:
         left = boxes.get(arrow.get("from"), {"label": arrow.get("from"),
                                              "kind": "worker"})
         right = boxes.get(arrow.get("to"), {"label": arrow.get("to"),
                                             "kind": "worker"})
-        glyph = ARROWS.get(arrow.get("kind", "flow"), "-->")
+        glyph = _glyph(arrow)
         label = arrow.get("label") or ""
         line = f"  {_box(left)} {glyph} {_box(right)}"
         if label:
@@ -123,6 +174,15 @@ def draw(payload: dict[str, Any], width: int = 76) -> Drawn:
             line = line[:width - 3] + "..."
         lines.append(line)
 
+    weighed = [a for a in arrows if a.get("basis")]
+    if weighed:
+        lines.append("")
+        for arrow in weighed:
+            weight = arrow.get("weight")
+            shown = "unmeasured" if weight is None else f"{weight:.0%}"
+            target = boxes.get(arrow.get("to"), {}).get("label", arrow.get("to"))
+            lines.append(f"  {target}: {shown} -- {arrow['basis']}")
+
     notes = [b for b in boxes.values() if b.get("note")]
     if notes:
         lines.append("")
@@ -132,7 +192,38 @@ def draw(payload: dict[str, Any], width: int = 76) -> Drawn:
     # The count is already inside the box as `label xN`; a second line saying
     # it would be the same fact twice, and two places for it to disagree.
 
-    return Drawn(tuple(lines), tuple(dropped))
+    return Drawn(tuple(lines), tuple(dropped), tuple(CANNOT_CARRY))
+
+
+def _glyph(arrow: dict[str, Any]) -> str:
+    """The arrow, banded by weight where a weight was measured.
+
+    Kind wins over weight: a refusal is drawn as a refusal however strong it
+    is, because "this path is not taken" and "this path is well travelled" are
+    not points on one scale.
+    """
+    kind = arrow.get("kind", "flow")
+    if kind != "flow":
+        return ARROWS.get(kind, "-->")
+    if "weight" not in arrow:
+        return ARROWS["flow"]
+    weight = arrow.get("weight")
+    if weight is None:
+        return UNMEASURED
+    for floor, glyph, _ in WEIGHT_BANDS:
+        if weight >= floor:
+            return glyph
+    return ARROWS["flow"]
+
+
+def band_of(weight: float | None) -> str:
+    """The word for a weight, for a legend or a row a reader can sort."""
+    if weight is None:
+        return "unmeasured"
+    for floor, _, name in WEIGHT_BANDS:
+        if weight >= floor:
+            return name
+    return "faint"
 
 
 def _box(box: dict[str, Any]) -> str:
@@ -159,4 +250,5 @@ def draw_gallery(payloads: list[dict[str, Any]], width: int = 76) -> Drawn:
         drawn = draw(payload, width=width)
         lines.extend(drawn.lines)
         dropped.extend(drawn.dropped)
-    return Drawn(tuple(lines), tuple(dict.fromkeys(dropped)))
+    return Drawn(tuple(lines), tuple(dict.fromkeys(dropped)),
+                 tuple(CANNOT_CARRY))

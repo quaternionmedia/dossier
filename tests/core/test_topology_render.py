@@ -217,3 +217,96 @@ def test_a_narrow_window_trims_presentation_and_never_the_flow():
     assert "[stage a]" in drawn.text(), "the flow lost a box to the margin"
     assert "-->" in drawn.text(), "the flow lost its arrow to the margin"
     assert drawn.dropped, "the trim was not reported"
+
+
+# --- weight, at this window's resolution --------------------------------------
+
+
+def test_unmeasured_is_drawn_differently_from_faint():
+    """THE ONE THAT MATTERS.
+
+    "Nobody looked" and "we looked and it is slight" are opposite claims about
+    an edge. Drawing them alike makes the first read as the second.
+
+    Mutation: return the faint glyph for `None` and this fails.
+    """
+    from dossier.topology import UNMEASURED, WEIGHT_BANDS
+
+    faint = WEIGHT_BANDS[-1][1]
+    assert UNMEASURED != faint
+
+    edges = payload(arrows=[
+        {"from": "in", "to": "r", "label": "", "kind": "flow", "weight": 0.001},
+        {"from": "in", "to": "w", "label": "", "kind": "flow", "weight": None},
+    ])
+    text = draw(edges).text()
+    assert faint in text and UNMEASURED in text
+
+
+def test_stronger_edges_get_a_heavier_glyph():
+    strong = payload(arrows=[{"from": "in", "to": "r", "label": "",
+                              "kind": "flow", "weight": 0.9}])
+    weak = payload(arrows=[{"from": "in", "to": "r", "label": "",
+                            "kind": "flow", "weight": 0.01}])
+    assert draw(strong).text() != draw(weak).text()
+
+
+def test_the_bands_are_fixed_rather_than_rescaled_per_graph():
+    """A scale that rescaled itself would make two readings incomparable: the
+    same edge looks strong beside weak company and weak beside strong.
+
+    Mutation: compute the bands from the data and this fails.
+    """
+    from dossier.topology import band_of
+
+    assert band_of(0.9) == band_of(0.5) == "strong"
+    assert band_of(None) == "unmeasured"
+    # The same value reads the same whatever it is drawn beside.
+    assert band_of(0.12) == "moderate"
+
+
+def test_a_refusal_stays_a_refusal_however_strong_it_is():
+    """"This path is not taken" and "this path is well travelled" are not
+    points on one scale.
+
+    Mutation: let weight override kind and this fails.
+    """
+    from dossier.topology import ARROWS
+
+    heavy_refusal = payload(arrows=[{"from": "in", "to": "r", "label": "",
+                                     "kind": "refusal", "weight": 0.99}])
+    assert ARROWS["refusal"] in draw(heavy_refusal).text()
+
+
+def test_the_basis_is_shown_so_a_thick_line_can_be_argued_with():
+    """A weight without what it was read from is authoritative rather than
+    arguable."""
+    weighted = payload(arrows=[{"from": "in", "to": "r", "label": "",
+                                "kind": "flow", "weight": 0.42,
+                                "basis": "27 of 63 turns (42.9%)"}])
+    assert "27 of 63 turns" in draw(weighted).text()
+
+
+def test_the_window_names_the_channel_it_cannot_carry():
+    """A reader comparing this with the page needs to know which axes are
+    missing here, not to find out by the two disagreeing.
+
+    Mutation: drop colour silently and this fails.
+    """
+    drawn = draw(payload())
+    assert "line_colour" in drawn.channels_dropped
+
+
+def test_measured_wins_the_glyph_when_two_axes_collide_in_one_channel():
+    """A terminal has one glyph per edge, so weight and measuredness compete
+    for it. The axis that must not be lost wins, and the loss is declared."""
+    from dossier.topology import CANNOT_CARRY, CARRIES
+
+    assert "line_style" in CARRIES and "line_weight" in CARRIES
+    assert "line_colour" in CANNOT_CARRY
+    unmeasured_but_would_be_strong = payload(
+        arrows=[{"from": "in", "to": "r", "label": "", "kind": "flow",
+                 "weight": None}])
+    from dossier.topology import UNMEASURED
+
+    assert UNMEASURED in draw(unmeasured_but_would_be_strong).text()
