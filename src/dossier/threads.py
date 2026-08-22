@@ -322,3 +322,88 @@ def summarise_reindex(result: dict[str, Any]) -> str:
     return (f"Reindexed. Archive holds "
             f"{'unknown' if threads is None else threads} thread(s), "
             f"{diverged} disagreeing.")
+
+
+# --- the harness's topology, which this window draws ---------------------------
+#
+# **`dossier.topology` COULD DRAW AND NOTHING FETCHED FOR IT.** The renderer
+# existed, was tested, and was reachable from no command and no tab -- the same
+# shape found in the other front end on the same day: a renderer nothing routes
+# to reads exactly like a finished feature. These two functions are the route.
+
+
+@dataclass
+class Topology:
+    """A topology as the harness served it, or why it did not."""
+
+    reachable: bool
+    where: str
+    payload: dict[str, Any] = field(default_factory=dict)
+    encoding: list[dict[str, Any]] = field(default_factory=list)
+    source: str = ""
+    surveyed: int = 0
+    problem: str = ""
+    remedy: str = ""
+
+
+def topology(kind: str = "delegation", subject: str = "",
+             base: str | None = None, timeout: float = 10.0) -> Topology:
+    """One topology from the harness.
+
+    A subject wins over a kind: asking what the archive says about one project
+    is the more specific request, and sending both would leave the harness to
+    guess which was meant.
+
+    Never raises. A harness that is not running is the ordinary case -- it is a
+    separate process on a separate port -- and the caller has a sentence to
+    print rather than a traceback to show.
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    root = (base or base_url()).rstrip("/")
+    path = (f"/v1/topology/relations/{subject}" if subject
+            else f"/v1/topology/shape/{kind}")
+    where = f"{root}{path}"
+
+    try:
+        with urllib.request.urlopen(where, timeout=timeout) as answer:
+            document = json.loads(answer.read())
+    except urllib.error.HTTPError as error:
+        detail = ""
+        try:
+            detail = str(json.loads(error.read()).get("detail", ""))
+        except Exception:                          # noqa: BLE001
+            pass
+        return Topology(False, where,
+                        problem=f"the harness answered {error.code}"
+                                + (f": {detail}" if detail else ""),
+                        remedy=("`uv run qmcp threads index --write` builds an "
+                                "archive" if error.code == 404 else ""))
+    except Exception as error:                     # noqa: BLE001
+        return Topology(False, where,
+                        problem=f"nothing is answering at {root}",
+                        remedy="`uv run qm dashboard --start harness`")
+
+    return Topology(
+        True, where,
+        payload=document.get("payload", {}),
+        encoding=document.get("encoding", []),
+        source=str(document.get("source", "")),
+        surveyed=int(document.get("surveyed") or 0),
+    )
+
+
+def topologies(base: str | None = None, timeout: float = 10.0) -> list[str]:
+    """Every topology the harness offers, or an empty list if it cannot say."""
+    import json
+    import urllib.request
+
+    root = (base or base_url()).rstrip("/")
+    try:
+        with urllib.request.urlopen(f"{root}/v1/topology", timeout=timeout) as a:
+            document = json.loads(a.read())
+    except Exception:                              # noqa: BLE001
+        return []
+    return [str(t.get("topology", "")) for t in document.get("topologies", [])]

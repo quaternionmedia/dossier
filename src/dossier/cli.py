@@ -4756,3 +4756,67 @@ def harness_ingest(payload: Path, write: bool) -> None:
 # health` worked and `python -m dossier.cli db health` said "No such command".
 if __name__ == "__main__":
     main()
+
+
+@cli.command("topology")
+@click.option("--kind", default="delegation",
+              help="a topology from the harness's own vocabulary")
+@click.option("--subject", default="",
+              help="a project to read the thread archive for; wins over --kind")
+@click.option("--width", default=76, show_default=True,
+              help="how wide to draw")
+@click.option("--list", "listing", is_flag=True,
+              help="every topology the harness offers, and exit")
+def topology_command(kind: str, subject: str, width: int, listing: bool) -> None:
+    """Draw a harness topology in this terminal.
+
+    **THE ROUTE THAT WAS MISSING.** `dossier.topology` could draw and was
+    tested, and no command or tab reached it -- so this front end had a
+    renderer nobody could run, which reads exactly like a finished feature.
+
+    The harness decides what a topology is; this decides what it looks like
+    here. An edge nobody measured is drawn `-?>` and never as a thin line: one
+    is an absence of evidence and the other is evidence of absence, and a
+    reader has to be able to tell.
+    """
+    from dossier import threads, topology as drawing
+
+    if listing:
+        found = threads.topologies()
+        if not found:
+            click.echo("the harness is not answering, so it cannot say what "
+                       "it offers")
+            click.echo("  uv run qm dashboard --start harness")
+            raise SystemExit(1)
+        for name in found:
+            click.echo(name)
+        return
+
+    answer = threads.topology(kind=kind, subject=subject)
+    if not answer.reachable:
+        # Named, with the command that fixes it. A front end whose backend is
+        # down is the ordinary case, not an exception.
+        click.echo(answer.problem)
+        if answer.remedy:
+            click.echo(f"  {answer.remedy}")
+        click.echo(f"  tried {answer.where}")
+        raise SystemExit(1)
+
+    drawn = drawing.draw(answer.payload, width=width)
+    click.echo(drawn.text())
+
+    unmeasured = sum(1 for line in drawn.lines if drawing.UNMEASURED in line)
+    total = len(answer.payload.get("arrows", []))
+    provenance = f" from the {answer.source}" if answer.source else ""
+    if answer.surveyed:
+        provenance += f", {answer.surveyed} thread(s) read"
+    click.echo("")
+    if unmeasured:
+        click.echo(f"{total - unmeasured} of {total} edge(s) measured{provenance};"
+                   f" the rest are drawn -?> because nobody looked")
+    else:
+        click.echo(f"every one of {total} edge(s) is measured{provenance}")
+
+    if drawn.channels_dropped:
+        click.echo(f"this window cannot carry: "
+                   f"{', '.join(drawn.channels_dropped)}")
