@@ -255,6 +255,46 @@ def already_ahead(declared: str | None, to_version: str) -> bool:
         return False
 
 
+def furthest_ahead(sweep: Sweep) -> str | None:
+    """The highest version any repository in this sweep already asks for.
+
+    **A SWEEP'S TARGET IS DERIVED, NOT TYPED IN.** The panel used a constant --
+    `0.116.0` -- for whatever package the sweep landed on, so sweeping anything
+    but `fastapi` proposed a version from an unrelated project's history. A
+    number that arrives from nowhere is a number nobody can check.
+
+    This is the number the organisation already contains: bring everyone to
+    where the furthest-ahead repository already is. It is conservative by
+    construction -- it can never propose a version no repository has adopted --
+    and it needs no network, which matters because `already_ahead` exists
+    precisely because a bump is not monotonic across an organisation.
+
+    Returns None when nothing declares a comparable version, which is a real
+    answer: there is no target to derive, and the caller must ask a person
+    rather than pick one.
+    """
+    try:
+        from packaging.version import InvalidVersion, Version
+    except ImportError:                            # pragma: no cover
+        return None
+
+    best: Any = None
+    best_text: str | None = None
+    for share in sweep.shares:
+        if not share.declared:
+            continue
+        found = _CONSTRAINT.match(share.declared.split(",")[0])
+        if not found:
+            continue
+        try:
+            version = Version(found.group("version"))
+        except InvalidVersion:
+            continue
+        if best is None or version > best:
+            best, best_text = version, found.group("version")
+    return best_text
+
+
 def plan(sweep: Sweep, to_version: str) -> Sweep:
     """The same sweep with a target version, re-shaped against it.
 

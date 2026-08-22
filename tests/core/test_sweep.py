@@ -12,6 +12,7 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
 from dossier.models.schemas import Project, ProjectDependency
+import dossier.sweep as sweep_module
 from dossier.sweep import (
     JUDGEMENT,
     MECHANICAL,
@@ -218,3 +219,80 @@ def test_the_summary_counts_each_shape(session):
     summary = plan(find(session, "fastapi"), "2.0.0").summary()
     assert "2 repositories" in summary
     assert "mechanical" in summary and "judgement" in summary
+
+
+# --- the target version comes from the data ------------------------------------
+
+
+def test_the_target_is_the_furthest_ahead_repository():
+    """**A SWEEP'S TARGET IS DERIVED, NOT TYPED IN.**
+
+    The panel used a constant, `0.116.0`, for whatever package the sweep landed
+    on — so sweeping anything but `fastapi` proposed a version out of an
+    unrelated project's history. The organisation already contains the answer:
+    bring everyone to where the furthest-ahead repository already is.
+
+    Mutation: return the lowest version and this fails.
+    """
+    found = sweep_module.furthest_ahead(sweep_module.Sweep(
+        package="fastapi",
+        shares=[
+            sweep_module.Share(project="a", declared=">=0.100.0"),
+            sweep_module.Share(project="b", declared=">=0.135.2"),
+            sweep_module.Share(project="c", declared=">=0.116.0"),
+        ]))
+    assert found == "0.135.2"
+
+
+def test_a_target_is_never_a_version_nobody_has_adopted():
+    """Conservative by construction: the derived target is always a version
+    some repository already asks for, so a sweep cannot propose a release the
+    organisation has never used.
+
+    Mutation: add one to the highest version and this fails.
+    """
+    declared = [">=1.2.0", "==1.4.1", ">=1.3.0"]
+    found = sweep_module.furthest_ahead(sweep_module.Sweep(
+        package="x",
+        shares=[sweep_module.Share(project=str(n), declared=d)
+                for n, d in enumerate(declared)]))
+    assert found == "1.4.1"
+
+
+def test_nothing_comparable_gives_no_target_rather_than_a_guess():
+    """THE ONE THAT MATTERS.
+
+    No comparable version is a real answer — there is no target to derive — and
+    the caller must ask a person rather than pick one. Returning a default here
+    is exactly how a constant got into the panel in the first place.
+
+    Mutation: fall back to a literal version and this fails.
+    """
+    for declared in (None, "", "not-a-constraint", "*"):
+        found = sweep_module.furthest_ahead(sweep_module.Sweep(
+            package="x",
+            shares=[sweep_module.Share(project="a", declared=declared)]))
+        assert found is None, f"{declared!r} produced {found!r}"
+
+
+def test_a_derived_target_never_moves_anybody_backwards():
+    """The derived target is the maximum, so `already_ahead` is true for at
+    most the repository it came from and never proposes a downgrade.
+
+    This is the property the constant broke: sweeping to 0.116.0 would have
+    rewritten `>=0.135.2` downwards.
+    """
+    shares = [sweep_module.Share(project="a", declared=">=0.100.0"),
+              sweep_module.Share(project="b", declared=">=0.135.2")]
+    target = sweep_module.furthest_ahead(
+        sweep_module.Sweep(package="x", shares=shares))
+    for share in shares:
+        assert not sweep_module.bump(share.declared, target) or \
+            not _moves_backwards(share.declared, target)
+
+
+def _moves_backwards(declared: str, target: str) -> bool:
+    from packaging.version import Version
+    import re
+    found = re.search(r"(\d+(?:\.\d+)*)", declared or "")
+    return bool(found) and Version(found.group(1)) > Version(target)

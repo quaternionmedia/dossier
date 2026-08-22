@@ -158,9 +158,18 @@ async def test_the_queue_is_drawn_and_counted(session):
 @pytest.mark.asyncio
 async def test_a_batch_says_whether_it_is_one_approval(session):
     """Every row a person is about to approve together, and a word saying that
-    is what it is. `NOT UNIFORM` is the state that must never be silent."""
+    is what it is. `NOT UNIFORM` is the state that must never be silent.
+
+    **THREE REPOSITORIES, BECAUSE THE TARGET IS NOW DERIVED.** The panel used a
+    constant version; it takes the furthest-ahead repository's version instead,
+    so whichever repository is furthest ahead is by definition already there and
+    queues rather than batching. Two repositories therefore produce one batch
+    and one queued row — correct, and not what this test is about. The third is
+    ahead of both, so the two below it still need two different edits.
+    """
     declare(session, "org/a", "fastapi", ">=0.100.0")
     declare(session, "org/b", "fastapi", "~=0.95")
+    declare(session, "org/c", "fastapi", ">=0.135.2")
 
     app = app_for(session)
     async with app.run_test(size=(120, 40)) as pilot:

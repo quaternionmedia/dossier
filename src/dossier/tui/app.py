@@ -1113,6 +1113,18 @@ class DossierApp(App):
                             yield Static("", id="sweep-summary")
                             yield DataTable(id="sweep-table")
                             yield Static("", id="sweep-note")
+                    with TabPane("Topology", id="tab-topology"):
+                        with Vertical():
+                            yield Static("", id="topology-caveat")
+                            with Horizontal(id="topology-picker"):
+                                yield Input(
+                                    placeholder="a project, to read the archive "
+                                                "for; blank draws a shape",
+                                    id="topology-subject")
+                                yield Button("Draw", id="btn-draw-topology",
+                                             variant="primary")
+                            yield Static("", id="topology-drawing")
+                            yield Static("", id="topology-note")
                     with TabPane("Threads", id="tab-threads"):
                         yield DataTable(id="threads-table")
                         with Horizontal(id="thread-buttons"):
@@ -1365,7 +1377,13 @@ class DossierApp(App):
     # where getting it wrong costs the most, and those are the same number.
     #
     # It is still a guess about intent, so the screen says which it picked.
-    SWEEP_DEFAULT_TO = "0.116.0"
+    selected_dependency: str | None = None
+    """The package a sweep will act on, set by choosing a row in Dependencies.
+
+    None means nobody has chosen, and the sweep falls back to the widest-shared
+    package **and says so** -- a fallback that looked like a choice is how the
+    panel came to sweep one package while a reader was looking at another.
+    """
 
     def _begin_sweep_review(self) -> None:
         """`6.4`. Review the widest-shared dependency across the organisation.
@@ -1384,27 +1402,55 @@ class DossierApp(App):
     @work(thread=True, exclusive=True, group="sweep-review")
     def _run_sweep_review(self) -> None:
         from dossier.approval import review as arrange
-        from dossier.sweep import find, plan, shared_needs
+        from dossier.sweep import find, furthest_ahead, plan, shared_needs
 
         try:
             with self.session_factory() as session:
-                widest = shared_needs(session, at_least=2)
-                if not widest:
+                package = self.selected_dependency
+                chosen_by = "chosen in Dependencies"
+                if not package:
+                    widest = shared_needs(session, at_least=2)
+                    if not widest:
+                        self.call_from_thread(
+                            self._sweep_review_failed,
+                            "nothing is declared by two repositories, so there "
+                            "is nothing to sweep. Choose a dependency in the "
+                            "Dependencies tab to sweep it anyway")
+                        return
+                    package, _ = widest[0]
+                    chosen_by = ("nothing chosen, so the widest-shared package"
+                                 " was used")
+
+                found = find(session, package)
+                if not found.shares:
                     self.call_from_thread(
                         self._sweep_review_failed,
-                        "nothing is declared by two repositories, so there is "
-                        "nothing to sweep")
+                        f"no repository declares {package}, so there is "
+                        f"nothing to sweep")
                     return
-                package, _ = widest[0]
-                planned = plan(find(session, package), self.SWEEP_DEFAULT_TO)
+
+                # **THE TARGET IS DERIVED FROM THE DATA, NOT TYPED IN.** This
+                # was a constant -- 0.116.0 -- applied to whatever package the
+                # sweep landed on, so any package but `fastapi` was offered a
+                # version out of an unrelated project's history.
+                to_version = furthest_ahead(found)
+                if not to_version:
+                    self.call_from_thread(
+                        self._sweep_review_failed,
+                        f"{package} is declared by {len(found.shares)} "
+                        f"repository(ies) and none states a comparable "
+                        f"version, so there is no target to sweep to. That is "
+                        f"a person's call, not this panel's")
+                    return
+                planned = plan(found, to_version)
         except Exception as exc:                  # noqa: BLE001
             self.call_from_thread(self._sweep_review_failed,
                                   f"{type(exc).__name__}: {exc}")
             return
 
-        outcomes = _dispatch(planned, self.SWEEP_DEFAULT_TO)
+        outcomes = _dispatch(planned, to_version)
         found = arrange(planned.address,
-                        f"{package} to {self.SWEEP_DEFAULT_TO}", outcomes)
+                        f"{package} to {to_version} ({chosen_by})", outcomes)
         self.call_from_thread(self._sweep_review_ready, found)
 
     def _sweep_review_ready(self, found) -> None:
@@ -3346,6 +3392,7 @@ class DossierApp(App):
         # for the repository tabs and wrong for these.
         unscoped = {
             "tab-sweep": self._load_sweep_tab,
+            "tab-topology": self._load_topology_tab,
             "tab-threads": self._load_threads_tab,
         }
         if tab_id in unscoped:
@@ -3374,6 +3421,7 @@ class DossierApp(App):
             # Reads no database of its own: a review is arranged from a
             # dispatcher run, and is empty until somebody asks for one.
             "tab-sweep": self._load_sweep_tab,
+            "tab-topology": self._load_topology_tab,
         }
         
         loader = loaders.get(tab_id)
@@ -4106,6 +4154,95 @@ class DossierApp(App):
     # The sweep a person is reviewing. None until one is asked for: a screen
     # that invented a default sweep would be proposing work nobody chose.
     _sweep_review = None
+
+    def _load_topology_tab(self, project=None) -> None:
+        """Draw a harness topology here, the way the web front end draws it.
+
+        **THE SAME DOCUMENT, THIS WINDOW'S RESOLUTION.** `qmcp` decides what a
+        topology is; `codecartographer` draws it as a graph on a page and this
+        draws it as text in a terminal. A figure that differs between the two is
+        a defect rather than a point of view, which is the whole reason both
+        exist -- and `uv run qm demo --over-http` is what checks it.
+
+        Unscoped, like Sweep and Threads: a topology is the organisation's, not
+        one repository's, so this does not wait for a project to be chosen.
+        """
+        self._progress_start("asking the harness for a topology")
+        self._run_topology_draw()
+
+    @work(thread=True, exclusive=True, group="topology")
+    def _run_topology_draw(self) -> None:
+        from dossier import threads, topology as drawing
+
+        subject = ""
+        try:
+            subject = self.query_one("#topology-subject", Input).value.strip()
+        except Exception:                          # noqa: BLE001
+            pass
+
+        # A subject wins over a shape: asking what the archive says about one
+        # project is the more specific request.
+        answer = (threads.topology(subject=subject) if subject
+                  else threads.topology(kind="delegation"))
+
+        if not answer.reachable:
+            # **A HARNESS THAT IS NOT RUNNING IS THE ORDINARY CASE.** It is a
+            # separate process on a separate port, and it is very often not
+            # started. Nothing is drawn: an empty drawing would state that this
+            # topology is empty, which is a different claim.
+            self.call_from_thread(
+                self._topology_failed, answer.problem, answer.remedy,
+                answer.where)
+            return
+
+        drawn = drawing.draw(answer.payload, width=76)
+        unmeasured = sum(1 for line in drawn.lines
+                         if drawing.UNMEASURED in line)
+        self.call_from_thread(self._topology_drawn, answer, drawn, unmeasured)
+
+    def _topology_drawn(self, answer, drawn, unmeasured: int) -> None:
+        total = len(answer.payload.get("arrows", []))
+        provenance = f" from the {answer.source}" if answer.source else ""
+        if answer.surveyed:
+            provenance += f", {answer.surveyed} thread(s) read"
+
+        if unmeasured:
+            caveat = (f"{total - unmeasured} of {total} edge(s) "
+                      f"measured{provenance}; the rest are drawn -?> because "
+                      f"nobody looked")
+        else:
+            caveat = f"every one of {total} edge(s) is measured{provenance}"
+
+        note = ""
+        if drawn.channels_dropped:
+            # Named rather than omitted: a reader comparing this with the web
+            # view needs to know which axes are missing here, not to discover
+            # it by the two disagreeing.
+            note = ("this window cannot carry: "
+                    + ", ".join(drawn.channels_dropped))
+
+        self.query_one("#topology-caveat", Static).update(caveat)
+        self.query_one("#topology-drawing", Static).update(drawn.text())
+        self.query_one("#topology-note", Static).update(note)
+        self._progress_finish("drew the topology")
+
+    def _topology_failed(self, problem: str, remedy: str, where: str) -> None:
+        lines = [problem]
+        if remedy:
+            lines.append(f"  {remedy}")
+        lines.append(f"  tried {where}")
+        lines.append("  Nothing was drawn. An empty drawing would look like an "
+                     "answer.")
+        self.query_one("#topology-caveat", Static).update("")
+        self.query_one("#topology-drawing", Static).update("\n".join(lines))
+        self.query_one("#topology-note", Static).update("")
+        self._progress_finish("the harness did not answer")
+
+    @on(Button.Pressed, "#btn-draw-topology")
+    def on_draw_topology(self, event: Button.Pressed) -> None:
+        """Draw whatever the subject box names, or a shape when it is blank."""
+        event.stop()
+        self._load_topology_tab()
 
     def _load_sweep_tab(self, project=None) -> None:
         """Draw the review: every batch, then everything waiting.
@@ -5535,6 +5672,10 @@ class DossierApp(App):
         with self.session_factory() as session:
             dep = session.get(ProjectDependency, dep_id)
             if dep:
+                # **WHAT A SWEEP WILL ACT ON.** Selecting a dependency here is
+                # the only place a person says which package they mean; the
+                # sweep used to ignore it and take the widest-shared one.
+                self.selected_dependency = dep.name
                 self._link_dependency_project({
                     "name": dep.name,
                     "version": dep.version_spec,
