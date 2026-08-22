@@ -33,15 +33,16 @@ same cell.
 | `8.2` | `m` `8` `2` | &nbsp;&nbsp;Governance | `view.governance` | yes |
 | `8.4` | `m` `8` `4` | &nbsp;&nbsp;Disk | `view.disk` | yes |
 | `8.9` | `m` `8` `9` | &nbsp;&nbsp;Details | `view.details` | yes |
+| `8.3` | `m` `8` `3` | &nbsp;&nbsp;Topology | `view.topology` | yes |
 | `6` | `m` `6` | Do | *opens a submenu* | yes |
-| `6.8` | `m` `6` `8` | &nbsp;&nbsp;Advance phase | `delta.advance` | **not yet** |
-| `6.6` | `m` `6` `6` | &nbsp;&nbsp;Add note | `delta.note` | **not yet** |
+| `6.8` | `m` `6` `8` | &nbsp;&nbsp;Advance phase | `delta.advance` | yes |
+| `6.6` | `m` `6` `6` | &nbsp;&nbsp;Add note | `delta.note` | yes |
 | `6.2` | `m` `6` `2` | &nbsp;&nbsp;Sync project | `project.sync` | yes |
 | `6.4` | `m` `6` `4` | &nbsp;&nbsp;Sweep a dependency | `sweep.review` | yes |
 | `2` | `m` `2` | Show | *opens a submenu* | yes |
-| `2.8` | `m` `2` `8` | &nbsp;&nbsp;All | `filter.all` | **not yet** |
-| `2.6` | `m` `2` `6` | &nbsp;&nbsp;Synced only | `filter.synced` | **not yet** |
-| `2.2` | `m` `2` `2` | &nbsp;&nbsp;Drifting | `filter.drifting` | **not yet** |
+| `2.8` | `m` `2` `8` | &nbsp;&nbsp;All | `filter.all` | yes |
+| `2.6` | `m` `2` `6` | &nbsp;&nbsp;Synced only | `filter.synced` | yes |
+| `2.2` | `m` `2` `2` | &nbsp;&nbsp;Drifting | `filter.drifting` | yes |
 | `4` | `m` `4` | Reach | *opens a submenu* | yes |
 | `4.8` | `m` `4` `8` | &nbsp;&nbsp;Open in qmcp | `reach.qmcp` | **not yet** |
 | `4.6` | `m` `4` `6` | &nbsp;&nbsp;Ingest deltas | `reach.ingest` | yes |
@@ -115,4 +116,4 @@ dead cells. It is drawn with a dotted border as well as a dimmer ink,
 so the state survives a theme with no dim colour and a terminal that
 approximates.
 
-Not yet applied: `6.8` Advance phase, `6.6` Add note, `2.8` All, `2.6` Synced only, `2.2` Drifting, `4.8` Open in qmcp.
+Not yet applied: `4.8` Open in qmcp.

@@ -359,20 +359,23 @@ class TestRingInTheApp:
             await pilot.press("enter")      # descend
             await pilot.pause()
             inside = app.screen.query_one("#rad-ring").last_render
-            # STILL DRAWN, AND STILL ON ITS CELL. `delta.advance` is not wired
-            # in this app, so it is greyed -- which must not mean removed. A
-            # menu that drops what it cannot do renumbers everything after it,
-            # and the numbers are written down in `docs/rad-commands.md`.
+            # STILL DRAWN, AND STILL ON ITS CELL. A menu that drops what it
+            # cannot do renumbers everything after it, and the numbers are
+            # written down in `docs/rad-commands.md`.
             assert "Advance phase" in inside
             assert "8 Advance phase" in inside, "it moved off cell 8"
 
             await pilot.press("enter")      # commit
             await pilot.pause()
             assert type(app.screen).__name__ != "RingScreen", "ring did not close"
-            # Not `delta.advance`: the highlight skipped it on the way in,
-            # because entering a submenu lands on the first wedge this app can
-            # actually act on. Sync is the only one under Do.
-            assert app._rad.intents[-1].action == "project.sync"
+            # **`delta.advance`, AND IT USED TO BE `project.sync`.** Entering a
+            # submenu lands on the first wedge this app can act on, and until
+            # the actions were reconciled into one dispatch table that was
+            # Sync -- advance and note were in the ring, greyed, while buttons
+            # did exactly them. All four under Do are wired now, so the
+            # landing moved to the first cell. The behaviour did not change;
+            # what the app can do did.
+            assert app._rad.intents[-1].action == "delta.advance"
 
     @pytest.mark.asyncio
     async def test_escape_backs_out_a_level_then_closes(self):

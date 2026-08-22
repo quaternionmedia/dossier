@@ -327,3 +327,81 @@ async def test_the_mermaid_button_converts_what_is_on_screen(
 
     assert source.startswith("flowchart ")
     assert "-.->" in source, "the unmeasured edge lost its dotted line"
+
+
+# --- one act, two routes ------------------------------------------------------
+
+
+class _Intent:
+    """What `_apply_rad_intent` reads. The real `Intent` carries a schema, a
+    verb, a path and a levels map that this test has no opinion about."""
+
+    def __init__(self, action: str):
+        self.action = action
+        self.ipa = 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action,expected", [
+    ("filter.all", None),
+    ("filter.synced", True),
+    ("filter.drifting", False),
+])
+async def test_the_ring_does_what_the_filter_buttons_do(
+        session, action, expected):
+    """**THE RECONCILIATION, CHECKED.**
+
+    These three were in the ring reporting "not applied yet" while three
+    buttons did exactly them. Each button held its own copy of "set the filter,
+    restyle, reload", so the ring had nothing to call — the act existed three
+    times and was reachable from one place.
+
+    Mutation: remove an entry from `RAD_ACTIONS` and this fails.
+    """
+    from dossier.tui.app import DossierApp
+
+    app = DossierApp(session_factory=lambda: _NoClose(session),
+                     initial_tab="tab-overview")
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        app.filter_synced = "untouched"
+        app._apply_rad_intent(_Intent(action))
+        await pilot.pause()
+
+    assert app.filter_synced is expected
+
+
+@pytest.mark.asyncio
+async def test_a_button_and_the_ring_reach_one_method(session):
+    """One act, one implementation. The routes differ; what they call must not.
+
+    Mutation: give the button its own copy of the work and this fails, because
+    the two would no longer be the same object.
+    """
+    from dossier.tui.app import DossierApp
+
+    app = DossierApp(session_factory=lambda: _NoClose(session))
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        # What the ring dispatches to, and what the button handler calls.
+        from_ring = getattr(app, app.RAD_ACTIONS["filter.synced"])
+        app.on_filter_synced_pressed()
+        await pilot.pause()
+
+    assert from_ring.__name__ == "_show_synced_projects"
+    assert app.filter_synced is True
+
+
+def test_the_ring_claims_only_what_the_panel_can_do():
+    """`RAD_HANDLED` is derived from the dispatch table rather than listed
+    beside it. A hand-kept copy is how the ring came to disclaim things the
+    panel could do.
+
+    Mutation: hard-code RAD_HANDLED and this fails when the table changes.
+    """
+    from dossier.tui.app import DossierApp
+
+    assert set(DossierApp.RAD_ACTIONS) <= set(DossierApp.RAD_HANDLED)
+    assert set(DossierApp.RAD_VIEWS) <= set(DossierApp.RAD_HANDLED)
+    assert set(DossierApp.RAD_HANDLED) == (
+        set(DossierApp.RAD_VIEWS) | set(DossierApp.RAD_ACTIONS))

@@ -40,6 +40,11 @@ def resolve(context: Any = None) -> tuple[Wedge, ...]:
             Wedge("go.governance", "Governance", action="view.governance"),
             Wedge("go.disk", "Disk", action="view.disk"),
             Wedge("go.details", "Details", action="view.details"),
+            # Sixth. `Go` was five children and is now six, which costs a step:
+            # rad's budget is 1 + ceil(N/2) + 1, so five cost 4 and six cost 5.
+            # Paid deliberately -- a view reachable only by a button is
+            # invisible to somebody driving from the keyboard.
+            Wedge("go.topology", "Topology", action="view.topology"),
         )),
         Wedge(DO, "Do", children=(
             Wedge("do.advance", "Advance phase", action="delta.advance"),

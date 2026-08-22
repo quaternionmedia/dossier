@@ -1227,13 +1227,36 @@ class DossierApp(App):
         "view.governance": "tab-governance",
         "view.disk": "tab-disk",
         "view.details": "tab-details",
+        "view.topology": "tab-topology",
+    }
+
+    # **ONE TABLE, AND THE BUTTONS USE IT TOO.** Dispatch was a chain of
+    # `if intent.action == ...`, which is a fourth place describing the same
+    # acts as the ring, the buttons and the bindings -- and it is how
+    # `filter.*` came to be routable by the ring and reported unhandled while
+    # three buttons did exactly those things.
+    #
+    # A method name rather than a bound method, because this is a class body
+    # and the methods do not exist yet. `_dispatch_action` resolves it.
+    RAD_ACTIONS: dict[str, str] = {
+        "project.sync": "_sync_current_view",
+        "reach.ingest": "_begin_thread_ingest",
+        "sweep.review": "_begin_sweep_review",
+        "reach.reconcile": "_begin_reconcile",
+        "delta.advance": "action_advance_delta_phase",
+        "delta.note": "action_add_delta_note",
+        "filter.all": "_show_all_projects",
+        "filter.synced": "_show_synced_projects",
+        "filter.drifting": "_show_drifting_projects",
     }
 
     # Every ring action this app actually does something with. Declared rather
     # than inferred, and read by `dossier.rad.index.applied_by` so the command
     # sheet marks what is wired instead of implying everything is.
-    RAD_HANDLED = frozenset(RAD_VIEWS) | {"project.sync", "reach.ingest",
-                                          "sweep.review", "reach.reconcile"}
+    # Derived, never listed twice. A hand-kept copy is how the ring came to
+    # claim it could do things the panel had no handler for, and to disclaim
+    # things it could.
+    RAD_HANDLED = frozenset(RAD_VIEWS) | frozenset(RAD_ACTIONS)
 
     @on(Button.Pressed, "#btn-ingest-threads")
     def on_ingest_threads_pressed(self) -> None:
@@ -1605,20 +1628,15 @@ class DossierApp(App):
                 pass
             self.notify(f"{intent.action}  (ipa {intent.ipa})", timeout=3)
             return
-        if intent.action == "project.sync":
-            self._sync_current_view()
+        handler = self.RAD_ACTIONS.get(intent.action)
+        if handler is not None:
+            # `project.sync` is the one action that reads a pending sync, so it
+            # is the one that must not clear it first.
+            if intent.action != "project.sync":
+                self._sync_pending = None
+            getattr(self, handler)()
+            self.notify(f"{intent.action}  (ipa {intent.ipa})", timeout=3)
             return
-        if intent.action == "reach.ingest":
-            self._sync_pending = None
-            self._begin_thread_ingest()
-            return
-        if intent.action == "sweep.review":
-            self._sync_pending = None
-            self._begin_sweep_review()
-            return
-        if intent.action == "reach.reconcile":
-            self._sync_pending = None
-            self._begin_reconcile()
             return
         self._sync_pending = None
         # Named in the palette and not yet handled here. Reported, because a
@@ -6660,29 +6678,48 @@ class DossierApp(App):
         """Handle add delta link button press."""
         self.action_add_delta_link()
 
+    # **THE BUTTON AND THE RING CALL ONE METHOD.** Each of these held its own
+    # copy of "set the filter, restyle the buttons, reload" -- three copies of
+    # one act, which is why the ring could offer `filter.*` and do nothing: it
+    # had nothing to call. The copies are now one method per filter, named in
+    # `RAD_ACTIONS`, and the buttons are two lines that delegate to it.
+
+    def _apply_project_filter(self, synced: bool | None) -> None:
+        """Set the sync filter and redraw the list. One act, one place."""
+        self.filter_synced = synced
+        self._update_filter_buttons()
+        try:
+            search = self.query_one("#search-input", Input).value
+        except Exception:                          # noqa: BLE001
+            # The ring can commit this from a screen with no search field. An
+            # absent box is an empty search, not a failure.
+            search = ""
+        self.load_projects(search=search)
+
+    def _show_all_projects(self) -> None:
+        self._apply_project_filter(None)
+
+    def _show_synced_projects(self) -> None:
+        self._apply_project_filter(True)
+
+    def _show_drifting_projects(self) -> None:
+        self._apply_project_filter(False)
+
     @on(Button.Pressed, "#btn-filter-all")
     def on_filter_all_pressed(self) -> None:
         """Show all projects (clear sync filter)."""
-        self.filter_synced = None
-        self._update_filter_buttons()
-        search_input = self.query_one("#search-input", Input)
-        self.load_projects(search=search_input.value)
-    
+        self._show_all_projects()
+
     @on(Button.Pressed, "#btn-filter-synced")
     def on_filter_synced_pressed(self) -> None:
         """Show only synced projects."""
-        self.filter_synced = True
-        self._update_filter_buttons()
-        search_input = self.query_one("#search-input", Input)
-        self.load_projects(search=search_input.value)
-    
+        self._show_synced_projects()
+
     @on(Button.Pressed, "#btn-filter-unsynced")
     def on_filter_unsynced_pressed(self) -> None:
-        """Show only unsynced projects."""
-        self.filter_synced = False
-        self._update_filter_buttons()
-        search_input = self.query_one("#search-input", Input)
-        self.load_projects(search=search_input.value)
+        """Show only drifting projects -- declared and never synced."""
+        self._show_drifting_projects()
+
     
     @on(Button.Pressed, "#btn-filter-starred")
     def on_filter_starred_pressed(self) -> None:
