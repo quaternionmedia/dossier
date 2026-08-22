@@ -42,7 +42,26 @@ The address is named for the change, not for the day it ran. A sweep named by
 date is a different delta on every run, and the second one carries none of the
 first one's approvals:
 
-    >>> Sweep(package="fastapi", to_version="0.116.0").address == sweep.address
+    >>> again = Sweep(package="fastapi", to_version="0.116.0", shares=sweep.shares)
+    >>> again.address == sweep.address
+    True
+
+**The owner comes from the repositories, not from a literal.** It was written
+into this module, so a fork's sweep emitted an address belonging to another
+organisation -- and an address's owner is what says two readings are about the
+same thing:
+
+    >>> sweep.owner
+    'quaternionmedia'
+
+A sweep spanning two organisations is a real thing, and not something one
+address can name. It says so rather than picking one:
+
+    >>> mixed = Sweep(package="fastapi", to_version="0.116.0", shares=[
+    ...     Share(project="quaternionmedia/qmcp", declared=">=0.115.0"),
+    ...     Share(project="somebody-else/thing", declared=">=0.115.0"),
+    ... ])
+    >>> mixed.owner is None and mixed.address is None
     True
 
 ## The shape of the work decides the tool
