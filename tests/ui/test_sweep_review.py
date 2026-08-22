@@ -228,7 +228,7 @@ async def test_the_application_responds_while_the_sweep_is_worked_out(session):
 
 
 @pytest.mark.asyncio
-async def test_nothing_shared_is_reported_rather_than_drawn_empty(session):
+async def test_nothing_shared_is_reported_rather_than_drawn_empty(session, until):
     """One repository declaring something is not a sweep. Saying so beats an
     empty table."""
     declare(session, "org/only", "lonely-package", ">=1.0.0")
@@ -237,13 +237,16 @@ async def test_nothing_shared_is_reported_rather_than_drawn_empty(session):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         app._apply_rad_intent(Intent("sweep.review"))
-        for _ in range(200):
-            await pilot.pause()
-            if app._sweep_review is not None:
-                break
+        summary = app.query_one("#sweep-summary", Static)
+        # **WAIT FOR WHAT IS ASSERTED.** The condition here was
+        # `_sweep_review is not None`, which in this case never becomes true --
+        # nothing is shared, so the review reports instead of producing one --
+        # so the loop ran its full two hundred cycles every time.
+        await until(pilot, lambda: str(summary.render()).strip())
+
         # Either it found nothing to sweep, or it found the lonely package and
         # said so. What it must not do is raise or draw an unexplained blank.
-        said = str(app.query_one("#sweep-summary", Static).render())
+        said = str(summary.render())
         assert said.strip(), "the screen said nothing at all"
 
 

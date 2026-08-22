@@ -557,3 +557,87 @@ def no_ambient_network(request, monkeypatch):
         return real_client(*args, **kwargs)
 
     monkeypatch.setattr(httpx, "Client", refusing)
+
+
+@pytest.fixture()
+def until():
+    """See `_until`. A fixture so every test gets it without an import."""
+    return _until
+
+
+@pytest.fixture()
+def drain():
+    """See `_drain`."""
+    return _drain
+
+
+@pytest.fixture()
+def quiet():
+    """See `_quiet`."""
+    return _quiet
+
+
+async def _until(pilot, ready, limit: int = 400):
+    """Pause until `ready()` is true, or `limit` cycles pass. Returns whether.
+
+    **WAIT FOR THE CONDITION, NOT FOR A COUNT.** Twenty places here wrote
+    `for _ in range(200): await pilot.pause()` and then asserted. That waits two
+    hundred full event-loop cycles whether or not the thing already happened —
+    three tests in `test_reconcile.py` spent 35 seconds between them doing
+    exactly that, and the assertions were all satisfiable in a fraction of it.
+
+    **THE LIMIT IS A CEILING, NOT A DURATION.** Returning `False` rather than
+    raising is deliberate: a caller that wants "this must happen" asserts on the
+    result and gets a message naming its own condition, which is better than a
+    timeout naming this helper.
+
+    A test that needs to prove something *did not* happen still has to wait, and
+    should say so where it waits — `drain` below is that, named.
+    """
+    if ready():
+        return True
+    for _ in range(limit):
+        await pilot.pause()
+        if ready():
+            return True
+    return False
+
+
+async def _drain(pilot, cycles: int = 50):
+    """Pause a fixed number of cycles, for the case where waiting *is* the test.
+
+    Separate from `until` and deliberately named: proving that nothing further
+    happens needs a duration, and a fixed wait dressed up as a condition would
+    be a lie about what the test knows. Kept small — a test asserting an absence
+    over two hundred cycles is not two hundred times more convincing than one
+    over fifty.
+    """
+    for _ in range(cycles):
+        await pilot.pause()
+
+
+async def _quiet(pilot, app, limit: int = 400):
+    """Pause until no worker is still running. Returns whether it went quiet.
+
+    **"THE WORK FINISHED" IS A CONDITION, NOT A DURATION.** A test that asserts
+    an *absence* -- nothing was imported, nothing was written -- genuinely has
+    to wait for the work to end before it can conclude anything. The way that
+    was written here was `for _ in range(200)`, which waits the same length
+    whether the work took one cycle or a hundred and ninety-nine, and is wrong
+    in both directions: slow when the work is quick, and unsound when it is not.
+
+    This asks the thing that knows. It is also the correct wait before teardown:
+    a test that stopped early raced the worker and failed on an unrelated
+    widget, which reads like a defect in the widget.
+    """
+    from textual.worker import WorkerState
+
+    def still_working() -> bool:
+        return any(w.state in (WorkerState.PENDING, WorkerState.RUNNING)
+                   for w in app.workers)
+
+    for _ in range(limit):
+        if not still_working():
+            return True
+        await pilot.pause()
+    return not still_working()

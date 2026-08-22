@@ -252,3 +252,203 @@ def draw_gallery(payloads: list[dict[str, Any]], width: int = 76) -> Drawn:
         dropped.extend(drawn.dropped)
     return Drawn(tuple(lines), tuple(dict.fromkeys(dropped)),
                  tuple(CANNOT_CARRY))
+
+
+# --- the same shape, as mermaid -----------------------------------------------
+#
+# **A DRAWING THAT CAN LEAVE THE TERMINAL.** The text above is this window's
+# resolution and nothing else can read it. Mermaid is a format a page, a
+# README, a pull request comment and a documentation site all render, so the
+# same topology can be looked at by somebody who is not sitting in front of
+# this panel -- without either window inventing a second description.
+#
+# **IT IS A THIRD RENDERING OF THE SAME DOCUMENT, NOT A NEW DESCRIPTION.** Same
+# boxes, same arrows, same order, same measured/unmeasured distinction. What
+# mermaid adds is that a renderer somewhere else can lay it out; what it must
+# not add is a judgement the harness did not send.
+
+MERMAID_SHAPES = {
+    # Mermaid's node syntax carries kind the way the terminal's brackets do.
+    "input": ("([", "])"),
+    "output": ("([", "])"),
+    "gate": ("{{", "}}"),
+    "worker": ("[", "]"),
+    "store": ("[(", ")]"),
+}
+MERMAID_DEFAULT = ("[", "]")
+
+MERMAID_LINKS = {
+    # `-->` measured, `-.->` unmeasured, `--x` refused. The dotted line is
+    # mermaid's own idiom for "not a normal flow", which is the closest thing
+    # it has to the terminal's `-?>`.
+    "measured": "-->",
+    "unmeasured": "-.->",
+    "refusal": "--x",
+    "feedback": "<-->",
+}
+
+
+def _mermaid_id(box_id: str) -> str:
+    """A node id mermaid will accept. Non-alphanumerics become underscores."""
+    cleaned = "".join(c if c.isalnum() else "_" for c in str(box_id))
+    return cleaned or "n"
+
+
+def _mermaid_text(value: str) -> str:
+    """Label text, with the characters that end a mermaid node removed.
+
+    Quotes and brackets in a label close the node early and produce a diagram
+    that renders as garbage rather than failing -- so they are replaced rather
+    than escaped, because a label is a name and not markup.
+    """
+    return (str(value or "")
+            .replace('"', "'").replace("[", "(").replace("]", ")")
+            .replace("{", "(").replace("}", ")").replace("|", "/"))
+
+
+def as_mermaid(payload: dict[str, Any], direction: str = "LR") -> str:
+    """The topology as mermaid `flowchart` source.
+
+    **THE UNMEASURED DISTINCTION SURVIVES THE FORMAT.** An edge nobody measured
+    is dotted, never thin -- the same rule every other window here obeys, and
+    the reason a `weight` of null is sent instead of a zero. A mermaid diagram
+    that drew it as a normal arrow would be the one rendering in which the
+    distinction was lost.
+
+    Returns source, not a picture. Nothing here renders mermaid; the point is
+    that many things elsewhere do.
+    """
+    lines = [f"flowchart {direction}"]
+
+    for box in payload.get("boxes") or []:
+        opener, closer = MERMAID_SHAPES.get(str(box.get("kind") or ""),
+                                            MERMAID_DEFAULT)
+        label = _mermaid_text(box.get("label"))
+        note = _mermaid_text(box.get("note"))
+        count = box.get("count")
+        if count:
+            label = f"{label} ({count})"
+        lines.append(f'    {_mermaid_id(box.get("id"))}{opener}"{label}"{closer}')
+        if note and note != label:
+            # The address, as a mermaid click target. A reader following the
+            # diagram somewhere else gets the same address the panel shows.
+            lines.append(f'    click {_mermaid_id(box.get("id"))} "{note}"')
+
+    for arrow in payload.get("arrows") or []:
+        kind = str(arrow.get("kind") or "flow")
+        weight = arrow.get("weight")
+        if kind in ("refusal", "feedback"):
+            link = MERMAID_LINKS[kind]
+        elif weight is None:
+            link = MERMAID_LINKS["unmeasured"]
+        else:
+            link = MERMAID_LINKS["measured"]
+
+        label = _mermaid_text(arrow.get("label"))
+        if weight is None and kind == "flow":
+            # Said in words, because a dotted line alone does not say why.
+            label = f"{label} (unmeasured)".strip()
+        elif weight is not None:
+            label = f"{label} {float(weight):.0%}".strip()
+
+        middle = f"|{label}|" if label else ""
+        lines.append(f'    {_mermaid_id(arrow.get("from"))} '
+                     f'{link}{middle} {_mermaid_id(arrow.get("to"))}')
+
+    return "\n".join(lines)
+
+
+# --- the same shape, as a flow with links -------------------------------------
+
+
+def draw_flow(payload: dict[str, Any], width: int = 76,
+              link: bool = True) -> Drawn:
+    """The topology as a flow of boxes, with each box a link to its address.
+
+    **A LIST OF ARROWS IS NOT A FLOWCHART.** `draw` renders one arrow per line,
+    which is exact and reads as a table. This lays the boxes out in the order
+    the harness sent them, draws the connectors between them, and hangs each
+    box's address off it as something a reader can follow.
+
+    `link=False` produces the same drawing without markup, for anywhere that is
+    not a Textual widget -- a file, a pull request body, a terminal that has no
+    handler for a click.
+
+    **THE LINK IS THE ADDRESS, NOT A GUESS AT ONE.** A box's `note` is the
+    address the harness sent; nothing here derives a URL, because a window that
+    invented a destination would send readers somewhere the harness never named.
+    """
+    boxes = payload.get("boxes") or []
+    arrows = payload.get("arrows") or []
+    by_id = {b["id"]: b for b in boxes}
+    lines: list[str] = []
+    dropped: list[str] = []
+
+    head = f"{payload.get('topology', '?')}  |  level {payload.get('level', '?')}"
+    status = payload.get("status", "")
+    if status and status != "runs":
+        head += f"  |  {status.upper()}"
+    lines.append(head)
+    caption = payload.get("caption", "")
+    if caption:
+        lines.append(f"  {caption}")
+    lines.append("")
+
+    # Outgoing arrows per box, in the order they arrived. Order is the
+    # harness's; sorting here would be this window imposing a reading.
+    out: dict[str, list[dict]] = {}
+    for arrow in arrows:
+        out.setdefault(str(arrow.get("from")), []).append(arrow)
+
+    for box in boxes:
+        box_id = str(box.get("id"))
+        lines.append(f"  {_linked(box, link)}")
+        going = out.get(box_id, [])
+        for index, arrow in enumerate(going):
+            last = index == len(going) - 1
+            elbow = "'--" if last else "|--"
+            target = by_id.get(str(arrow.get("to")), {})
+            glyph = _glyph(arrow)
+            label = str(arrow.get("label") or "")
+            weight = arrow.get("weight")
+            # The number in words beside the glyph, because a band is coarse
+            # and a reader comparing two windows needs the figure.
+            measure = ("unmeasured" if weight is None
+                       else f"{float(weight):.0%}")
+            lines.append(
+                f"  {elbow} {glyph} {_linked(target, link)}"
+                f"   {label}  [{measure}]".rstrip())
+        if going:
+            lines.append("")
+
+    # Boxes nothing points at and that point at nothing are still boxes. A
+    # renderer that dropped them would be quietly deciding they do not count.
+    reached = {str(a.get("to")) for a in arrows} | set(out)
+    lonely = [b for b in boxes if str(b.get("id")) not in reached]
+    if lonely:
+        lines.append("  not connected to anything the harness sent:")
+        for box in lonely:
+            lines.append(f"    {_linked(box, link)}")
+        lines.append("")
+
+    # Named rather than omitted, as `draw` does: a reader comparing this with
+    # the web view needs to know which axes this window cannot carry.
+    dropped.append("line_colour")
+    return Drawn(lines=tuple(lines), channels_dropped=tuple(dropped))
+
+
+def _linked(box: dict[str, Any], link: bool) -> str:
+    """One box, drawn as its kind, linked to its address when there is one."""
+    left, right = EDGES.get(str(box.get("kind") or "worker"), ("[", "]"))
+    label = str(box.get("label") or "?")
+    count = box.get("count")
+    if count:
+        label = f"{label} {count}"
+    drawn = f"{left}{label}{right}"
+
+    note = str(box.get("note") or "")
+    if not link or not note:
+        return drawn if not note else f"{drawn}   {note}"
+    # Textual console markup. The address is both the label of the link and
+    # what it opens, so a reader who cannot click still sees where it goes.
+    return f"[@click=app.open_address('{note}')]{drawn}[/]   {note}"

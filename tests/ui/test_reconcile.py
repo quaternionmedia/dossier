@@ -79,7 +79,7 @@ def test_four_two_is_reconcile_and_it_is_wired():
 
 
 @pytest.mark.asyncio
-async def test_every_stage_is_named_while_it_is_happening(app, monkeypatch):
+async def test_every_stage_is_named_while_it_is_happening(app, monkeypatch, until, drain):
     """THE ONE THAT MATTERS.
 
     Three stages, each announced before it starts rather than after it
@@ -90,7 +90,10 @@ async def test_every_stage_is_named_while_it_is_happening(app, monkeypatch):
     Mutation: report only the outcome and this fails.
     """
     holding = threading.Event()
-    stub(monkeypatch, on_fetch=lambda: holding.wait(timeout=5))
+    # The timeout is a safety net, not the plan: the test releases the event as
+    # soon as it has read the labels. Five seconds meant a failing run waited
+    # five, and a passing one paid for the worker to notice.
+    stub(monkeypatch, on_fetch=lambda: holding.wait(timeout=2))
 
     async with app.run_test(size=(110, 40)) as pilot:
         await pilot.pause()
@@ -105,53 +108,55 @@ async def test_every_stage_is_named_while_it_is_happening(app, monkeypatch):
         # concludes stage one never happened. It did; the sampling missed it.
         seen.add(str(label.render()).rsplit("  (", 1)[0])
 
-        for _ in range(200):
-            await pilot.pause()
-            seen.add(str(label.render()).rsplit("  (", 1)[0])
-            if any("reading the archive" in s for s in seen):
-                break
+        await until(
+            pilot,
+            lambda: (seen.add(str(label.render()).rsplit("  (", 1)[0]) or
+                     any("reading the archive" in s for s in seen)))
+
+        # Released before the assertions: the sampling is done, and holding
+        # the worker open while pytest formats a failure message helps nobody.
+        holding.set()
 
         assert any("rebuild its index" in s for s in seen), seen
         assert any("reading the archive" in s for s in seen), seen
-
-        holding.set()
-        for _ in range(200):
-            await pilot.pause()
+        # Let the worker finish so the app tears down cleanly. Nothing is
+        # asserted after this, so it is a drain and is named one.
+        await drain(pilot)
 
 
 @pytest.mark.asyncio
-async def test_the_bar_carries_a_real_fraction(app, monkeypatch):
+async def test_the_bar_carries_a_real_fraction(app, monkeypatch, until, drain):
     """The stages are known and countable, so a pulse here would be throwing
     away a figure this one actually has -- unlike an import, which cannot."""
     stub(monkeypatch)
     async with app.run_test(size=(110, 40)) as pilot:
         await pilot.pause()
         app._apply_rad_intent(Intent("reach.reconcile"))
-        for _ in range(200):
-            await pilot.pause()
         bar = app.query_one("#work-progress-bar", ProgressBar)
+        assert await until(pilot, lambda: bar.total), "the bar never got a total"
         assert bar.total == len(DossierApp.RECONCILE_STAGES) == 3
+        # **AND LET THE WORKER FINISH.** The old unconditional wait was doing
+        # this by accident; once the assertion stopped waiting for it, teardown
+        # raced the worker and failed on an unrelated widget. Waiting for the
+        # answer and waiting for the work to end are two things.
+        await drain(pilot)
 
 
 @pytest.mark.asyncio
-async def test_the_outcome_names_what_the_archive_holds(app, monkeypatch):
+async def test_the_outcome_names_what_the_archive_holds(app, monkeypatch, until, drain):
     stub(monkeypatch, threads=237)
     async with app.run_test(size=(110, 40)) as pilot:
         await pilot.pause()
         app._apply_rad_intent(Intent("reach.reconcile"))
         label = app.query_one("#work-progress-label", Label)
-        for _ in range(300):
-            await pilot.pause()
-            if "237" in str(label.render()):
-                break
-        assert "237" in str(label.render())
+        assert await until(pilot, lambda: "237" in str(label.render())),             f"the count never reached the label: {label.render()!r}"
 
 
 # --- it is not an import ------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_it_needs_no_path_to_an_export(app, monkeypatch):
+async def test_it_needs_no_path_to_an_export(app, monkeypatch, quiet):
     """The whole reason this exists. Refreshing through the import route would
     need an export somebody may no longer have, and would re-unpack megabytes
     to answer a question about what is already unpacked.
@@ -169,8 +174,9 @@ async def test_it_needs_no_path_to_an_export(app, monkeypatch):
     async with app.run_test(size=(110, 40)) as pilot:
         await pilot.pause()
         app._apply_rad_intent(Intent("reach.reconcile"))
-        for _ in range(200):
-            await pilot.pause()
+        # **AN ABSENCE NEEDS THE WORK TO HAVE FINISHED**, and "finished" is a
+        # condition the app can answer rather than a number of cycles to guess.
+        assert await quiet(pilot, app), "the reconcile never finished"
 
     assert called == [], "reconcile imported something"
 

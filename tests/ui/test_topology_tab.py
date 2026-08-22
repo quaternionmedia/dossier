@@ -216,3 +216,114 @@ class _NoClose:
 
     def __exit__(self, *exc):
         return False
+
+
+# --- the keyboard route, and the loading state --------------------------------
+
+
+@pytest.mark.asyncio
+async def test_enter_in_the_subject_field_draws(session, monkeypatch, until):
+    """**A FIELD ONLY A MOUSE CAN SUBMIT IS WORSE THAN NO FIELD**, because it
+    looks finished. This app already fixed the identical failure once, for the
+    export path, and the fix did not reach the field added next.
+
+    Mutation: remove the `Input.Submitted` handler and this fails.
+    """
+    from dossier.tui.app import DossierApp
+    from textual.widgets import Input, Static
+
+    asked = []
+
+    def stub(**kw):
+        asked.append(kw.get("subject", ""))
+        return threads.Topology(True, "fixture", payload=_payload(),
+                                source="topology")
+
+    monkeypatch.setattr(threads, "topology", stub)
+
+    app = DossierApp(session_factory=lambda: _NoClose(session),
+                     initial_tab="tab-topology")
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        asked.clear()
+
+        field = app.query_one("#topology-subject", Input)
+        field.focus()
+        await pilot.pause()
+        await pilot.press(*"dossier")
+        await pilot.press("enter")
+
+        assert await until(pilot, lambda: bool(asked)), \
+            "Enter did not trigger a draw"
+
+    assert "dossier" in asked, asked
+
+
+@pytest.mark.asyncio
+async def test_the_drawing_shows_a_loading_state_while_the_harness_is_asked(
+        session, monkeypatch):
+    """The framework's own indicator rather than a hand-written spinner: one
+    fewer thing to keep in step, and it blocks interaction for exactly as long
+    as the work takes.
+
+    Mutation: stop setting `loading` and this fails.
+    """
+    from dossier.tui.app import DossierApp
+    from textual.widgets import Static
+
+    monkeypatch.setattr(threads, "topology", lambda **kw: threads.Topology(
+        True, "fixture", payload=_payload(), source="topology"))
+
+    app = DossierApp(session_factory=lambda: _NoClose(session),
+                     initial_tab="tab-topology")
+    async with app.run_test(size=(160, 50)) as pilot:
+        drawing = app.query_one("#topology-drawing", Static)
+        app._load_topology_tab()
+        # Set synchronously by the loader, before the worker starts.
+        assert drawing.loading is True
+
+        for _ in range(60):
+            await pilot.pause()
+            if drawing.loading is False:
+                break
+
+    assert drawing.loading is False, "the loading state was never cleared"
+
+
+@pytest.mark.asyncio
+async def test_the_mermaid_button_converts_what_is_on_screen(
+        session, monkeypatch, until):
+    """Converts the drawn payload rather than fetching again — two fetches
+    could return two different documents, and the button would then be showing
+    source for something the reader is not looking at.
+
+    Mutation: re-fetch in the handler and this fails.
+    """
+    from dossier.tui.app import DossierApp
+    from textual.widgets import Static
+
+    monkeypatch.setattr(threads, "topology", lambda **kw: threads.Topology(
+        True, "fixture", payload=_payload(), source="topology"))
+
+    app = DossierApp(session_factory=lambda: _NoClose(session),
+                     initial_tab="tab-topology")
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        drawing = app.query_one("#topology-drawing", Static)
+        assert await until(pilot, lambda: str(drawing.render()).strip())
+
+        # The harness is now unreachable; the button must still work, because
+        # it converts what was already drawn.
+        monkeypatch.setattr(threads, "topology", lambda **kw: threads.Topology(
+            False, "gone", problem="nothing is answering", remedy=""))
+        # `press()` posts the Pressed message; `pilot.click` needs the button
+        # to be on screen, which makes the test about the layout rather than
+        # about the handler.
+        from textual.widgets import Button
+
+        app.query_one("#btn-topology-mermaid", Button).press()
+        await pilot.pause()
+        source = str(drawing.render())
+
+    assert source.startswith("flowchart ")
+    assert "-.->" in source, "the unmeasured edge lost its dotted line"

@@ -1123,6 +1123,7 @@ class DossierApp(App):
                                     id="topology-subject")
                                 yield Button("Draw", id="btn-draw-topology",
                                              variant="primary")
+                                yield Button("Mermaid", id="btn-topology-mermaid")
                             yield Static("", id="topology-drawing")
                             yield Static("", id="topology-note")
                     with TabPane("Threads", id="tab-threads"):
@@ -4167,6 +4168,14 @@ class DossierApp(App):
         Unscoped, like Sweep and Threads: a topology is the organisation's, not
         one repository's, so this does not wait for a project to be chosen.
         """
+        # **TEXTUAL'S OWN LOADING STATE.** `widget.loading = True` overlays an
+        # indicator and blocks interaction for exactly as long as the work
+        # takes. Writing a spinner here would be a second thing to keep in step
+        # with the framework's, and a worse one.
+        try:
+            self.query_one("#topology-drawing", Static).loading = True
+        except Exception:                          # noqa: BLE001
+            pass
         self._progress_start("asking the harness for a topology")
         self._run_topology_draw()
 
@@ -4195,12 +4204,20 @@ class DossierApp(App):
                 answer.where)
             return
 
-        drawn = drawing.draw(answer.payload, width=76)
+        # **THE FLOW, NOT THE LIST.** `draw` renders one arrow per line, which
+        # is exact and reads as a table. `draw_flow` lays the boxes out with
+        # their connectors and hangs each address off its box as a link.
+        drawn = drawing.draw_flow(answer.payload, width=76)
         unmeasured = sum(1 for line in drawn.lines
                          if drawing.UNMEASURED in line)
         self.call_from_thread(self._topology_drawn, answer, drawn, unmeasured)
 
+    _topology_payload: dict | None = None
+    """The document behind what is on screen, so Mermaid converts exactly what
+    was drawn rather than fetching again and possibly getting something else."""
+
     def _topology_drawn(self, answer, drawn, unmeasured: int) -> None:
+        self._topology_payload = answer.payload
         total = len(answer.payload.get("arrows", []))
         provenance = f" from the {answer.source}" if answer.source else ""
         if answer.surveyed:
@@ -4221,6 +4238,8 @@ class DossierApp(App):
             note = ("this window cannot carry: "
                     + ", ".join(drawn.channels_dropped))
 
+        drawing_widget = self.query_one("#topology-drawing", Static)
+        drawing_widget.loading = False
         self.query_one("#topology-caveat", Static).update(caveat)
         self.query_one("#topology-drawing", Static).update(drawn.text())
         self.query_one("#topology-note", Static).update(note)
@@ -4237,6 +4256,70 @@ class DossierApp(App):
         self.query_one("#topology-drawing", Static).update("\n".join(lines))
         self.query_one("#topology-note", Static).update("")
         self._progress_finish("the harness did not answer")
+
+    @on(Input.Submitted, "#topology-subject")
+    def on_topology_subject_submitted(self, event: Input.Submitted) -> None:
+        """Enter in the field does what Draw does.
+
+        **THE SAME ONE-KEY-SHORT FAILURE THIS APP ALREADY FIXED ONCE**, for
+        `#thread-export-path`: a field that only a mouse can submit is a worse
+        outcome than no field, because it looks finished.
+        """
+        event.stop()
+        self._load_topology_tab()
+
+    @on(Button.Pressed, "#btn-topology-mermaid")
+    def on_topology_mermaid(self, event: Button.Pressed) -> None:
+        """Show the same topology as mermaid source.
+
+        **A DRAWING THAT CAN LEAVE THIS TERMINAL.** The flow above is this
+        window's resolution and nothing else reads it; mermaid renders in a
+        README, a pull request, a documentation site and the web front end. It
+        is a third rendering of one document, not a second description.
+        """
+        event.stop()
+        from dossier import topology as drawing
+
+        if not self._topology_payload:
+            self.query_one("#topology-note", Static).update(
+                "nothing is drawn yet, so there is nothing to convert")
+            return
+        source = drawing.as_mermaid(self._topology_payload)
+        self.query_one("#topology-drawing", Static).update(source)
+        self.query_one("#topology-note", Static).update(
+            "mermaid source -- paste it anywhere that renders mermaid. "
+            "Press Draw to go back to the flow.")
+
+    def action_open_address(self, address: str) -> None:
+        """Follow a box's address from the flow.
+
+        The address is what the harness sent. When it names a repository this
+        panel knows, the panel scopes to it; otherwise the address is reported
+        rather than guessed at, because a window that invented a destination
+        would send a reader somewhere nobody named.
+        """
+        wanted = str(address or "").strip()
+        if not wanted:
+            return
+        tail = wanted.rsplit("/", 1)[-1]
+        try:
+            with self.session_factory() as session:
+                from sqlmodel import select
+
+                found = session.exec(
+                    select(Project).where(Project.name.contains(tail))
+                ).first()
+        except Exception:                          # noqa: BLE001
+            found = None
+
+        if found is None:
+            self.query_one("#topology-note", Static).update(
+                f"{wanted} is an address the harness sent; no repository here "
+                f"matches it")
+            return
+        self.selected_project = found
+        self.query_one("#topology-note", Static).update(
+            f"scoped to {found.name} -- {wanted}")
 
     @on(Button.Pressed, "#btn-draw-topology")
     def on_draw_topology(self, event: Button.Pressed) -> None:
