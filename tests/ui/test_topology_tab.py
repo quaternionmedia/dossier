@@ -111,12 +111,59 @@ async def test_an_unreachable_harness_is_a_sentence_and_draws_nothing(
                 break
             await pilot.pause(0.05)
         note = str(app.query_one("#topology-note", Static).render())
+        loading = app.query_one("#topology-drawing", Static).loading
 
     assert "nothing is answering" in drawing
     assert "qm dashboard --start harness" in drawing
     assert "would look like an answer" in drawing
     assert "-?>" not in drawing and "-->" not in drawing
     assert note == ""
+    # **AND THE OVERLAY MUST BE DOWN, OR NONE OF THE ABOVE IS VISIBLE.** See
+    # the test below: every assertion here passed while the tab showed a
+    # spinner and nothing else.
+    assert loading is False
+
+
+@pytest.mark.asyncio
+async def test_an_unreachable_harness_takes_the_loading_overlay_down(
+        session, monkeypatch):
+    """**THE MESSAGE WAS WRITTEN AND THEN COVERED UP.**
+
+    `widget.loading = True` draws an overlay *on top of* the widget. Only the
+    drawn path set it back to False, so with the harness down -- the ordinary
+    case, because it is a separate process on a separate port -- the tab sat on
+    a spinner forever with the problem, the remedy and the URL underneath it.
+
+    The test above did not catch it because it asserts what the widget
+    *contains*, and the content was correct the whole time. The overlay is
+    separate state, and nothing asserted it. Reported from a running terminal:
+    "dossier topology tab just shows loading and no actual topology".
+
+    Mutation: drop the `_topology_idle()` call from `_topology_failed` and this
+    fails while every content assertion still passes.
+    """
+    from dossier.tui.app import DossierApp
+    from textual.widgets import Static
+
+    monkeypatch.setattr(threads, "topology", lambda **kw: threads.Topology(
+        False, "http://127.0.0.1:3141/v1/topology/shape/delegation",
+        problem="nothing is answering at http://127.0.0.1:3141",
+        remedy="`uv run qm dashboard --start harness`"))
+
+    app = DossierApp(session_factory=lambda: _NoClose(session),
+                     initial_tab="tab-topology")
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        for _ in range(40):
+            widget = app.query_one("#topology-drawing", Static)
+            if str(widget.render()) and not widget.loading:
+                break
+            await pilot.pause(0.05)
+        still_loading = app.query_one("#topology-drawing", Static).loading
+
+    assert still_loading is False, (
+        "the harness did not answer and the tab is still showing its loading "
+        "overlay, which covers the sentence explaining why")
 
 
 @pytest.mark.asyncio

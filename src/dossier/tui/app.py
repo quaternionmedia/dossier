@@ -4256,14 +4256,30 @@ class DossierApp(App):
             note = ("this window cannot carry: "
                     + ", ".join(drawn.channels_dropped))
 
-        drawing_widget = self.query_one("#topology-drawing", Static)
-        drawing_widget.loading = False
+        self._topology_idle()
         self.query_one("#topology-caveat", Static).update(caveat)
         self.query_one("#topology-drawing", Static).update(drawn.text())
         self.query_one("#topology-note", Static).update(note)
         self._progress_finish("drew the topology")
 
+    def _topology_idle(self) -> None:
+        """Take the loading overlay down, whatever the outcome was.
+
+        **THE OVERLAY HID THE MESSAGE EXPLAINING WHY THERE WAS NOTHING TO SEE.**
+        Only the drawn path cleared it, so with the harness down -- which
+        `_run_topology_draw` calls the ordinary case, because it is a separate
+        process on a separate port -- the tab sat on a spinner forever with the
+        problem, the remedy and the URL written into the widget *underneath* it.
+        Both terminal paths now come through here, so a third one cannot be
+        added that forgets.
+        """
+        try:
+            self.query_one("#topology-drawing", Static).loading = False
+        except Exception:                          # noqa: BLE001
+            pass
+
     def _topology_failed(self, problem: str, remedy: str, where: str) -> None:
+        self._topology_idle()
         lines = [problem]
         if remedy:
             lines.append(f"  {remedy}")
