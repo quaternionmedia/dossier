@@ -358,11 +358,23 @@ class TestRingInTheApp:
 
             await pilot.press("enter")      # descend
             await pilot.pause()
-            assert "Advance phase" in app.screen.query_one("#rad-ring").last_render
+            inside = app.screen.query_one("#rad-ring").last_render
+            # STILL DRAWN, AND STILL ON ITS CELL. A menu that drops what it
+            # cannot do renumbers everything after it, and the numbers are
+            # written down in `docs/rad-commands.md`.
+            assert "Advance phase" in inside
+            assert "8 Advance phase" in inside, "it moved off cell 8"
 
             await pilot.press("enter")      # commit
             await pilot.pause()
             assert type(app.screen).__name__ != "RingScreen", "ring did not close"
+            # **`delta.advance`, AND IT USED TO BE `project.sync`.** Entering a
+            # submenu lands on the first wedge this app can act on, and until
+            # the actions were reconciled into one dispatch table that was
+            # Sync -- advance and note were in the ring, greyed, while buttons
+            # did exactly them. All four under Do are wired now, so the
+            # landing moved to the first cell. The behaviour did not change;
+            # what the app can do did.
             assert app._rad.intents[-1].action == "delta.advance"
 
     @pytest.mark.asyncio
@@ -763,3 +775,81 @@ class TestTheRingIsRecorded:
             path = self.OUTPUT / f"{name}.svg"
             assert path.is_file(), f"{path} was not recorded"
             assert path.stat().st_size > 0
+
+
+class TestGreyedOutWedges:
+    """Unavailable wedges, as drawn. The state has to survive losing colour."""
+
+    def _view(self):
+        from dossier.rad.session import RadSession, Wedge
+
+        palette = (
+            Wedge("a", "Alive", action="live"),
+            Wedge("d", "Dead", action="dead"),
+        )
+        session = RadSession(resolve=lambda c=None: palette,
+                             available=lambda w: w.action == "live")
+        session.open_at()
+        return session.view
+
+    def test_the_border_says_unavailable_without_any_colour(self):
+        """THE ONE THAT MATTERS.
+
+        `contrast` has no fainter ink to grey with, by design, and a
+        sixteen-colour terminal approximates everything. A state carried by
+        colour alone is a wedge that looks ordinary and refuses to be chosen.
+        `last_render` is the plain grid, before any markup.
+
+        Mutation: draw unavailable nodes with the ordinary rule and this fails.
+        """
+        from dossier.rad.ring import Ring
+
+        ring = Ring()
+        ring.render_view(self._view())
+        lines = ring.last_render.split(chr(10))
+
+        dead_row = next(i for i, line in enumerate(lines) if "Dead" in line)
+        live_row = next(i for i, line in enumerate(lines) if "Alive" in line)
+        assert "." in lines[dead_row - 1], "no dotted rule above the dead wedge"
+        assert "." not in lines[live_row - 1], (
+            "the available wedge was drawn dotted too, so the rule says nothing")
+
+    def test_an_unavailable_wedge_is_painted_in_its_own_role(self):
+        from dossier.rad.ring import Ring
+        from dossier.rad.tokens import roles as role_tokens
+
+        markup = Ring().render_view(self._view())
+        faint = role_tokens().wedge_label_unavailable
+        assert f"[{faint}]" in markup, "nothing used the unavailable role"
+
+    def test_the_contrast_theme_greys_with_the_border_and_not_with_colour(self):
+        """Its rule is >= 7:1 with no decorative colour, so `ink_faint` there is
+        `ink_dim`. The dotted border is what carries the state, and the test
+        above proves the border is drawn regardless of theme."""
+        from dossier.rad.tokens import roles as role_tokens
+
+        contrast = role_tokens("contrast")
+        assert contrast.wedge_label_unavailable == contrast.wedge_label
+        radical = role_tokens("radical")
+        assert radical.wedge_label_unavailable != radical.wedge_label, (
+            "every other theme must actually look different")
+
+    def test_the_centre_is_never_drawn_unavailable(self):
+        """Backing out works at every level, including one where nothing else
+        does. A greyed `5` would strand a reader in the ring."""
+        from dossier.rad.ring import Ring
+
+        ring = Ring()
+        ring.render_view(self._view())
+        lines = ring.last_render.split(chr(10))
+        centre_row = next(i for i, line in enumerate(lines) if "close" in line)
+
+        # The centre's own columns, not the whole row: three boxes share every
+        # row of this grid, so a dotted rule somewhere on the line belongs to
+        # whichever cell sits over it. A first version of this test read the
+        # line and failed on the dead wedge's border two columns to the right.
+        start = lines[centre_row].index("5 close") - 2
+        end = lines[centre_row].index("|", start + 3) + 1
+        above = lines[centre_row - 1][start:end]
+        assert "-" in above, f"expected the ordinary rule, got {above!r}"
+        assert "." not in above, f"the centre was drawn dotted: {above!r}"

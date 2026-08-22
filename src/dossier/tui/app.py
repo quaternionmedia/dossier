@@ -443,6 +443,81 @@ class SyncStatusWidget(Static):
         self.query_one("#rate-label", Label).update(f"Rate: {value}/{self.rate_limit}")
 
 
+class WorkProgress(Vertical):
+    """What a long operation is doing, while it is doing it.
+
+    **INDETERMINATE UNLESS SOMEBODY KNOWS THE FRACTION.** An import is one
+    request to the harness: it is sent, and later it is answered. Nothing in
+    between reports a percentage, so a bar creeping to sixty would be a number
+    this application made up -- and a made-up number is worse than no number,
+    because a reader checks it and stops looking. `start(total=N)` is for the
+    cases that genuinely count, like a batch sync over N repositories.
+
+    THE ELAPSED SECONDS ARE THE HONEST FIGURE. They are measured, they always
+    exist, and they are what tells somebody the difference between slow and
+    stuck -- which is the actual question behind wanting a progress bar.
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Label("", id="work-progress-label")
+        yield ProgressBar(total=None, show_eta=False, id="work-progress-bar")
+
+    def on_mount(self) -> None:
+        self.display = False
+        self._started = 0.0
+        self._what = ""
+        self._timer = None
+
+    def start(self, what: str, total: int | None = None) -> None:
+        """Show the panel and begin counting. `total` only when it is known."""
+        import time
+
+        self._what = what
+        self._started = time.monotonic()
+        self.display = True
+        bar = self.query_one("#work-progress-bar", ProgressBar)
+        bar.total = total
+        if total is not None:
+            bar.update(progress=0)
+        self._tick()
+        if self._timer is None:
+            # Twice a second: fast enough to read as alive, slow enough that the
+            # tick is not competing with the work for the event loop.
+            self._timer = self.set_interval(0.5, self._tick)
+
+    def advance(self, done: int, of: int, what: str | None = None) -> None:
+        """For work that really does know how far along it is."""
+        if what:
+            self._what = what
+        bar = self.query_one("#work-progress-bar", ProgressBar)
+        bar.total = of
+        bar.update(progress=done)
+        self._tick()
+
+    def finish(self, said: str) -> None:
+        """Stop, and leave the outcome on screen rather than vanishing.
+
+        A panel that disappears takes the only record of what happened with it,
+        and the reader was probably looking somewhere else when it did.
+        """
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+        self.query_one("#work-progress-label", Label).update(
+            f"{said}  ({self._elapsed():.0f}s)")
+        self.query_one("#work-progress-bar", ProgressBar).display = False
+
+    def _elapsed(self) -> float:
+        import time
+
+        return time.monotonic() - self._started
+
+    def _tick(self) -> None:
+        self.query_one("#work-progress-bar", ProgressBar).display = True
+        self.query_one("#work-progress-label", Label).update(
+            f"{self._what}  ({self._elapsed():.0f}s)")
+
+
 class ProjectDetailPanel(Vertical):
     """Panel showing detailed project information."""
     
@@ -710,6 +785,75 @@ class DossierApp(App):
     DataTable {
         height: 1fr;
     }
+
+    /* The overview stacks many tables in one scroll. `height: 1fr` above makes
+       each one flex to fill, so they compete for the same space and every
+       section ends up squashed against its neighbours -- which is what a
+       reader sees as the page having lost its shape. Here each table is as
+       tall as its rows and the panel scrolls. */
+    /* NO `max-height` HERE, DELIBERATELY. Capping a table inside a page that
+       already scrolls gives the table its own scrollbar, and a reader who
+       scrolls the page past a capped section never sees its last rows -- text
+       that is present, rendered, and unreachable without noticing there was a
+       second scroll region. The page is the only scroll axis; a section that
+       grows makes the page longer. Measured against the real database: the
+       tallest section is 17 rows, so a cap of 20 would not have bound today
+       and would have bound silently later. */
+    .overview-section {
+        height: auto;
+        margin: 0 0 1 0;
+    }
+
+    .overview-heading {
+        margin: 1 0 0 0;
+        padding: 0 1;
+        color: $accent;
+    }
+
+    /* The note explains what the numbers above it do and do not mean. It sits
+       with that table rather than floating between two, so the margin is under
+       it and not over. */
+    .overview-note {
+        margin: 0 0 1 0;
+        padding: 0 2;
+        color: $text-muted;
+    }
+
+    /* THE INGEST ROW HAD NO STYLESHEET, AND THE BUTTON WENT OFF THE SCREEN.
+       A Textual `Input` defaults to the full width of its container, so beside
+       a button in a `Horizontal` it takes everything and pushes the button past
+       the right edge -- measured at 140 columns, the button's region started at
+       x=138, leaving two columns of it visible. At an ordinary 80-column
+       terminal it is not on the screen at all. A person could type the path to
+       an export and have nowhere to press.
+
+       So the field flexes and the button is sized by its own label. `min-width`
+       rather than a fixed width, because the label is the thing that decides
+       how wide a button needs to be. */
+    #thread-buttons {
+        height: auto;
+        margin: 1 0 0 0;
+    }
+
+    #thread-export-path {
+        width: 1fr;
+    }
+
+    #btn-ingest-threads {
+        width: auto;
+        min-width: 12;
+        margin: 0 0 0 1;
+    }
+
+    #overview-scope {
+        padding: 1 1 0 1;
+    }
+
+    #overview-masthead {
+        padding: 0 1 1 1;
+        border-bottom: solid $primary-darken-2;
+        margin: 0 0 1 0;
+    }
     
     TabPane {
         padding: 1;
@@ -950,6 +1094,48 @@ class DossierApp(App):
                     # both sides.
                     with TabPane("Harness", id="tab-harness"):
                         yield DataTable(id="harness-table")
+                    # Its own tab rather than a second table under Harness:
+                    # this is the one thing on the screen that is waiting for
+                    # the reader, and a queue somebody has to go looking for is
+                    # a queue nobody empties.
+                    with TabPane("Waiting", id="tab-waiting"):
+                        yield DataTable(id="waiting-table")
+                    # The harness's thread archive, read over the seam. This is
+                    # the only human surface for it: a second one would be a
+                    # second definition of what a figure means, and the CLI
+                    # beside it is for machines and for debugging.
+                    # One sweep: what may be approved together, and what may
+                    # not. Its own tab rather than a modal, because a person
+                    # comes back to a review and a modal is a thing you are
+                    # inside of rather than a thing you can leave and return to.
+                    with TabPane("Sweep", id="tab-sweep"):
+                        with Vertical():
+                            yield Static("", id="sweep-summary")
+                            yield DataTable(id="sweep-table")
+                            yield Static("", id="sweep-note")
+                    with TabPane("Topology", id="tab-topology"):
+                        with Vertical():
+                            yield Static("", id="topology-caveat")
+                            with Horizontal(id="topology-picker"):
+                                yield Input(
+                                    placeholder="a project, to read the archive "
+                                                "for; blank draws a shape",
+                                    id="topology-subject")
+                                yield Button("Draw", id="btn-draw-topology",
+                                             variant="primary")
+                                yield Button("Mermaid", id="btn-topology-mermaid")
+                            yield Static("", id="topology-drawing")
+                            yield Static("", id="topology-note")
+                    with TabPane("Threads", id="tab-threads"):
+                        yield DataTable(id="threads-table")
+                        with Horizontal(id="thread-buttons"):
+                            yield Input(placeholder="path to an export "
+                                                    "(conversations.json or the "
+                                                    "folder holding it)",
+                                        id="thread-export-path")
+                            yield Button("Ingest", id="btn-ingest-threads",
+                                         variant="primary")
+                        yield WorkProgress(id="thread-progress")
                     with TabPane("Governance", id="tab-governance"):
                         with Vertical():
                             yield Static("", id="governance-age")
@@ -1004,7 +1190,8 @@ class DossierApp(App):
         from dossier.rad.session import RadSession
 
         if self._rad is None:
-            self._rad = RadSession(resolve=resolve)
+            self._rad = RadSession(resolve=resolve,
+                                   available=self.rad_can_apply)
 
         def applied(intent) -> None:
             if intent is None:
@@ -1024,32 +1211,525 @@ class DossierApp(App):
     # any selection reads a value rather than raising.
     _scope_owner = None
 
+    # The selected repository, for the same reason and found the same way: a
+    # ring opened before any selection asks for it, and `__init__` is not the
+    # only construction path this app has.
+    _current_project = None
+
     # Actions the ring can commit that map onto a view this app already has.
+    # `view.harness` was here and no wedge in the palette names it, so nothing
+    # could ever commit it -- a dead entry that made the dispatch look wider
+    # than the menu. `tab-harness` is still reachable by its tab; only the
+    # unreachable mapping is gone. `test_rad_sync.py` checks the direction.
     RAD_VIEWS = {
         "view.overview": "tab-overview",
-        "view.harness": "tab-harness",
         "view.deltas": "tab-deltas",
         "view.governance": "tab-governance",
         "view.disk": "tab-disk",
         "view.details": "tab-details",
+        "view.topology": "tab-topology",
     }
+
+    # **ONE TABLE, AND THE BUTTONS USE IT TOO.** Dispatch was a chain of
+    # `if intent.action == ...`, which is a fourth place describing the same
+    # acts as the ring, the buttons and the bindings -- and it is how
+    # `filter.*` came to be routable by the ring and reported unhandled while
+    # three buttons did exactly those things.
+    #
+    # A method name rather than a bound method, because this is a class body
+    # and the methods do not exist yet. `_dispatch_action` resolves it.
+    RAD_ACTIONS: dict[str, str] = {
+        "project.sync": "_sync_current_view",
+        "reach.ingest": "_begin_thread_ingest",
+        "sweep.review": "_begin_sweep_review",
+        "reach.reconcile": "_begin_reconcile",
+        "delta.advance": "action_advance_delta_phase",
+        "delta.note": "action_add_delta_note",
+        "filter.all": "_show_all_projects",
+        "filter.synced": "_show_synced_projects",
+        "filter.drifting": "_show_drifting_projects",
+    }
+
+    # Every ring action this app actually does something with. Declared rather
+    # than inferred, and read by `dossier.rad.index.applied_by` so the command
+    # sheet marks what is wired instead of implying everything is.
+    # Derived, never listed twice. A hand-kept copy is how the ring came to
+    # claim it could do things the panel had no handler for, and to disclaim
+    # things it could.
+    RAD_HANDLED = frozenset(RAD_VIEWS) | frozenset(RAD_ACTIONS)
+
+    @on(Button.Pressed, "#btn-ingest-threads")
+    def on_ingest_threads_pressed(self) -> None:
+        """Ask the harness to unpack an export, then show what arrived.
+
+        **ON THIS CLASS BECAUSE THIS CLASS COMPOSES THE BUTTON.** It lived on
+        `ContentViewerScreen`, a modal document viewer that is not an ancestor
+        of the Threads tab, so the press had nowhere to land and the field
+        could be filled in and submitted to nothing. Textual routes
+        `Button.Pressed` up the widget tree it was pressed in; a handler on an
+        unrelated screen is not on that path and is never called.
+
+        THE PANEL DOES NOT WRITE THE ARCHIVE. It asks the harness, which owns
+        it. The human act -- requesting the export from the service -- happened
+        before this button existed, and everything after it may be automated.
+        """
+        self.ingest_threads_from(self.query_one("#thread-export-path", Input).value)
+
+    def _begin_thread_ingest(self) -> None:
+        """`4.6`. Open the archive and put the cursor where the path goes.
+
+        **THE RING CANNOT ASK FOR THE PATH ITSELF.** It commits an intent and
+        closes -- that is what makes a keystroke count mean anything -- so a
+        command needing free text has to hand off to a surface that can hold
+        one. Handing off is not a lesser outcome: the tab it opens is where the
+        result appears, so a reader ends up looking at the thing they changed.
+
+        The field is focused rather than merely visible. A route that leaves
+        somebody hunting for where to type has moved the work rather than done
+        it, which is the whole complaint `PRINCIPLES.md` P13 is about.
+        """
+        try:
+            self.query_one("#project-tabs").active = "tab-threads"
+            # Filled on arrival rather than left to whatever fires on a tab
+            # change: a person routed here by `4.6` should see the archive they
+            # are about to add to, not an empty table.
+            self._load_tab_data("tab-threads")
+        except Exception:
+            pass
+
+        def focus_the_field() -> None:
+            try:
+                field = self.query_one("#thread-export-path", Input)
+            except Exception:
+                return
+            field.focus()
+            self.notify("Type the path to an export, then press Enter.",
+                        title="Ingest an export", timeout=8)
+
+        # After the refresh: the tab's contents are mounted on the way through,
+        # and focusing before that finds nothing and fails silently.
+        self.call_after_refresh(focus_the_field)
+
+    @on(Input.Submitted, "#thread-export-path")
+    def on_thread_export_submitted(self, event) -> None:
+        """Enter in the field does what the button does.
+
+        Without this the keyboard route ends one key short: `4.6` focuses a
+        field that only a mouse can submit, which is a worse outcome than not
+        having the route.
+        """
+        self.ingest_threads_from(event.value)
+
+    def ingest_threads_from(self, path: str | None) -> None:
+        """The ingest itself, reachable without a button.
+
+        Split out so the keyboard route and the mouse route are the same code
+        rather than two implementations that agree until one is edited.
+        """
+        path = (path or "").strip().strip('"')
+        if not path:
+            self.notify("Give the path to an export first.",
+                        severity="warning", title="Nothing to ingest")
+            return
+
+        # **OFF THE EVENT LOOP, AND THAT IS THE POINT.** This used to call
+        # `request_import` here. A real export is twenty-five megabytes and the
+        # harness reindexes every session afterwards, so the whole application
+        # stopped repainting and stopped taking keys for the duration -- and a
+        # progress bar would have been frozen too, which is the one thing worse
+        # than not having one. The work goes to a thread; the bar is on the
+        # loop, so it can move.
+        try:
+            self.query_one("#thread-progress", WorkProgress).start(
+                f"asking the harness to unpack {path}")
+        except Exception:
+            pass
+        self._run_thread_ingest(path)
+
+    @work(thread=True, exclusive=True, group="thread-ingest")
+    def _run_thread_ingest(self, path: str) -> None:
+        """Ask the harness, then report on the loop.
+
+        Everything touching the screen goes through `call_from_thread`: a widget
+        updated from a worker thread is a race, and the kind that shows up as a
+        redraw that never happens rather than as an error.
+        """
+        from dossier.threads import request_import, summarise_import
+
+        result = request_import(path)
+        line = summarise_import(result)
+        self.call_from_thread(self._thread_ingest_finished, result, line)
+
+    def _thread_ingest_finished(self, result: dict, line: str) -> None:
+        try:
+            self.query_one("#thread-progress", WorkProgress).finish(line)
+        except Exception:
+            pass
+
+        if not result.get("ok"):
+            self.notify(line, severity="error", title="Ingest refused")
+            return
+
+        # Refresh before reporting, so the count in the message and the rows on
+        # the screen are the same reading. Reporting first and refreshing after
+        # is how a panel comes to say one number and show another.
+        #
+        # **AND RELOAD THE TAB, NOT JUST THE PROJECT LIST.** `action_refresh`
+        # reloads projects; the archive is somebody else's data on a different
+        # tab, and `_load_tab_data` caches by id, so the table a person was
+        # watching stayed empty while the message said two hundred and three.
+        # Measured: rows after a real ingest were 0.
+        self.action_refresh()
+        self.reload_tab("tab-threads")
+        self.notify(line, title="Ingested")
+
+    def reload_tab(self, tab_id: str) -> None:
+        """Load a tab's data again, cache or no cache.
+
+        `_load_tab_data` returns immediately for a tab it has already filled,
+        which is right for switching between tabs and wrong after the data
+        underneath one has changed.
+        """
+        loaded = getattr(self, "_tabs_loaded", None)
+        if loaded is not None:
+            loaded.discard(tab_id)
+        self._load_tab_data(tab_id)
+
+    # Which dependency `6.4` reviews when nobody has said. The widest-shared
+    # one is not a default so much as the only starting point that is not
+    # arbitrary: it is where one decision saves the most repeated ones, and
+    # where getting it wrong costs the most, and those are the same number.
+    #
+    # It is still a guess about intent, so the screen says which it picked.
+    selected_dependency: str | None = None
+    """The package a sweep will act on, set by choosing a row in Dependencies.
+
+    None means nobody has chosen, and the sweep falls back to the widest-shared
+    package **and says so** -- a fallback that looked like a choice is how the
+    panel came to sweep one package while a reader was looking at another.
+    """
+
+    def _begin_sweep_review(self) -> None:
+        """`6.4`. Review the widest-shared dependency across the organisation.
+
+        Opens the tab first and fills it from a worker: the sweep reads every
+        declared dependency in the database and runs a worker per share, which
+        is not something to do on the loop a person is looking at.
+        """
+        try:
+            self.query_one("#project-tabs").active = "tab-sweep"
+        except Exception:
+            pass
+        self._progress_start("working out what a sweep would touch")
+        self._run_sweep_review()
+
+    @work(thread=True, exclusive=True, group="sweep-review")
+    def _run_sweep_review(self) -> None:
+        from dossier.approval import review as arrange
+        from dossier.sweep import find, furthest_ahead, plan, shared_needs
+
+        try:
+            with self.session_factory() as session:
+                package = self.selected_dependency
+                chosen_by = "chosen in Dependencies"
+                if not package:
+                    widest = shared_needs(session, at_least=2)
+                    if not widest:
+                        self.call_from_thread(
+                            self._sweep_review_failed,
+                            "nothing is declared by two repositories, so there "
+                            "is nothing to sweep. Choose a dependency in the "
+                            "Dependencies tab to sweep it anyway")
+                        return
+                    package, _ = widest[0]
+                    chosen_by = ("nothing chosen, so the widest-shared package"
+                                 " was used")
+
+                found = find(session, package)
+                if not found.shares:
+                    self.call_from_thread(
+                        self._sweep_review_failed,
+                        f"no repository declares {package}, so there is "
+                        f"nothing to sweep")
+                    return
+
+                # **THE TARGET IS DERIVED FROM THE DATA, NOT TYPED IN.** This
+                # was a constant -- 0.116.0 -- applied to whatever package the
+                # sweep landed on, so any package but `fastapi` was offered a
+                # version out of an unrelated project's history.
+                to_version = furthest_ahead(found)
+                if not to_version:
+                    self.call_from_thread(
+                        self._sweep_review_failed,
+                        f"{package} is declared by {len(found.shares)} "
+                        f"repository(ies) and none states a comparable "
+                        f"version, so there is no target to sweep to. That is "
+                        f"a person's call, not this panel's")
+                    return
+                planned = plan(found, to_version)
+        except Exception as exc:                  # noqa: BLE001
+            self.call_from_thread(self._sweep_review_failed,
+                                  f"{type(exc).__name__}: {exc}")
+            return
+
+        outcomes = _dispatch(planned, to_version)
+        found = arrange(planned.address,
+                        f"{package} to {to_version} ({chosen_by})", outcomes)
+        self.call_from_thread(self._sweep_review_ready, found)
+
+    def _sweep_review_ready(self, found) -> None:
+        self._sweep_review = found
+        self._progress_finish(found.summary())
+        self.reload_tab("tab-sweep")
+        self.notify(found.summary(), title="Sweep", timeout=8)
+
+    def _sweep_review_failed(self, said: str) -> None:
+        self._progress_finish(said)
+        self.notify(said, severity="error", title="Sweep", timeout=8)
+
+    # The stages of a refresh, in the order they have to happen. Named here
+    # because a person watching wants to know which part is slow, and because a
+    # stage that silently did nothing would otherwise be indistinguishable from
+    # one that was quick.
+    RECONCILE_STAGES = (
+        ("reindex", "asking the harness to rebuild its index"),
+        ("refetch", "reading the archive back over the seam"),
+        ("redraw", "clearing the panel's own caches and drawing again"),
+    )
+
+    def _begin_reconcile(self) -> None:
+        """`4.2`. Refresh every cache and reconcile the panel with the harness.
+
+        **THIS IS NOT AN IMPORT.** Nothing is unpacked and no export is needed:
+        the harness rebuilds its index from what it already holds, and the panel
+        throws away what it had cached and reads again. That is the difference
+        between "get me a fresh reading" and "take in this new thing", and
+        having only the second is what made refreshing require a path to an
+        export somebody might not still have.
+        """
+        try:
+            self.query_one("#project-tabs").active = "tab-threads"
+            self._load_tab_data("tab-threads")
+        except Exception:
+            pass
+        self._progress_start(self.RECONCILE_STAGES[0][1],
+                             total=len(self.RECONCILE_STAGES))
+        self._run_reconcile()
+
+    @work(thread=True, exclusive=True, group="reconcile")
+    def _run_reconcile(self) -> None:
+        """Off the loop: re-indexing reads every session on the machine.
+
+        Each stage reports before it starts rather than after it finishes, so
+        the label names what is happening now and not what just did.
+        """
+        from dossier.threads import fetch, request_reindex, summarise_reindex
+
+        result = request_reindex()
+        line = summarise_reindex(result)
+        if not result.get("ok"):
+            self.call_from_thread(self._reconcile_failed, line)
+            return
+
+        self.call_from_thread(self._progress_advance, 1,
+                              len(self.RECONCILE_STAGES),
+                              self.RECONCILE_STAGES[1][1])
+        archive = fetch()
+
+        self.call_from_thread(self._progress_advance, 2,
+                              len(self.RECONCILE_STAGES),
+                              self.RECONCILE_STAGES[2][1])
+        self.call_from_thread(self._reconcile_finished, line, archive)
+
+    def _reconcile_finished(self, line: str, archive) -> None:
+        # Every cache the panel keeps, not just the tab in front of somebody.
+        # A refresh that left the other tabs stale would be a refresh a person
+        # has to remember the scope of.
+        loaded = getattr(self, "_tabs_loaded", None)
+        if loaded is not None:
+            loaded.clear()
+        try:
+            self.query_one(OverviewPanel).refresh_overview()
+        except Exception:
+            pass
+        self.action_refresh()
+        self.reload_tab("tab-threads")
+
+        reachable = "" if archive.reachable else "  (the archive did not answer)"
+        self._progress_finish(line + reachable)
+        self.notify(line, title="Reconciled", timeout=6)
+
+    def _reconcile_failed(self, said: str) -> None:
+        self._progress_finish(said)
+        self.notify(said, severity="error", title="Reconcile", timeout=8)
+
+    # --- progress, wherever the panel happens to be --------------------------
+    #
+    # A worker calls these through `call_from_thread` and never touches a widget
+    # itself. They find the panel rather than being handed one, so a caller does
+    # not have to know which tab is showing -- and they are quiet when there is
+    # no panel, because a sync started from the command line has no screen and
+    # should not fail for the want of one.
+
+    def _progress_panel(self):
+        try:
+            return self.query_one("#thread-progress", WorkProgress)
+        except Exception:
+            return None
+
+    def _progress_start(self, what: str, total: int | None = None) -> None:
+        panel = self._progress_panel()
+        if panel is not None:
+            panel.start(what, total)
+
+    def _progress_advance(self, done: int, of: int, what: str) -> None:
+        panel = self._progress_panel()
+        if panel is not None:
+            panel.advance(done, of, what)
+
+    def _progress_finish(self, said: str) -> None:
+        panel = self._progress_panel()
+        if panel is not None:
+            panel.finish(said)
+
+    def rad_can_apply(self, wedge) -> bool:
+        """Whether this app can act on one leaf wedge.
+
+        Passed to `RadSession`, which greys out what comes back false and
+        refuses to select it. Submenus are not asked about -- the session works
+        those out from their descendants, because a verb whose every child is
+        dead should be dead too rather than open onto a level of dead cells.
+
+        `wedge.action or wedge.id` is the same fallback `RadSession.enter` uses
+        to build the intent. Reading it differently here would grey out a wedge
+        the dispatch would in fact have handled, or the reverse.
+        """
+        return (wedge.action or wedge.id) in self.RAD_HANDLED
+
+    # How many repositories `6.2` will fetch off two keystrokes without asking
+    # again. Above this it states the plan and waits for the same two keys a
+    # second time. The threshold is not about danger -- it is that a hundred
+    # requests is a thing somebody should have meant, and repeating the route
+    # is the cheapest possible way to mean it.
+    SYNC_WITHOUT_CONFIRMING = 5
+
+    # Set by a `6.2` that asked for confirmation, cleared by anything else.
+    # A class attribute so it reads as absent however the app was constructed.
+    _sync_pending = None
 
     def _apply_rad_intent(self, intent) -> None:
         """Apply one committed intent, and say so where a reader can see it."""
         tab = self.RAD_VIEWS.get(intent.action)
         if tab is not None:
+            self._sync_pending = None
             try:
                 self.query_one("#project-tabs").active = tab
             except Exception:
                 pass
             self.notify(f"{intent.action}  (ipa {intent.ipa})", timeout=3)
             return
+        handler = self.RAD_ACTIONS.get(intent.action)
+        if handler is not None:
+            # `project.sync` is the one action that reads a pending sync, so it
+            # is the one that must not clear it first.
+            if intent.action != "project.sync":
+                self._sync_pending = None
+            getattr(self, handler)()
+            self.notify(f"{intent.action}  (ipa {intent.ipa})", timeout=3)
+            return
+            return
+        self._sync_pending = None
         # Named in the palette and not yet handled here. Reported, because a
         # wedge that quietly does nothing teaches a reader the menu is broken.
         self.notify(
             f"{intent.action}: not applied yet (ipa {intent.ipa})",
             severity="warning", timeout=4,
         )
+
+    def sync_plan(self):
+        """What refreshing the view currently on screen would touch.
+
+        Scope comes from the screen rather than from a selection the ring
+        cannot see: a chosen repository first, then the owner the tabs are
+        scoped to, then everything. `action_sync` refuses without a selection,
+        which is right for a command about repositories and wrong for one about
+        the view -- the org overview is the view most often stale and the one
+        with nothing selected.
+        """
+        from dossier.freshness import plan_for
+
+        try:
+            tab = self.query_one("#project-tabs").active
+        except Exception:
+            tab = None
+
+        # THE TAB DECIDES THE SCOPE, NOT THE SELECTION. The app selects the
+        # first repository on mount, so `_current_project` is set even on a
+        # screen showing the whole organisation -- reading it here would scope
+        # the org overview's refresh to one repository nobody chose. The
+        # overview is an org view whatever is selected behind it, and the
+        # panel's own `owner` is what it is drawn from.
+        owner, project = self._scope_owner, self._current_project
+        if tab == "tab-overview":
+            try:
+                owner, project = self.query_one(OverviewPanel).owner, None
+            except Exception:
+                project = None
+
+        with self.session_factory() as session:
+            row = None if project is None else session.get(Project, project.id)
+            return plan_for(session, tab=tab, owner=owner, project=row)
+
+    def _sync_current_view(self) -> None:
+        """`6.2`. Make what is on screen current, or say why it is not stale.
+
+        Every branch here ends in the reader being told something. A refresh
+        that finds nothing to do and says nothing is indistinguishable from one
+        that did not run, and the second time that happens a person stops
+        trusting the key.
+        """
+        plan = self.sync_plan()
+
+        if plan.inapplicable:
+            self._sync_pending = None
+            self.notify(plan.summary(), severity="warning", timeout=6)
+            return
+        if plan.is_current:
+            self._sync_pending = None
+            self.notify(plan.summary(), title="Already current", timeout=4)
+            return
+        if not plan.subjects:
+            self._sync_pending = None
+            self.notify(plan.summary(), severity="warning", timeout=4)
+            return
+
+        wanted = plan.wanted
+        confirming = self._sync_pending == plan.scope
+        if len(wanted) > self.SYNC_WITHOUT_CONFIRMING and not confirming:
+            self._sync_pending = plan.scope
+            self.notify(
+                f"{plan.summary()}. Press 6.2 again to fetch {len(wanted)}.",
+                title="Confirm", severity="warning", timeout=10,
+            )
+            return
+
+        self._sync_pending = None
+        names = {subject.name for subject in wanted}
+        with self.session_factory() as session:
+            rows = [p for p in session.exec(select(Project)).all()
+                    if (p.full_name or p.name) in names]
+        if not rows:
+            # The plan named subjects and the database has no rows for them.
+            # Reported rather than passed to a sync that would silently do
+            # nothing, because those two look identical from the outside.
+            self.notify(f"{plan.scope}: nothing to fetch for "
+                        f"{len(names)} named subject(s)",
+                        severity="error", timeout=6)
+            return
+
+        self.notify(f"Syncing {len(rows)} of {len(plan.subjects)} in "
+                    f"{plan.scope}", title="Sync started", timeout=4)
+        self.run_sync_batch(rows)
 
     def on_mount(self) -> None:
         # Setup docs tree
@@ -2724,6 +3404,20 @@ class DossierApp(App):
             self._render_facet_at_org(facet, owner)
             return
 
+        # TABS THAT ARE NOT ABOUT A REPOSITORY LOAD BEFORE THE SELECTION GATE.
+        # A sweep spans the organisation and the archive belongs to the harness;
+        # neither is scoped to a project, and both drew blank on a fresh
+        # installation because the gate below returned first. The gate is right
+        # for the repository tabs and wrong for these.
+        unscoped = {
+            "tab-sweep": self._load_sweep_tab,
+            "tab-topology": self._load_topology_tab,
+            "tab-threads": self._load_threads_tab,
+        }
+        if tab_id in unscoped:
+            unscoped[tab_id](getattr(self, "_current_project", None))
+            return
+
         project = getattr(self, "_current_project", None)
         if not project:
             return
@@ -2740,6 +3434,13 @@ class DossierApp(App):
             "tab-releases": self._load_releases_tab,
             "tab-components": self._load_components_tab,
             "tab-deltas": self._load_deltas_tab,
+            # Reads the harness over HTTP rather than the database, so it takes
+            # no project -- the archive is not scoped to one repository.
+            "tab-threads": self._load_threads_tab,
+            # Reads no database of its own: a review is arranged from a
+            # dispatcher run, and is empty until somebody asks for one.
+            "tab-sweep": self._load_sweep_tab,
+            "tab-topology": self._load_topology_tab,
         }
         
         loader = loaders.get(tab_id)
@@ -3468,6 +4169,291 @@ class DossierApp(App):
             
             if not has_components:
                 components_table.add_row("", "(No component relationships)", "", "", key="empty")
+
+    # The sweep a person is reviewing. None until one is asked for: a screen
+    # that invented a default sweep would be proposing work nobody chose.
+    _sweep_review = None
+
+    def _load_topology_tab(self, project=None) -> None:
+        """Draw a harness topology here, the way the web front end draws it.
+
+        **THE SAME DOCUMENT, THIS WINDOW'S RESOLUTION.** `qmcp` decides what a
+        topology is; `codecartographer` draws it as a graph on a page and this
+        draws it as text in a terminal. A figure that differs between the two is
+        a defect rather than a point of view, which is the whole reason both
+        exist -- and `uv run qm demo --over-http` is what checks it.
+
+        Unscoped, like Sweep and Threads: a topology is the organisation's, not
+        one repository's, so this does not wait for a project to be chosen.
+        """
+        # **TEXTUAL'S OWN LOADING STATE.** `widget.loading = True` overlays an
+        # indicator and blocks interaction for exactly as long as the work
+        # takes. Writing a spinner here would be a second thing to keep in step
+        # with the framework's, and a worse one.
+        try:
+            self.query_one("#topology-drawing", Static).loading = True
+        except Exception:                          # noqa: BLE001
+            pass
+        self._progress_start("asking the harness for a topology")
+        self._run_topology_draw()
+
+    @work(thread=True, exclusive=True, group="topology")
+    def _run_topology_draw(self) -> None:
+        from dossier import threads, topology as drawing
+
+        subject = ""
+        try:
+            subject = self.query_one("#topology-subject", Input).value.strip()
+        except Exception:                          # noqa: BLE001
+            pass
+
+        # A subject wins over a shape: asking what the archive says about one
+        # project is the more specific request.
+        answer = (threads.topology(subject=subject) if subject
+                  else threads.topology(kind="delegation"))
+
+        if not answer.reachable:
+            # **A HARNESS THAT IS NOT RUNNING IS THE ORDINARY CASE.** It is a
+            # separate process on a separate port, and it is very often not
+            # started. Nothing is drawn: an empty drawing would state that this
+            # topology is empty, which is a different claim.
+            self.call_from_thread(
+                self._topology_failed, answer.problem, answer.remedy,
+                answer.where)
+            return
+
+        # **THE FLOW, NOT THE LIST.** `draw` renders one arrow per line, which
+        # is exact and reads as a table. `draw_flow` lays the boxes out with
+        # their connectors and hangs each address off its box as a link.
+        drawn = drawing.draw_flow(answer.payload, width=76)
+        unmeasured = sum(1 for line in drawn.lines
+                         if drawing.UNMEASURED in line)
+        self.call_from_thread(self._topology_drawn, answer, drawn, unmeasured)
+
+    _topology_payload: dict | None = None
+    """The document behind what is on screen, so Mermaid converts exactly what
+    was drawn rather than fetching again and possibly getting something else."""
+
+    def _topology_drawn(self, answer, drawn, unmeasured: int) -> None:
+        self._topology_payload = answer.payload
+        total = len(answer.payload.get("arrows", []))
+        provenance = f" from the {answer.source}" if answer.source else ""
+        if answer.surveyed:
+            provenance += f", {answer.surveyed} thread(s) read"
+
+        if unmeasured:
+            caveat = (f"{total - unmeasured} of {total} edge(s) "
+                      f"measured{provenance}; the rest are drawn -?> because "
+                      f"nobody looked")
+        else:
+            caveat = f"every one of {total} edge(s) is measured{provenance}"
+
+        note = ""
+        if drawn.channels_dropped:
+            # Named rather than omitted: a reader comparing this with the web
+            # view needs to know which axes are missing here, not to discover
+            # it by the two disagreeing.
+            note = ("this window cannot carry: "
+                    + ", ".join(drawn.channels_dropped))
+
+        self._topology_idle()
+        self.query_one("#topology-caveat", Static).update(caveat)
+        self.query_one("#topology-drawing", Static).update(drawn.text())
+        self.query_one("#topology-note", Static).update(note)
+        self._progress_finish("drew the topology")
+
+    def _topology_idle(self) -> None:
+        """Take the loading overlay down, whatever the outcome was.
+
+        **THE OVERLAY HID THE MESSAGE EXPLAINING WHY THERE WAS NOTHING TO SEE.**
+        Only the drawn path cleared it, so with the harness down -- which
+        `_run_topology_draw` calls the ordinary case, because it is a separate
+        process on a separate port -- the tab sat on a spinner forever with the
+        problem, the remedy and the URL written into the widget *underneath* it.
+        Both terminal paths now come through here, so a third one cannot be
+        added that forgets.
+        """
+        try:
+            self.query_one("#topology-drawing", Static).loading = False
+        except Exception:                          # noqa: BLE001
+            pass
+
+    def _topology_failed(self, problem: str, remedy: str, where: str) -> None:
+        self._topology_idle()
+        lines = [problem]
+        if remedy:
+            lines.append(f"  {remedy}")
+        lines.append(f"  tried {where}")
+        lines.append("  Nothing was drawn. An empty drawing would look like an "
+                     "answer.")
+        self.query_one("#topology-caveat", Static).update("")
+        self.query_one("#topology-drawing", Static).update("\n".join(lines))
+        self.query_one("#topology-note", Static).update("")
+        self._progress_finish("the harness did not answer")
+
+    @on(Input.Submitted, "#topology-subject")
+    def on_topology_subject_submitted(self, event: Input.Submitted) -> None:
+        """Enter in the field does what Draw does.
+
+        **THE SAME ONE-KEY-SHORT FAILURE THIS APP ALREADY FIXED ONCE**, for
+        `#thread-export-path`: a field that only a mouse can submit is a worse
+        outcome than no field, because it looks finished.
+        """
+        event.stop()
+        self._load_topology_tab()
+
+    @on(Button.Pressed, "#btn-topology-mermaid")
+    def on_topology_mermaid(self, event: Button.Pressed) -> None:
+        """Show the same topology as mermaid source.
+
+        **A DRAWING THAT CAN LEAVE THIS TERMINAL.** The flow above is this
+        window's resolution and nothing else reads it; mermaid renders in a
+        README, a pull request, a documentation site and the web front end. It
+        is a third rendering of one document, not a second description.
+        """
+        event.stop()
+        from dossier import topology as drawing
+
+        if not self._topology_payload:
+            self.query_one("#topology-note", Static).update(
+                "nothing is drawn yet, so there is nothing to convert")
+            return
+        source = drawing.as_mermaid(self._topology_payload)
+        self.query_one("#topology-drawing", Static).update(source)
+        self.query_one("#topology-note", Static).update(
+            "mermaid source -- paste it anywhere that renders mermaid. "
+            "Press Draw to go back to the flow.")
+
+    def action_open_address(self, address: str) -> None:
+        """Follow a box's address from the flow.
+
+        The address is what the harness sent. When it names a repository this
+        panel knows, the panel scopes to it; otherwise the address is reported
+        rather than guessed at, because a window that invented a destination
+        would send a reader somewhere nobody named.
+        """
+        wanted = str(address or "").strip()
+        if not wanted:
+            return
+        tail = wanted.rsplit("/", 1)[-1]
+        try:
+            with self.session_factory() as session:
+                from sqlmodel import select
+
+                found = session.exec(
+                    select(Project).where(Project.name.contains(tail))
+                ).first()
+        except Exception:                          # noqa: BLE001
+            found = None
+
+        # **AND OPEN THE CODE IT REPRESENTS.** Scoping the panel says which
+        # repository is meant; it does not show the reader the code. The
+        # address names a place, `content_for` says where that place is read,
+        # and the web window opens the same URL from the same node.
+        from dossier.topology import content_for
+
+        content = content_for(wanted)
+        if content:
+            try:
+                import webbrowser
+
+                webbrowser.open(content)
+            except Exception:                      # noqa: BLE001
+                # A machine with no browser is a real state. The URL is on
+                # screen either way, which is why it is written out.
+                pass
+
+        if found is None:
+            self.query_one("#topology-note", Static).update(
+                f"{wanted} is an address the harness sent; no repository here "
+                f"matches it"
+                + (f" -- opened {content}" if content else ""))
+            return
+        self.selected_project = found
+        self.query_one("#topology-note", Static).update(
+            f"scoped to {found.name} -- {wanted}"
+            + (f" -- opened {content}" if content else ""))
+
+    @on(Button.Pressed, "#btn-draw-topology")
+    def on_draw_topology(self, event: Button.Pressed) -> None:
+        """Draw whatever the subject box names, or a shape when it is blank."""
+        event.stop()
+        self._load_topology_tab()
+
+    def _load_sweep_tab(self, project=None) -> None:
+        """Draw the review: every batch, then everything waiting.
+
+        BATCHES FIRST AND THE QUEUE LAST, WITH THE COUNT OF THE QUEUE AT THE
+        TOP. A reader scans down and stops when they have what they came for,
+        so the thing they must not miss goes where they start rather than where
+        they stop.
+        """
+        table = self.query_one("#sweep-table", DataTable)
+        table.clear(columns=True)
+        table.add_columns("repo", "change", "asking")
+
+        review = self._sweep_review
+        if review is None:
+            table.add_row("--", "no sweep asked for yet", "--", key="empty")
+            self.query_one("#sweep-summary", Static).update(
+                "Press [b]m 6 4[/b] to review a sweep.")
+            self.query_one("#sweep-note", Static).update("")
+            return
+
+        self.query_one("#sweep-summary", Static).update(review.summary())
+
+        from dossier.approval import batch_is_uniform
+
+        for index, batch in enumerate(review.batches):
+            uniform = "one approval" if batch_is_uniform(batch) else "NOT UNIFORM"
+            table.add_row(f"[b]batch {index + 1}[/b]", batch.change, uniform,
+                          key=f"batch-{index}")
+            for row_index, row in enumerate(batch.rows()):
+                table.add_row(*row, key=f"batch-{index}-{row_index}")
+
+        if review.queue:
+            table.add_row("[b]queue[/b]",
+                          f"{len(review.queue)} waiting on a person",
+                          "one at a time", key="queue")
+            for row_index, item in enumerate(review.queue):
+                table.add_row(item.repo, item.detail[:60], item.asking,
+                              key=f"queue-{row_index}")
+
+        self.query_one("#sweep-note", Static).update(
+            "A batch is approvable only while every edit in it is identical. "
+            "The queue is not a failure list: it is work waiting on a person, "
+            "each row carrying why. Approving is a person's act -- "
+            "governance/qm/ci/attested-registry.yaml.")
+
+    def _load_threads_tab(self, project=None) -> None:
+        """Fill the archive table from the same facet the overview reads.
+
+        **THIS DID NOT EXIST, AND THAT IS WHY NOTHING EVER APPEARED HERE.** The
+        tab was composed, the columns were defined, the facet was written and
+        the overview drew its own section from it -- and `_load_tab_data` had no
+        entry for this tab, so the table was never filled. Ingesting an export
+        reported two hundred and three threads onto an empty screen, which is
+        the shape of failure somebody reported as "I cannot get an export to
+        display in threads".
+
+        One facet, not a second query. `threads_org` is what the overview's
+        section uses, so the tab and the overview cannot disagree about what a
+        row is -- which is the property the two axes of this screen are built
+        on.
+        """
+        from dossier.facets import BY_TAB
+
+        # THROUGH THE FACET, NOT A SECOND QUERY. `_render_facet_at_org` already
+        # draws this table when an owner is in scope; the gap was only the
+        # project path, and filling it with its own query would give the same
+        # tab two ways of deciding what a row is. `threads_project` delegates to
+        # `threads_org` because an archive is not scoped to a repository, so
+        # both scopes see the same rows -- which is the honest answer and not a
+        # shortcut.
+        facet = BY_TAB.get("tab-threads")
+        if facet is None:
+            return
+        self._render_facet_for_project(facet, project)
 
     def _load_deltas_tab(self, project: Project) -> None:
         """Load deltas tab."""
@@ -4822,6 +5808,10 @@ class DossierApp(App):
         with self.session_factory() as session:
             dep = session.get(ProjectDependency, dep_id)
             if dep:
+                # **WHAT A SWEEP WILL ACT ON.** Selecting a dependency here is
+                # the only place a person says which package they mean; the
+                # sweep used to ignore it and take the widest-shared one.
+                self.selected_dependency = dep.name
                 self._link_dependency_project({
                     "name": dep.name,
                     "version": dep.version_spec,
@@ -5723,29 +6713,48 @@ class DossierApp(App):
         """Handle add delta link button press."""
         self.action_add_delta_link()
 
+    # **THE BUTTON AND THE RING CALL ONE METHOD.** Each of these held its own
+    # copy of "set the filter, restyle the buttons, reload" -- three copies of
+    # one act, which is why the ring could offer `filter.*` and do nothing: it
+    # had nothing to call. The copies are now one method per filter, named in
+    # `RAD_ACTIONS`, and the buttons are two lines that delegate to it.
+
+    def _apply_project_filter(self, synced: bool | None) -> None:
+        """Set the sync filter and redraw the list. One act, one place."""
+        self.filter_synced = synced
+        self._update_filter_buttons()
+        try:
+            search = self.query_one("#search-input", Input).value
+        except Exception:                          # noqa: BLE001
+            # The ring can commit this from a screen with no search field. An
+            # absent box is an empty search, not a failure.
+            search = ""
+        self.load_projects(search=search)
+
+    def _show_all_projects(self) -> None:
+        self._apply_project_filter(None)
+
+    def _show_synced_projects(self) -> None:
+        self._apply_project_filter(True)
+
+    def _show_drifting_projects(self) -> None:
+        self._apply_project_filter(False)
+
     @on(Button.Pressed, "#btn-filter-all")
     def on_filter_all_pressed(self) -> None:
         """Show all projects (clear sync filter)."""
-        self.filter_synced = None
-        self._update_filter_buttons()
-        search_input = self.query_one("#search-input", Input)
-        self.load_projects(search=search_input.value)
-    
+        self._show_all_projects()
+
     @on(Button.Pressed, "#btn-filter-synced")
     def on_filter_synced_pressed(self) -> None:
         """Show only synced projects."""
-        self.filter_synced = True
-        self._update_filter_buttons()
-        search_input = self.query_one("#search-input", Input)
-        self.load_projects(search=search_input.value)
-    
+        self._show_synced_projects()
+
     @on(Button.Pressed, "#btn-filter-unsynced")
     def on_filter_unsynced_pressed(self) -> None:
-        """Show only unsynced projects."""
-        self.filter_synced = False
-        self._update_filter_buttons()
-        search_input = self.query_one("#search-input", Input)
-        self.load_projects(search=search_input.value)
+        """Show only drifting projects -- declared and never synced."""
+        self._show_drifting_projects()
+
     
     @on(Button.Pressed, "#btn-filter-starred")
     def on_filter_starred_pressed(self) -> None:
@@ -5763,30 +6772,11 @@ class DossierApp(App):
         status = "starred only" if self.filter_starred is True else "no stars" if self.filter_starred is False else "all"
         self.notify(f"Filter: {status}")
     
-    @on(Button.Pressed, "#btn-sort-stars")
-    def on_sort_stars_pressed(self) -> None:
-        """Sort by stars."""
-        self.sort_by = "stars"
-        self._update_sort_ui()
-        search_input = self.query_one("#search-input", Input)
-        self.load_projects(search=search_input.value)
-    
-    @on(Button.Pressed, "#btn-sort-name")
-    def on_sort_name_pressed(self) -> None:
-        """Sort by name."""
-        self.sort_by = "name"
-        self._update_sort_ui()
-        search_input = self.query_one("#search-input", Input)
-        self.load_projects(search=search_input.value)
-    
-    @on(Button.Pressed, "#btn-sort-synced")
-    def on_sort_synced_pressed(self) -> None:
-        """Sort by recently synced."""
-        self.sort_by = "synced"
-        self._update_sort_ui()
-        search_input = self.query_one("#search-input", Input)
-        self.load_projects(search=search_input.value)
-    
+    # Sorting is a Select (`#select-sort`), not buttons. Three
+    # `@on(Button.Pressed, "#btn-sort-*")` handlers outlived the buttons they
+    # were written for and are gone: a handler for a widget that does not exist
+    # reads like a feature to anybody grepping for one.
+
     @on(Select.Changed, "#select-language")
     def on_language_changed(self, event: Select.Changed) -> None:
         """Handle language filter change."""
@@ -5909,17 +6899,26 @@ class DossierApp(App):
         for index, row in enumerate(section.rows):
             table.add_row(*row, key=f"{table_id}-{index}")
 
-    def _render_facet_at_org(self, facet, owner: str) -> None:
+    def _render_facet_at_org(self, facet, owner: str, limit=None) -> None:
         from dossier.overview import scope_ids
 
         with self.session_factory() as session:
             ids = scope_ids(session, owner)
-            section = facet.at(session, ids=ids)
+            section = facet.at(session, ids=ids,
+                               limit=self.TAB_ROWS if limit is None else limit)
         self._render_section(facet.table, section)
 
-    def _render_facet_for_project(self, facet, project) -> None:
+    # How many rows a facet tab shows. The overview's sections take twelve
+    # because they are summaries with a whole page to share; a tab is where
+    # somebody went to see the thing, and twelve of two hundred and three shown
+    # without a word is the "board quietly showing thirty-seven of forty"
+    # failure this corpus keeps naming.
+    TAB_ROWS = 500
+
+    def _render_facet_for_project(self, facet, project, limit=None) -> None:
         with self.session_factory() as session:
-            section = facet.at(session, project=project)
+            section = facet.at(session, project=project,
+                               limit=self.TAB_ROWS if limit is None else limit)
         self._render_section(facet.table, section)
 
     def show_org_overview(self, owner: str) -> None:
@@ -6212,11 +7211,18 @@ class DossierApp(App):
         token = os.environ.get("GITHUB_TOKEN")
         success_count = 0
         
+        # DETERMINATE HERE, AND ONLY HERE. This one really does know how far
+        # along it is -- N repositories, one at a time -- so the bar carries a
+        # fraction rather than a pulse. The ingest next door cannot, and does
+        # not pretend to.
+        self.call_from_thread(self._progress_start,
+                              f"syncing {len(projects)} repositories",
+                              len(projects))
+
         for i, project in enumerate(projects):
             self.call_from_thread(
-                self.notify,
-                f"Syncing {i+1}/{len(projects)}: {project.name}...",
-            )
+                self._progress_advance, i, len(projects),
+                f"syncing {i + 1} of {len(projects)}: {project.name}")
             
             if not project.github_owner or not project.github_repo:
                 continue
@@ -6258,6 +7264,9 @@ class DossierApp(App):
                     severity="error",
                 )
         
+        self.call_from_thread(
+            self._progress_finish,
+            f"synced {success_count} of {len(projects)}")
         self.call_from_thread(
             self.notify,
             f"Synced {success_count}/{len(projects)} projects",
@@ -8134,19 +9143,19 @@ Set `GITHUB_TOKEN` environment variable for:
             EXPORT_FORMAT_OPTIONS,
         )
         
-        # Get database path and stats
-        from dossier.config import dossier_home
+        # Which stores this installation is reading, and which it merely might.
+        # Gathered here rather than in `compose` so a slow answer -- the archive
+        # is an HTTP call -- happens once while the screen is being built.
+        from dossier.sources import all_sources
 
-        db_path = dossier_home() / "dossier.db"
-        db_size = "N/A"
-        if db_path.exists():
-            size_bytes = db_path.stat().st_size
-            if size_bytes < 1024:
-                db_size = f"{size_bytes} B"
-            elif size_bytes < 1024 * 1024:
-                db_size = f"{size_bytes / 1024:.1f} KB"
-            else:
-                db_size = f"{size_bytes / (1024 * 1024):.1f} MB"
+        try:
+            data_sources = all_sources()
+        except Exception as exc:                      # noqa: BLE001
+            # A settings screen that will not open because one source is
+            # unreachable is worse than one that says so in a row.
+            from dossier.sources import Source
+            data_sources = [Source("data sources", "could not be read",
+                                   str(exc), in_use=False, present=False)]
         
         # Get project count
         project_count = 0
@@ -8274,18 +9283,33 @@ Set `GITHUB_TOKEN` environment variable for:
                                 yield Static("Platform:", classes="info-label")
                                 yield Static(f"{platform.system()} {platform.release()}", classes="info-value")
                             with Horizontal(classes="info-row"):
-                                yield Static("Database:", classes="info-label")
-                                yield Static(f"{db_path}", classes="info-value")
-                            with Horizontal(classes="info-row"):
-                                yield Static("DB Size:", classes="info-label")
-                                yield Static(f"{db_size}", classes="info-value")
-                            with Horizontal(classes="info-row"):
                                 yield Static("Projects:", classes="info-label")
                                 yield Static(f"{project_count}", classes="info-value")
-                            with Horizontal(classes="info-row"):
-                                yield Static("Config:", classes="info-label")
-                                yield Static(f"{DossierConfig.get_config_path()}", classes="info-value")
-                        
+
+                        yield Rule()
+
+                        # Data sources. This replaced a single "Database:" row
+                        # showing `dossier_home()/dossier.db` -- a path this
+                        # application does not necessarily open. It was a real
+                        # number about the wrong file, which is worse than none:
+                        # a reader checks it, sees a plausible size, and stops
+                        # looking. Every candidate is listed and the live one is
+                        # marked, because two databases with nothing on screen
+                        # saying which is live is the failure `health.py` exists
+                        # for.
+                        yield Static("🗄  Data sources", classes="settings-label")
+                        with Vertical(classes="settings-section"):
+                            for source in data_sources:
+                                with Horizontal(classes="info-row"):
+                                    mark = f" [{source.marker}]" if source.marker else ""
+                                    yield Static(f"{source.label}{mark}:",
+                                                 classes="info-label")
+                                    yield Static(source.where, classes="info-value")
+                                with Horizontal(classes="info-row"):
+                                    yield Static("", classes="info-label")
+                                    yield Static(source.detail,
+                                                 classes="info-value")
+
                         yield Rule()
                         
                         # Theme Section
@@ -8436,3 +9460,46 @@ def run_tui() -> None:
 
 if __name__ == "__main__":
     run_tui()
+
+
+def _dispatch(planned, to_version):
+    """Run a sweep's shares, through the harness if it is installed.
+
+    **THE PANEL DOES NOT DEPEND ON THE HARNESS, AND THIS IS WHERE THAT SHOWS.**
+    `qmcp` is a separate repository with no dependency between them, so it may
+    simply not be importable -- and a review that raised in that case would make
+    the seam a requirement rather than a seam. The fallback runs the same
+    contract this side, and says so on every row it produces.
+    """
+    shares = [{"project": s.project, "shape": s.shape,
+               "declared": s.declared, "why": s.why} for s in planned.shares]
+    try:
+        from qmcp.sweep import run as harness_run
+
+        return harness_run(shares, to_version).outcomes
+    except ImportError:
+        return [_locally(share, to_version) for share in shares]
+
+
+class _Outcome:
+    """Shaped like the harness's, for when the harness is not installed."""
+
+    __slots__ = ("project", "state", "detail", "edit")
+
+    def __init__(self, project, state, detail="", edit=None):
+        self.project, self.state, self.detail, self.edit = (
+            project, state, detail, edit)
+
+
+def _locally(share, to_version):
+    from dossier.sweep import MECHANICAL, bump
+
+    if share.get("shape") != MECHANICAL:
+        return _Outcome(share["project"], "needs a worker",
+                        share.get("why") or "needs judgement")
+    edit = bump(share.get("declared"), to_version)
+    if edit is None:
+        return _Outcome(share["project"], "refused",
+                        f"{share.get('declared')!r} is not a single constraint")
+    return _Outcome(share["project"], "done",
+                    f"{share.get('declared')} -> {edit}", edit)

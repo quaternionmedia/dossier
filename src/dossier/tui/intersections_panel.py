@@ -17,7 +17,10 @@ from textual.containers import VerticalScroll
 from textual.widgets import Static
 
 from dossier.intersections import build
-from dossier.rad.tokens import DEFAULT_THEME, roles
+# Through `dossier.palette`, so rad is optional in fact and not
+# only in intention: importing its tokens directly made the whole
+# application fail to import without rad installed.
+from dossier.palette import DEFAULT_THEME, roles
 from dossier.tui.section_render import render_section
 
 

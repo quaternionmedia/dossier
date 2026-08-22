@@ -6,7 +6,7 @@ invocations, each one addressed as `owner/repo/invocation/<id>`. Nothing here
 imports qmcp and nothing there imports dossier -- coupling them would mean
 neither ships without the other, which is the opposite of a pair.
 
-TWO TABLES, BECAUSE THEY ARE TWO DIFFERENT CLAIMS.
+THREE TABLES, BECAUSE THEY ARE THREE DIFFERENT CLAIMS.
 
   * `HarnessSnapshot` holds the figures the harness reported *about itself* at
     one moment: how many invocations it has run, how many failed, how many
@@ -15,6 +15,12 @@ TWO TABLES, BECAUSE THEY ARE TWO DIFFERENT CLAIMS.
     because the payload carries only the recent ones.
   * `HarnessInvocation` holds the rows themselves, keyed by address, so an
     invocation seen twice updates rather than duplicating.
+
+  * `HarnessAsk` holds the human-in-the-loop queue, keyed by address. The
+    snapshot's `human_requests` says *how many* are outstanding; this says
+    *which*, with the prompt and the options, so a person reading the control
+    panel can see the question rather than a number. Until this existed the
+    count was all that crossed, and a count is not something anybody can answer.
 
 Storing the totals and calling them derived would be a second, wrong figure;
 storing only the rows would silently shrink every count to the size of the
@@ -84,3 +90,85 @@ class HarnessInvocation(SQLModel, table=True):
     ran_at: Optional[str] = None
 
     loaded_at: datetime = Field(default_factory=utcnow)
+
+
+class HarnessAsk(SQLModel, table=True):
+    """One question the harness put to a person.
+
+    Answered rows are kept rather than deleted: what was asked and what was
+    said is the audit trail, and a queue that forgets its answers cannot show
+    anybody why something was decided.
+
+    NOTHING HERE ANSWERS ANYTHING. This is the control panel's copy of a queue
+    the harness owns. Writing an answer into this table would make two systems
+    believe they hold the same authority over one row -- the answer goes back
+    across the seam as a payload, exactly as the question came.
+    """
+
+    __tablename__ = "harness_ask"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    # The join. `owner/repo/ask/<id>` is the same string on both sides.
+    address: str = Field(index=True, unique=True)
+    project: str = Field(index=True)
+
+    request_id: str = Field(index=True)
+    request_type: Optional[str] = None
+    prompt: Optional[str] = None
+
+    # Stored as the payload sent them, newline-joined. A list column would be
+    # a second encoding to keep in step for a field nothing queries.
+    options: Optional[str] = None
+
+    status: Optional[str] = None
+    asked_at: Optional[str] = None
+
+    # None while outstanding. The presence of an answer is what `outstanding`
+    # means here -- not the status string, which is the harness's own word and
+    # can lag.
+    answered_with: Optional[str] = None
+    answered_by: Optional[str] = None
+    answered_at: Optional[str] = None
+
+    loaded_at: datetime = Field(default_factory=utcnow)
+
+    @property
+    def outstanding(self) -> bool:
+        return self.answered_with is None
+
+
+class DeltaRelation(SQLModel, table=True):
+    """One relation between two deltas, both named by address.
+
+    ADDRESSES ON BOTH SIDES, NOT ROW IDS. A relation crosses repositories and
+    threads by construction, and either end may name a delta this database has
+    never ingested -- an address denotes without existing, and the row may
+    arrive later. A foreign key would make the common case impossible.
+
+    THE VOCABULARY IS CLOSED and lives in `dossier.composition.RELATIONS`. It is
+    not enforced by the column, because a database constraint would make adding
+    the sixth relation a migration rather than a decision; it is enforced at
+    every write, and `governance/qm/records/DRAFT-deltas-compose.md` is what a
+    sixth would change.
+
+    NOTHING HERE FORBIDS A CYCLE. That is the record's clause 7 and the reason
+    this table has no acyclicity check: refusing to store a tangle does not
+    untangle the work, it deletes the evidence that the work is tangled.
+    """
+
+    __tablename__ = "delta_relation"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    source_address: str = Field(index=True)
+    relation: str = Field(index=True)
+    target_address: str = Field(index=True)
+
+    # A relation is a claim, so it says who made it. A detector may propose one;
+    # proposing is not asserting, which is what `proposed` distinguishes.
+    stated_by: Optional[str] = None
+    proposed: bool = False
+
+    note: Optional[str] = None
+    created_at: datetime = Field(default_factory=utcnow)

@@ -23,6 +23,102 @@ TEST_DB_URL = f"sqlite:///{TEST_DB_PATH}"
 SCREENSHOTS_DIR = Path("docs/screenshots")
 
 
+# --- how the suite is grouped -------------------------------------------------
+#
+# TWO AXES, APPLIED AUTOMATICALLY. `scale` is how much machinery a test needs,
+# and it is what somebody picks when they want a fast answer. `axis` is what a
+# test is about, and it is what somebody picks when they have changed one thing.
+#
+# DERIVED, NOT DECLARED. Marking seven hundred tests by hand would be seven
+# hundred chances to mark one wrong, and the marks would drift the moment a test
+# moved. These are read from where a test lives and what its module actually
+# does, so a file that stops spinning an app stops being `app` without anybody
+# remembering to say so.
+MARKERS = {
+    "unit": "pure logic: no app, no database, no clock, no network",
+    "db": "needs a database session",
+    "app": "spins a Textual application",
+    "e2e": "reaches a subprocess, the filesystem at large, or a sibling clone",
+    "ui": "about what is drawn, or which key does what",
+    "data": "about facets, overviews, models, ingest",
+    "seam": "about the boundary with the harness",
+    "governance": "about corpus rules and generated documents",
+    "docs": "an executable page, run as written",
+}
+
+# What each directory is about. `scale` is refined per module below; the axis is
+# a property of where somebody put the file, and that is a decision rather than
+# an accident.
+# `e2e` is deliberately absent: it is a scale, not a subject, and mapping it
+# here gave eight tests `e2e` twice and no axis at all. What an end-to-end test
+# is about is decided the same way as anything else.
+AXIS_BY_DIR = {
+    "ui": "ui",
+    "db": "data",
+    "core": "data",
+}
+
+
+def _scale_of(source: str, directory: str) -> str:
+    """How much machinery a module needs, read from what it does.
+
+    Order matters: a module that spins an app and also opens a database is
+    `app`, because the app is what costs the time. `e2e` wins over both --
+    a subprocess or a sibling clone is a different kind of dependency, not
+    a heavier one.
+    """
+    if directory == "e2e" or "subprocess" in source:
+        return "e2e"
+    if "run_test(" in source:
+        return "app"
+    if "create_engine" in source or "Session(" in source:
+        return "db"
+    return "unit"
+
+
+def _axis_of(source: str, directory: str) -> str:
+    """What a module is about.
+
+    THE ARTIFACT KIND WINS FIRST. A walkthrough is a page that runs, whatever
+    subject it happens to cover -- and every one of them mentions the harness or
+    the corpus, so a keyword rule ahead of this claimed four of the five pages
+    and left `docs` describing one.
+
+    Then the two subjects that cut across every directory, then the directory.
+    """
+    if directory == "walkthrough":
+        return "docs"
+    if "dossier.threads" in source or "harness" in source.lower():
+        return "seam"
+    if "governance" in source.lower() or "restatement" in source.lower():
+        return "governance"
+    return AXIS_BY_DIR.get(directory, "data")
+
+
+def pytest_collection_modifyitems(config, items):
+    """Put every test in one scale group and one axis group.
+
+    Read once per module rather than once per test: a suite this size would
+    otherwise open the same file several hundred times.
+    """
+    cache: dict[Path, tuple[str, str]] = {}
+    for item in items:
+        path = Path(str(getattr(item, "fspath", "") or ""))
+        if not path.name:
+            continue
+        if path not in cache:
+            try:
+                source = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                source = ""
+            directory = path.parent.name
+            cache[path] = (_scale_of(source, directory),
+                           _axis_of(source, directory))
+        scale, axis = cache[path]
+        item.add_marker(getattr(pytest.mark, scale))
+        item.add_marker(getattr(pytest.mark, axis))
+
+
 def pytest_addoption(parser):
     """Add custom pytest command line options."""
     parser.addoption(
@@ -43,6 +139,10 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "screenshot: mark test as a screenshot test"
     )
+    for name, what in MARKERS.items():
+        config.addinivalue_line("markers", f"{name}: {what}")
+    config.addinivalue_line(
+        "markers", "network: this test may open a real connection")
     
     # Create screenshots directory if generating screenshots
     if config.getoption("--screenshots"):
@@ -404,3 +504,140 @@ def repo_root() -> Path:
     from tests.structural import repo_root as find_root
 
     return find_root()
+
+
+# --- no ambient network -------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def no_ambient_network(request, monkeypatch):
+    """Any connection this suite did not arrange fails at once.
+
+    **THIS IS A CORRECTNESS FIX THAT HAPPENS TO BE A SPEED FIX.** The suite
+    reached the harness for real. With one running it saw two hundred threads;
+    with none it waited out a connect timeout and saw none -- so two tests
+    passed or failed depending on whether something was listening on a port,
+    which is the suite measuring its surroundings rather than the code.
+
+    The speed is the same fact from the other side. An unreachable host does not
+    refuse here, it times out: measured at 2.25s per call against both a closed
+    port and a filtered one. A full run with the harness up took 229s and with
+    it down took 558s, and the difference is that timeout paid a hundred and
+    fifty times over.
+
+    Tests that arrange their own transport are unaffected and compose with this:
+    the usual pattern captures `httpx.Client`, adds a `transport`, and calls
+    through -- and a call that already names a transport is passed straight to
+    the real client. A test that genuinely wants a socket says so with
+    `@pytest.mark.network`.
+    """
+    if "network" in request.keywords:
+        return
+
+    # A module using respx is already guaranteeing no real connection -- that is
+    # what respx is -- and it intercepts at a different layer, so injecting a
+    # transport underneath it replaces respx's routing with a refusal and every
+    # one of its tests fails. Exempting it gives up nothing this fixture was
+    # protecting.
+    if getattr(request.module, "respx", None) is not None:
+        return
+
+    import httpx
+
+    real_client = httpx.Client
+
+    def refusing(*args, **kwargs):
+        if "transport" not in kwargs:
+            def handler(sent):
+                raise httpx.ConnectError(
+                    "this suite does not open real connections; stub the "
+                    "transport, or mark the test with @pytest.mark.network",
+                    request=sent)
+            kwargs["transport"] = httpx.MockTransport(handler)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "Client", refusing)
+
+
+@pytest.fixture()
+def until():
+    """See `_until`. A fixture so every test gets it without an import."""
+    return _until
+
+
+@pytest.fixture()
+def drain():
+    """See `_drain`."""
+    return _drain
+
+
+@pytest.fixture()
+def quiet():
+    """See `_quiet`."""
+    return _quiet
+
+
+async def _until(pilot, ready, limit: int = 400):
+    """Pause until `ready()` is true, or `limit` cycles pass. Returns whether.
+
+    **WAIT FOR THE CONDITION, NOT FOR A COUNT.** Twenty places here wrote
+    `for _ in range(200): await pilot.pause()` and then asserted. That waits two
+    hundred full event-loop cycles whether or not the thing already happened —
+    three tests in `test_reconcile.py` spent 35 seconds between them doing
+    exactly that, and the assertions were all satisfiable in a fraction of it.
+
+    **THE LIMIT IS A CEILING, NOT A DURATION.** Returning `False` rather than
+    raising is deliberate: a caller that wants "this must happen" asserts on the
+    result and gets a message naming its own condition, which is better than a
+    timeout naming this helper.
+
+    A test that needs to prove something *did not* happen still has to wait, and
+    should say so where it waits — `drain` below is that, named.
+    """
+    if ready():
+        return True
+    for _ in range(limit):
+        await pilot.pause()
+        if ready():
+            return True
+    return False
+
+
+async def _drain(pilot, cycles: int = 50):
+    """Pause a fixed number of cycles, for the case where waiting *is* the test.
+
+    Separate from `until` and deliberately named: proving that nothing further
+    happens needs a duration, and a fixed wait dressed up as a condition would
+    be a lie about what the test knows. Kept small — a test asserting an absence
+    over two hundred cycles is not two hundred times more convincing than one
+    over fifty.
+    """
+    for _ in range(cycles):
+        await pilot.pause()
+
+
+async def _quiet(pilot, app, limit: int = 400):
+    """Pause until no worker is still running. Returns whether it went quiet.
+
+    **"THE WORK FINISHED" IS A CONDITION, NOT A DURATION.** A test that asserts
+    an *absence* -- nothing was imported, nothing was written -- genuinely has
+    to wait for the work to end before it can conclude anything. The way that
+    was written here was `for _ in range(200)`, which waits the same length
+    whether the work took one cycle or a hundred and ninety-nine, and is wrong
+    in both directions: slow when the work is quick, and unsound when it is not.
+
+    This asks the thing that knows. It is also the correct wait before teardown:
+    a test that stopped early raced the worker and failed on an unrelated
+    widget, which reads like a defect in the widget.
+    """
+    from textual.worker import WorkerState
+
+    def still_working() -> bool:
+        return any(w.state in (WorkerState.PENDING, WorkerState.RUNNING)
+                   for w in app.workers)
+
+    for _ in range(limit):
+        if not still_working():
+            return True
+        await pilot.pause()
+    return not still_working()

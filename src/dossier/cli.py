@@ -27,7 +27,38 @@ from dossier.parsers import GitHubParser, ParserRegistry
 
 
 # Database setup
-DATABASE_URL = "sqlite:///dossier.db"
+# Where the database is, and the one way to point this somewhere else.
+#
+# `sqlite:///dossier.db` is relative to the working directory, so which database
+# you get depends on where you launched from -- `dossier/health.py` records the
+# failure that came out of exactly that. Until this override existed there was
+# no other way to redirect it, so anything that wanted a scratch database had to
+# change directory, and anything that forgot wrote into whichever `dossier.db`
+# was underfoot. A demo, an experiment or a walkthrough run in the repository
+# root wrote into the operator's own data, which is how this was found.
+#
+# `qmcp dashboard --database` is the same affordance on the other side of the
+# seam, and it existed first.
+def _database_url() -> str:
+    """The database URL, with `~` resolved.
+
+    No shell expands a tilde in the middle of a string, so
+    `sqlite:///~/hil/panel.db` arrives here literally. Passed through, it makes
+    a directory actually named `~` and reports success -- and `.gitignore`
+    carries `*~`, so it does not appear in `git status` either.
+    """
+    from pathlib import Path as _Path
+
+    url = os.environ.get("DOSSIER_DATABASE_URL")
+    if not url:
+        return "sqlite:///dossier.db"
+    prefix = "sqlite:///"
+    if url.startswith(prefix) and "~" in url:
+        return prefix + _Path(url[len(prefix):]).expanduser().as_posix()
+    return url
+
+
+DATABASE_URL = _database_url()
 engine = create_engine(DATABASE_URL, echo=False)
 
 
@@ -54,6 +85,19 @@ def _alembic_config():
     # command that is otherwise fine.
     config = Config(str(project_root() / "alembic.ini"), stdout=sys.stdout)
     config.set_main_option("script_location", str(project_root() / "alembic"))
+
+    # The database this process is actually using, not the one `alembic.ini`
+    # names. Without this the migration commands read `sqlalchemy.url` from the
+    # ini file -- `sqlite:///dossier.db`, relative to the working directory --
+    # so `db upgrade` migrated whichever database was underfoot while every
+    # query ran against the one the caller asked for, and reported success.
+    #
+    # That is the two-databases failure `dossier/health.py` exists for, and it
+    # survived two earlier repairs: the engine learned about the override, then
+    # `health.candidate_databases` did, and this third path did not. Three
+    # resolvers, one answer.
+    config.set_main_option("sqlalchemy.url", DATABASE_URL)
+
     config.attributes["configure_logger"] = False
     return config
 
@@ -206,6 +250,173 @@ def deltas() -> None:
     pass
 
 
+def _store_links(session, delta, links: list[dict]) -> None:
+    """Write a payload's links, without writing one twice.
+
+    Re-ingesting the same payload is ordinary -- a harness emits its state on
+    every run -- so a link is matched on what identifies it rather than
+    appended. `(delta, link_type, target_name)` is that identity: two links of
+    the same type at the same target are one link, however many runs mentioned
+    it.
+    """
+    from sqlmodel import select
+
+    from dossier.models.schemas import DeltaLink
+
+    for link in links:
+        link_type = link.get("link_type")
+        target_name = link.get("target_name")
+        if not link_type:
+            continue
+        existing = session.exec(
+            select(DeltaLink)
+            .where(DeltaLink.delta_id == delta.id)
+            .where(DeltaLink.link_type == str(link_type))
+            .where(DeltaLink.target_name == (
+                None if target_name is None else str(target_name)))
+        ).first()
+        if existing is not None:
+            continue
+        session.add(DeltaLink(
+            delta_id=delta.id,
+            link_type=str(link_type),
+            target_id=link.get("target_id"),
+            target_name=None if target_name is None else str(target_name),
+        ))
+
+
+@deltas.command("relate")
+@click.argument("source")
+@click.argument("relation")
+@click.argument("target")
+@click.option("--by", default=None, help="who is stating this")
+@click.option("--proposed", is_flag=True,
+              help="a detector suggests it; proposing is not asserting")
+@click.option("--note", default=None)
+def deltas_relate(source: str, relation: str, target: str, by: str | None,
+                  proposed: bool, note: str | None) -> None:
+    """State that two deltas compose.
+
+    SOURCE and TARGET are addresses -- `<owner>/<repo>/delta/<id>` -- so a
+    relation crosses repositories and threads. Either may name a delta this
+    database has not ingested; an address denotes without existing.
+
+    \b
+    part-of       closing the whole requires closing this
+    same-as       two addresses denote one strand
+    blocks        this must close before that can start
+    crosses       both must happen, they interact at one point, and neither
+                  contains the other
+    derived-from  this strand came out of that one and both continue
+
+    `crosses` is not a weak `blocks`. A block orders whole strands; a crossing
+    orders them at one place and leaves the rest independent. Recording a
+    crossing as a block is how a board comes to say nothing can start.
+    """
+    from sqlmodel import select
+
+    from dossier.composition import RELATIONS, check_address, check_relation
+    from dossier.models.harness import DeltaRelation
+
+    for problem in (check_relation(relation), check_address(source),
+                    check_address(target)):
+        if problem:
+            raise SystemExit(problem)
+    if source == target and relation not in ("same-as", "crosses"):
+        raise SystemExit(
+            f"a delta cannot be {relation!r} itself. Only the symmetric "
+            f"relations are meaningful reflexively, and even those say nothing."
+        )
+
+    with get_session() as session:
+        existing = session.exec(
+            select(DeltaRelation)
+            .where(DeltaRelation.source_address == source)
+            .where(DeltaRelation.relation == relation)
+            .where(DeltaRelation.target_address == target)
+        ).first()
+        if existing is not None:
+            click.echo(f"  [=] already stated"
+                       + (f" by {existing.stated_by}" if existing.stated_by else ""))
+            return
+        session.add(DeltaRelation(
+            source_address=source, relation=relation, target_address=target,
+            stated_by=by, proposed=proposed, note=note))
+        session.commit()
+
+    click.echo(f"  [+] {source}")
+    click.echo(f"      {relation}  ({RELATIONS[relation]})")
+    click.echo(f"      {target}")
+    if proposed:
+        click.echo("      Proposed, not asserted. A detector suggested it.")
+
+
+@deltas.command("tangles")
+def deltas_tangles() -> None:
+    """Every cycle the relations form. Reports, and changes nothing.
+
+    Other trackers refuse a cycle as invalid input. What happens then is that
+    somebody deletes whichever relation the tool complained about, so the tool
+    is consistent and the record is false. A tangle is a fact about the work.
+    """
+    from sqlmodel import select
+
+    from dossier.composition import Edge, render_tangles, tangles
+    from dossier.models.harness import DeltaRelation
+
+    with get_session() as session:
+        edges = [
+            Edge(row.source_address, row.relation, row.target_address,
+                 row.stated_by)
+            for row in session.exec(select(DeltaRelation)).all()
+        ]
+    click.echo(render_tangles(tangles(edges)))
+
+
+@deltas.command("compose")
+@click.argument("address")
+def deltas_compose(address: str) -> None:
+    """What one delta is made of, and what else is the same strand."""
+    from sqlmodel import select
+
+    from dossier.composition import Edge, check_address, parts_of, strands
+    from dossier.models.harness import DeltaRelation
+
+    problem = check_address(address)
+    if problem:
+        raise SystemExit(problem)
+
+    with get_session() as session:
+        edges = [
+            Edge(row.source_address, row.relation, row.target_address,
+                 row.stated_by)
+            for row in session.exec(select(DeltaRelation)).all()
+        ]
+
+    click.echo(f"  {address}")
+    parts, truncated = parts_of(address, edges)
+    if parts:
+        click.echo("")
+        click.echo("  made of")
+        for part in parts:
+            click.echo(f"    {part}")
+        if truncated:
+            click.echo("    ... and deeper. This walk stopped at its bound "
+                       "rather than running on: the relations are allowed to "
+                       "contain a cycle, so an unbounded walk is a hang.")
+    else:
+        click.echo("  Nothing states it is made of anything.")
+
+    same = strands(address, edges)
+    if same:
+        click.echo("")
+        click.echo("  the same strand as")
+        for other in same:
+            click.echo(f"    {other}")
+        click.echo("    Both names are kept. Neither is retired, because "
+                   "documents already cite each of them.")
+
+
 @deltas.command("ingest")
 @click.argument("payload", type=click.Path(exists=True, path_type=Path))
 @click.option("--write", is_flag=True,
@@ -246,17 +457,32 @@ def deltas_ingest(payload: Path, write: bool) -> None:
             for item in payloads:
                 row = item.get("delta") or {}
                 verdict = by_name.get(str(row.get("name") or ""))
-                if verdict is None or verdict.action not in ("create", "update"):
+                # `unchanged` reaches the link pass too. A delta whose own
+                # fields are identical can still have gained a link -- a second
+                # run of the same failing check produces the same delta and a
+                # new invocation -- and skipping it would drop exactly the rows
+                # that accumulate.
+                if verdict is None or verdict.action == "refused":
                     continue
                 project = lookup_project(item["project"])
                 fields = {k: row[k] for k in WRITABLE if k in row}
                 if verdict.action == "create":
-                    session.add(ProjectDelta(project_id=project.id, **fields))
+                    delta = ProjectDelta(project_id=project.id, **fields)
+                    session.add(delta)
                 else:
-                    existing = lookup_delta(project.id, fields["name"])
-                    for key, value in fields.items():
-                        setattr(existing, key, value)
-                    session.add(existing)
+                    delta = lookup_delta(project.id, fields["name"])
+                    if verdict.action == "update":
+                        for key, value in fields.items():
+                            setattr(delta, key, value)
+                        session.add(delta)
+
+                # `links` used to be read for the address and then dropped, so
+                # the row that names what a delta points at -- the invocation
+                # that found it, and the address that joins it to the other
+                # view -- was never stored. Both sides believed the join
+                # existed and nothing held it.
+                session.flush()   # the delta needs its id before a link can cite it
+                _store_links(session, delta, item.get("links") or [])
             session.commit()
 
         click.echo(render(verdicts, write))
@@ -4448,13 +4674,14 @@ def harness_ingest(payload: Path, write: bool) -> None:
     from sqlmodel import select
 
     from dossier.harness import (
+        asks_of,
         invocations_of,
         load,
         plan,
         render,
         totals_of,
     )
-    from dossier.models.harness import HarnessInvocation, HarnessSnapshot
+    from dossier.models.harness import HarnessAsk, HarnessInvocation, HarnessSnapshot
 
     document = load(payload)
 
@@ -4464,9 +4691,21 @@ def harness_ingest(payload: Path, write: bool) -> None:
                 select(HarnessInvocation).where(HarnessInvocation.address == address)
             ).first()
 
-        verdicts = plan(document, lookup)
+        def lookup_ask(address: str):
+            return session.exec(
+                select(HarnessAsk).where(HarnessAsk.address == address)
+            ).first()
+
+        verdicts = plan(document, lookup, lookup_ask)
         click.echo(render(verdicts, written=write))
-        if not write or any(v.state == "refused" for v in verdicts):
+
+        # A refusal exits non-zero whether or not --write was passed. It used
+        # to exit 0, so a scheduled ingest of an unreadable harness printed the
+        # refusal and reported success to whatever ran it -- a check that says
+        # nothing was enforced while its caller records that it passed.
+        if any(v.state == "refused" for v in verdicts):
+            raise SystemExit(1)
+        if not write:
             return
 
         totals = totals_of(document)
@@ -4486,6 +4725,26 @@ def harness_ingest(payload: Path, write: bool) -> None:
             target.error = row.get("error")
             target.ran_at = row.get("created_at")
             session.add(target)
+
+        # The queue. Updated in place rather than appended: a question seen
+        # twice is the same question, and its answer arriving is a change to
+        # that row rather than a second one.
+        for row in asks_of(document):
+            existing = lookup_ask(row["address"])
+            target = existing or HarnessAsk(
+                address=row["address"], project=document["project"],
+                request_id=row.get("id") or row["address"].rsplit("/", 1)[-1])
+            target.request_type = row.get("request_type")
+            target.prompt = row.get("prompt")
+            options = row.get("options") or []
+            target.options = "\n".join(str(option) for option in options) or None
+            target.status = row.get("status")
+            target.asked_at = row.get("created_at")
+            target.answered_with = row.get("answered_with")
+            target.answered_by = row.get("answered_by")
+            target.answered_at = row.get("answered_at")
+            session.add(target)
+
         session.commit()
 
 
@@ -4497,3 +4756,74 @@ def harness_ingest(payload: Path, write: bool) -> None:
 # health` worked and `python -m dossier.cli db health` said "No such command".
 if __name__ == "__main__":
     main()
+
+
+@cli.command("topology")
+@click.option("--kind", default="delegation",
+              help="a topology from the harness's own vocabulary")
+@click.option("--subject", default="",
+              help="a project to read the thread archive for; wins over --kind")
+@click.option("--level", default=2, type=click.IntRange(0, 2), show_default=True,
+              help="the resolution the harness draws at, as the web window "
+                   "offers it: 0 is the black box, 2 is the flows")
+@click.option("--width", default=76, show_default=True,
+              help="how wide to draw")
+@click.option("--list", "listing", is_flag=True,
+              help="every topology the harness offers, and exit")
+def topology_command(kind: str, subject: str, level: int, width: int,
+                     listing: bool) -> None:
+    """Draw a harness topology in this terminal.
+
+    **THE ROUTE THAT WAS MISSING.** `dossier.topology` could draw and was
+    tested, and no command or tab reached it -- so this front end had a
+    renderer nobody could run, which reads exactly like a finished feature.
+
+    The harness decides what a topology is; this decides what it looks like
+    here. An edge nobody measured is drawn `-?>` and never as a thin line: one
+    is an absence of evidence and the other is evidence of absence, and a
+    reader has to be able to tell.
+    """
+    from dossier import threads, topology as drawing
+
+    if listing:
+        found = threads.topologies()
+        if not found:
+            click.echo("the harness is not answering, so it cannot say what "
+                       "it offers")
+            click.echo("  uv run qm dashboard --start harness")
+            raise SystemExit(1)
+        for name in found:
+            click.echo(name)
+        return
+
+    answer = threads.topology(kind=kind, subject=subject, level=level)
+    if not answer.reachable:
+        # Named, with the command that fixes it. A front end whose backend is
+        # down is the ordinary case, not an exception.
+        click.echo(answer.problem)
+        if answer.remedy:
+            click.echo(f"  {answer.remedy}")
+        click.echo(f"  tried {answer.where}")
+        raise SystemExit(1)
+
+    # The flow, with each box carrying the address it names and the URL where
+    # the code behind it is read -- the same two things the web window puts on
+    # the same node.
+    drawn = drawing.draw_flow(answer.payload, width=width, link=False)
+    click.echo(drawn.text())
+
+    unmeasured = sum(1 for line in drawn.lines if drawing.UNMEASURED in line)
+    total = len(answer.payload.get("arrows", []))
+    provenance = f" from the {answer.source}" if answer.source else ""
+    if answer.surveyed:
+        provenance += f", {answer.surveyed} thread(s) read"
+    click.echo("")
+    if unmeasured:
+        click.echo(f"{total - unmeasured} of {total} edge(s) measured{provenance};"
+                   f" the rest are drawn -?> because nobody looked")
+    else:
+        click.echo(f"every one of {total} edge(s) is measured{provenance}")
+
+    if drawn.channels_dropped:
+        click.echo(f"this window cannot carry: "
+                   f"{', '.join(drawn.channels_dropped)}")

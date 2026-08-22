@@ -162,14 +162,37 @@ def test_ages_are_injectable_so_they_can_be_asserted(session):
     assert "1yr" in later.generated_from or "12mo" in later.generated_from
 
 
+# Sections an empty database cannot empty. `Deltas by phase` is a fixed board
+# with a row per phase and no rows of its own; `Thread archive` belongs to the
+# harness and is read over HTTP, so it is populated exactly when the harness is
+# running -- which made this test pass or fail depending on whether something
+# was listening on another port. That is the suite measuring its own
+# surroundings rather than the code.
+NOT_THE_DATABASE_S = {"Deltas by phase", "Thread archive"}
+
+
 def test_an_empty_dossier_says_so_rather_than_showing_zeroes():
     engine = create_engine("sqlite://")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as empty:
         built = ov.build(empty, now=NOW)
     assert built.generated_from == "nothing synced yet"
-    assert all(section.is_empty or section.title == "Deltas by phase"
+    assert all(section.is_empty or section.title in NOT_THE_DATABASE_S
                for section in built.sections)
+
+
+def test_the_sections_an_empty_database_cannot_empty_are_still_drawn():
+    """Excluding them from the assertion above must not mean excluding them
+    from the page. A section that vanished when the database was empty would
+    take its explanatory note with it, and the note is the part that says why
+    the table is empty.
+    """
+    engine = create_engine("sqlite://")
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as empty:
+        built = ov.build(empty, now=NOW)
+    titles = {section.title for section in built.sections}
+    assert NOT_THE_DATABASE_S <= titles, f"missing: {NOT_THE_DATABASE_S - titles}"
 
 
 # --- the tab, driven ---------------------------------------------------------

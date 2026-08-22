@@ -60,16 +60,33 @@ GRID_COLS = 58
 BOX_H, BOX_CORNER, BOX_V = "-", "+", "|"
 
 
-def _box(label: str, selected: bool = False) -> tuple[str, str, str]:
+def _box(label: str, selected: bool = False,
+         available: bool = True) -> tuple[str, str, str]:
     """One node: its top, middle and bottom rows.
 
     A selected node is drawn with a doubled rule rather than only a colour.
     rad treats accessibility as foundation, and a selection carried by colour
     alone is invisible to a reader who cannot see it -- so the border says it
     too, in the plain text.
+
+    **An unavailable node is drawn with a dotted rule, for the same reason.**
+    Greying out is a colour, and the `contrast` theme deliberately has no dimmer
+    ink to grey with; a reader on that theme, or on a sixteen-colour terminal,
+    would see a wedge that looks ordinary and refuses to be chosen. Dotted says
+    it in characters that survive both.
+
+    Unavailable wins over selected. The highlight never rests on an unavailable
+    cell -- every route that moves it skips them -- so the combination means a
+    caller drew something the state machine would refuse, and it should look
+    refused rather than look chosen.
     """
     inner = f" {label} "
-    horizontal = "=" if selected else BOX_H
+    if not available:
+        horizontal = "."
+    elif selected:
+        horizontal = "="
+    else:
+        horizontal = BOX_H
     edge = BOX_CORNER + horizontal * len(inner) + BOX_CORNER
     return edge, f"{BOX_V}{inner}{BOX_V}", edge
 
@@ -151,17 +168,19 @@ class Ring(Static):
         placement = view.placement
         cursor = view.cursor_cell
 
-        labelled: dict[int, tuple[str, bool]] = {}
+        labelled: dict[int, tuple[str, bool, bool]] = {}
         for cell, index in placement.by_cell.items():
             wedge = view.wedges[index]
             text = f"{cell} {wedge.label}" + (SUBMENU if wedge.is_submenu else "")
-            labelled[cell] = (text, cell == cursor)
+            labelled[cell] = (text, cell == cursor, view.is_available(index))
 
         depth = len(view.path)
         centre_text = f"{numpad.BACK} back" if depth else f"{numpad.BACK} close"
-        labelled[numpad.BACK] = (centre_text, False)
+        # The centre is always available: backing out is the one thing that
+        # works at every level, including a level where nothing else does.
+        labelled[numpad.BACK] = (centre_text, False, True)
 
-        width = max(len(text) for text, _ in labelled.values()) + 4
+        width = max(len(text) for text, _, _ in labelled.values()) + 4
         gap = 2
         column_at = [column * (width + gap) for column in range(3)]
         row_at = [row * 4 for row in range(3)]
@@ -170,14 +189,14 @@ class Ring(Static):
         rows = row_at[-1] + 3 + 2  # room for the depth marks underneath
         grid = [[" "] * cols for _ in range(rows)]
 
-        painted: list[tuple[int, str, bool, bool]] = []
-        for cell, (text, selected) in labelled.items():
+        painted: list[tuple[int, str, bool, bool, bool]] = []
+        for cell, (text, selected, available) in labelled.items():
             column, row = numpad.POSITION[cell]
-            box = _box(text.ljust(width - 4), selected)
+            box = _box(text.ljust(width - 4), selected, available)
             for offset, line in enumerate(box):
                 _place_in(grid, row_at[row] + offset, column_at[column], line, cols)
             is_submenu = text.endswith(SUBMENU)
-            painted.append((row_at[row] + 1, text, selected, is_submenu))
+            painted.append((row_at[row] + 1, text, selected, is_submenu, available))
 
         # Depth, under the centre: one rule per level, so how deep you are is
         # readable without counting the path.
@@ -201,13 +220,20 @@ class Ring(Static):
             marks = [m for m in painted if m[0] == row_index]
             text = line
 
-            for _, body, selected, is_submenu in marks:
+            for _, body, selected, is_submenu, available in marks:
                 if not body or body not in text:
                     continue
-                token = (self.roles.focus_ring if selected
-                         else (self.roles.submenu_mark if is_submenu
-                               else self.roles.wedge_label))
-                weight = "bold " if selected else ""
+                if not available:
+                    # Ahead of selected and of submenu: an unavailable wedge is
+                    # not a chooseable one wearing a different colour, and the
+                    # submenu mark on a greyed verb should be greyed too.
+                    token = self.roles.wedge_label_unavailable
+                    weight = ""
+                else:
+                    token = (self.roles.focus_ring if selected
+                             else (self.roles.submenu_mark if is_submenu
+                                   else self.roles.wedge_label))
+                    weight = "bold " if selected else ""
                 text = text.replace(body, f"[{weight}{token}]{body}[/]", 1)
 
             if not marks:

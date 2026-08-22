@@ -213,3 +213,111 @@ def test_the_report_states_that_a_difference_is_not_a_correction():
 def test_the_report_states_that_nothing_is_deleted():
     """A delta absent from a payload is not one that was removed."""
     assert "not one that was removed" in render(run([payload()]), written=False)
+
+
+# --- the links, which the write path used to drop ----------------------------
+#
+# `links` was read for the address and then discarded, so the row naming what a
+# delta points at -- the invocation that found it, and the address that joins it
+# to the other view -- was never stored. Both sides believed the join existed
+# and nothing held it. These run the real CLI against a real database, because
+# the defect was in the write path and a test of `plan` alone cannot see it.
+
+
+def _run_ingest(tmp_path, payloads, monkeypatch):
+    """Ingest through the real command, against a database of its own."""
+    from click.testing import CliRunner
+
+    database = tmp_path / "links.db"
+    monkeypatch.setenv("DOSSIER_DATABASE_URL", f"sqlite:///{database}")
+
+    import importlib
+
+    from dossier import cli as cli_module
+    cli_module = importlib.reload(cli_module)
+
+    runner = CliRunner()
+    assert runner.invoke(cli_module.cli, ["db", "upgrade"]).exit_code == 0
+    assert runner.invoke(
+        cli_module.cli, ["projects", "add", "quaternionmedia/qmcp"]).exit_code == 0
+
+    payload_file = tmp_path / "deltas.json"
+    payload_file.write_text(json.dumps(payloads), encoding="utf-8")
+    result = runner.invoke(
+        cli_module.cli, ["deltas", "ingest", str(payload_file), "--write"])
+    assert result.exit_code == 0, result.output
+    return database, cli_module
+
+
+def _payload(**delta):
+    row = {"name": "tag-claims-does-not-pass", "title": "t", "phase": "brainstorm",
+           "delta_type": "chore", "priority": "high"}
+    row.update(delta)
+    return {
+        "schema": SCHEMA,
+        "project": "quaternionmedia/qmcp",
+        "delta": row,
+        "links": [
+            {"link_type": "invocation", "target_id": None, "target_name": "abc-123"},
+            {"link_type": "address", "target_id": None,
+             "target_name": "quaternionmedia/qmcp/delta/tag-claims-does-not-pass"},
+        ],
+    }
+
+
+def _links(database):
+    import sqlite3
+
+    connection = sqlite3.connect(str(database))
+    try:
+        return sorted(connection.execute(
+            "select link_type, target_name from delta_link"))
+    finally:
+        connection.close()
+
+
+def test_a_payloads_links_are_stored(tmp_path, monkeypatch):
+    database, _ = _run_ingest(tmp_path, [_payload()], monkeypatch)
+    assert _links(database) == [
+        ("address", "quaternionmedia/qmcp/delta/tag-claims-does-not-pass"),
+        ("invocation", "abc-123"),
+    ]
+
+
+def test_ingesting_the_same_payload_twice_does_not_duplicate_a_link(tmp_path, monkeypatch):
+    """A harness emits its state on every run, so re-ingesting is ordinary.
+
+    Mutation: append without checking and this doubles.
+    """
+    database, cli_module = _run_ingest(tmp_path, [_payload()], monkeypatch)
+    from click.testing import CliRunner
+
+    payload_file = tmp_path / "deltas.json"
+    again = CliRunner().invoke(
+        cli_module.cli, ["deltas", "ingest", str(payload_file), "--write"])
+    assert again.exit_code == 0, again.output
+    assert len(_links(database)) == 2
+
+
+def test_a_delta_whose_fields_did_not_change_still_gains_a_new_link(tmp_path, monkeypatch):
+    """The case the first fix missed.
+
+    Links were written only on `create` and `update`, so an unchanged delta
+    skipped the pass entirely -- and a second run of the same failing check
+    produces exactly that: the same delta, a new invocation. The rows that
+    accumulate were the rows being dropped.
+    """
+    database, cli_module = _run_ingest(tmp_path, [_payload()], monkeypatch)
+    from click.testing import CliRunner
+
+    second = _payload()
+    second["links"] = [
+        {"link_type": "invocation", "target_id": None, "target_name": "def-456"}]
+    payload_file = tmp_path / "second.json"
+    payload_file.write_text(json.dumps([second]), encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli_module.cli, ["deltas", "ingest", str(payload_file), "--write"])
+    assert result.exit_code == 0, result.output
+    assert "already matching" in result.output, "the delta itself is unchanged"
+    assert ("invocation", "def-456") in _links(database)

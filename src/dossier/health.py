@@ -24,6 +24,7 @@ diagnostic's decision.
 from __future__ import annotations
 
 import re
+import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -62,12 +63,58 @@ def candidate_databases(cwd: Path | None = None) -> list[Path]:
 
     cwd = cwd or Path.cwd()
     seen, found = set(), []
-    for path in (cwd / "dossier.db", dossier_home() / "dossier.db"):
+    override = overridden_database()
+    order = [cwd / "dossier.db", dossier_home() / "dossier.db"]
+    if override is not None:
+        # First, and alone in practice: an operator who named a database meant
+        # that one. Leaving the others behind it would let a diagnostic report
+        # a database nobody asked for.
+        order = [override]
+    for path in order:
         resolved = path.resolve()
         if resolved not in seen:
             seen.add(resolved)
             found.append(path)
     return found
+
+
+def overridden_database() -> Path | None:
+    """The database `DOSSIER_DATABASE_URL` names, or None if it is unset.
+
+    WHY THIS EXISTS AND WHY IT IS HERE RATHER THAN ONLY IN THE CLI. `dossier`
+    opened `sqlite:///dossier.db` relative to the working directory and offered
+    no other way to redirect it, so anything wanting a scratch database had to
+    change directory and anything that forgot wrote into whichever `dossier.db`
+    was underfoot. A demo run from the repository root wrote into the
+    operator's own data, which is how this was found.
+
+    Putting the override only on the engine would have been worse than not
+    having one: `db upgrade` resolves its target through this module, so the
+    migration would have run against one database while every query ran against
+    another -- and it would have reported success. That is the two-databases
+    failure this module was written for, reintroduced by its own fix.
+
+    A URL this cannot resolve to a file raises rather than falling back. An
+    override that is quietly ignored sends the caller's writes somewhere they
+    did not ask for, which is the whole problem.
+    """
+    url = os.environ.get("DOSSIER_DATABASE_URL")
+    if not url:
+        return None
+    prefix = "sqlite:///"
+    if not url.startswith(prefix):
+        raise ValueError(
+            f"DOSSIER_DATABASE_URL={url!r} is not a sqlite file URL. This "
+            f"resolves {prefix}<path> and refuses anything else rather than "
+            f"falling back to the default, which would write where nobody asked."
+        )
+    # `~` is expanded here because no shell will do it. A tilde is only
+    # expanded at the start of a word, so `sqlite:///~/hil/panel.db` reaches
+    # this as a literal tilde -- and without this, `db upgrade` created a
+    # directory actually named `~` inside the repository, wrote the database
+    # there, and reported success. `.gitignore` carries `*~`, so it did not
+    # even appear in `git status`.
+    return Path(url[len(prefix):]).expanduser()
 
 
 def _columns(connection: sqlite3.Connection, table: str) -> set[str]:

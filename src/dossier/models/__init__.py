@@ -61,6 +61,8 @@ __all__ = [
 ]
 
 from dossier.models.harness import (  # noqa: E402,F401
+    DeltaRelation,
+    HarnessAsk,
     HarnessInvocation,
     HarnessSnapshot,
 )

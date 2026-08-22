@@ -17,7 +17,10 @@ from rich.table import Table
 from rich.text import Text
 
 from dossier.overview import Section
-from dossier.rad.tokens import DEFAULT_THEME, roles
+# Through `dossier.palette`, so rad is optional in fact and not
+# only in intention: importing its tokens directly made the whole
+# application fail to import without rad installed.
+from dossier.palette import DEFAULT_THEME, roles
 
 _LEAD_COLUMN_WIDTH = 30
 

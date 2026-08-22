@@ -98,6 +98,24 @@ It counts what it costs you. Every choice records how many keystrokes it took
 from opening the menu to committing, so a menu that grows awkward shows up as a
 number rather than as a vague feeling. A digit press is two: open, choose.
 
+**Every command has a number, and the number is the route.** `6.2` is sync:
+`6` opens Do, `2` is the third thing under it. So it is `m` `6` `2` from
+anywhere. [docs/rad-commands.md](docs/rad-commands.md) is the full sheet —
+generated from the menu itself, marking which commands are wired and which are
+in the menu but not applied yet.
+
+**`m` `6` `2` makes what you are looking at current.** The tab decides what
+gets refreshed rather than whatever happens to be selected, anything already
+current is left alone, and a large fetch states what it would do and waits for
+you to press it again.
+
+Two more are wired: **`m` `4` `6`** puts a conversation export into the archive,
+and **`m` `6` `4`** reviews a dependency sweep across every repository that
+declares it. The rest of the menu is greyed out and cannot be selected — an
+unavailable command keeps its cell, because dropping it would renumber every
+command after it. The sheet says which are which; this page deliberately does
+not repeat the list.
+
 This is an implementation of [rad](https://github.com/quaternionmedia/rad),
 Quaternion Media's interaction contract, in a terminal. The same four verbs are
 meant to work the same way in a browser.
@@ -219,6 +237,28 @@ uv run dossier github sync-user yourname --limit 1
 | [Architecture](docs/architecture.md) | System design |
 | [Extending](docs/extending.md) | Customize for your needs |
 | [Contributing](docs/contributing.md) | Development guide |
+
+### Pages that execute
+
+These run under the ordinary test command, so an example that stops being true
+fails the build instead of misleading you. They are the shortest honest route in.
+
+| Page | What it shows |
+|------|---------------|
+| [01 — First run](walkthrough/01-first-run.md) | what `dossier dashboard` does on your behalf before it opens |
+| [02 — Filling it](walkthrough/02-filling-it.md) | getting real repositories into it |
+| [03 — Before a pull request](walkthrough/03-before-a-pull-request.md) | the gates, and what each one cannot see |
+| [04 — The pair](walkthrough/04-the-pair.md) | dossier beside a harness: two views of one dataset, joined by an address |
+
+**The pair.** dossier is the control panel; [qmcp](https://github.com/quaternionmedia/qmcp)
+is the harness that runs things. Neither imports the other — what crosses is a
+schema, and an address names the same row on both sides. When the two disagree
+about a row, neither wins: the disagreement is itself a unit of work.
+
+**Pointing it at a scratch database.** `DOSSIER_DATABASE_URL=sqlite:///somewhere.db`
+overrides the default, which is otherwise relative to the working directory.
+Use it for anything experimental; it is the difference between a demo and an
+edit to your own data.
 
 ## 📄 Dossier File Format
 

@@ -263,7 +263,26 @@ async def test_wasd_moves_the_highlight_like_the_arrows():
         await pilot.press("w")          # back up
         await pilot.pause()
         assert app._rad.view.cursor_cell == before
-        assert moved_by_letter == 2, "s should reach the bottom cardinal"
+
+    # THE SUBJECT IS THE EQUIVALENCE, SO IT IS ASSERTED DIRECTLY. This used to
+    # pin the destination -- `s` reaches cell 2 -- which was true of this app's
+    # menu rather than of `wasd`, and stopped being true when cell 2 became a
+    # wedge this app cannot act on and movement began stepping over it. A test
+    # of "the letters move like the arrows" that names a cell is really a test
+    # of the palette, and it fails for reasons that have nothing to do with the
+    # letters.
+    app = DossierApp(session_factory=lambda: Session(engine))
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("m")
+        await pilot.pause()
+        await pilot.pause()
+        await pilot.press("down")
+        await pilot.pause()
+        moved_by_arrow = app._rad.view.cursor_cell
+
+    assert moved_by_letter == moved_by_arrow, (
+        f"`s` reached {moved_by_letter} and `down` reached {moved_by_arrow}")
 
 
 @pytest.mark.asyncio

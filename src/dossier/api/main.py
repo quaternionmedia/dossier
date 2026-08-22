@@ -22,7 +22,19 @@ from dossier.models import (
 from dossier.parsers import GitHubClient, GitHubParser
 
 # Database setup
-DATABASE_URL = "sqlite:///dossier.db"
+# Where the database is, and the one way to point this somewhere else.
+#
+# `sqlite:///dossier.db` is relative to the working directory, so which database
+# you get depends on where you launched from -- `dossier/health.py` records the
+# failure that came out of exactly that. Until this override existed there was
+# no other way to redirect it, so anything that wanted a scratch database had to
+# change directory, and anything that forgot wrote into whichever `dossier.db`
+# was underfoot. A demo, an experiment or a walkthrough run in the repository
+# root wrote into the operator's own data, which is how this was found.
+#
+# `qmcp dashboard --database` is the same affordance on the other side of the
+# seam, and it existed first.
+DATABASE_URL = os.environ.get("DOSSIER_DATABASE_URL") or "sqlite:///dossier.db"
 engine = create_engine(DATABASE_URL, echo=False)
 
 
