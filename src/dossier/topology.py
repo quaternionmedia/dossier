@@ -361,6 +361,29 @@ def as_mermaid(payload: dict[str, Any], direction: str = "LR") -> str:
 # --- the same shape, as a flow with links -------------------------------------
 
 
+FORGE = "https://github.com"
+"""Where an `<owner>/<repo>` is read. **A default, not a fact**: an address says
+which account owns a repository and not which forge hosts it. `DOSSIER_FORGE`
+overrides it, and the web window has the same setting for the same reason --
+two windows onto one topology must agree about where its content lives."""
+
+
+def content_for(address: str) -> str | None:
+    """Where the thing at `address` can be read, or None.
+
+    None rather than a guess. A box that is a stage in a pipeline is not a
+    place, and a link to nowhere is worse than no link because it looks like it
+    goes somewhere -- which is the same rule the unmeasured edge follows.
+    """
+    import os
+
+    parts = [part for part in str(address or "").split("/") if part]
+    if len(parts) < 2:
+        return None
+    forge = (os.environ.get("DOSSIER_FORGE") or FORGE).rstrip("/")
+    return f"{forge}/{parts[0]}/{parts[1]}"
+
+
 def draw_flow(payload: dict[str, Any], width: int = 76,
               link: bool = True) -> Drawn:
     """The topology as a flow of boxes, with each box a link to its address.
@@ -447,8 +470,17 @@ def _linked(box: dict[str, Any], link: bool) -> str:
     drawn = f"{left}{label}{right}"
 
     note = str(box.get("note") or "")
-    if not link or not note:
-        return drawn if not note else f"{drawn}   {note}"
-    # Textual console markup. The address is both the label of the link and
-    # what it opens, so a reader who cannot click still sees where it goes.
-    return f"[@click=app.open_address('{note}')]{drawn}[/]   {note}"
+    if not note:
+        return drawn
+
+    # **THE URL IS SHOWN WHETHER OR NOT IT CAN BE CLICKED, AND ESPECIALLY WHEN
+    # IT CANNOT.** The unlinked form is for a file, a pull request body, or a
+    # terminal with no click handler -- all places where writing the address out
+    # is the *only* way a reader reaches the code. The web window carries the
+    # same two things on the same node, which is what makes the views
+    # comparable rather than merely similar.
+    content = content_for(note)
+    opens = f"  ->  {content}" if content else ""
+    if not link:
+        return f"{drawn}   {note}{opens}"
+    return f"[@click=app.open_address('{note}')]{drawn}[/]   {note}{opens}"

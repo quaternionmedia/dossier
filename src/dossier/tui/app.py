@@ -4330,14 +4330,33 @@ class DossierApp(App):
         except Exception:                          # noqa: BLE001
             found = None
 
+        # **AND OPEN THE CODE IT REPRESENTS.** Scoping the panel says which
+        # repository is meant; it does not show the reader the code. The
+        # address names a place, `content_for` says where that place is read,
+        # and the web window opens the same URL from the same node.
+        from dossier.topology import content_for
+
+        content = content_for(wanted)
+        if content:
+            try:
+                import webbrowser
+
+                webbrowser.open(content)
+            except Exception:                      # noqa: BLE001
+                # A machine with no browser is a real state. The URL is on
+                # screen either way, which is why it is written out.
+                pass
+
         if found is None:
             self.query_one("#topology-note", Static).update(
                 f"{wanted} is an address the harness sent; no repository here "
-                f"matches it")
+                f"matches it"
+                + (f" -- opened {content}" if content else ""))
             return
         self.selected_project = found
         self.query_one("#topology-note", Static).update(
-            f"scoped to {found.name} -- {wanted}")
+            f"scoped to {found.name} -- {wanted}"
+            + (f" -- opened {content}" if content else ""))
 
     @on(Button.Pressed, "#btn-draw-topology")
     def on_draw_topology(self, event: Button.Pressed) -> None:

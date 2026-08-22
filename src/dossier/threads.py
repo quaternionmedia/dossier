@@ -346,7 +346,7 @@ class Topology:
     remedy: str = ""
 
 
-def topology(kind: str = "delegation", subject: str = "",
+def topology(kind: str = "delegation", subject: str = "", level: int = 2,
              base: str | None = None, timeout: float = 10.0) -> Topology:
     """One topology from the harness.
 
@@ -363,8 +363,12 @@ def topology(kind: str = "delegation", subject: str = "",
     import urllib.request
 
     root = (base or base_url()).rstrip("/")
+    # **THE SAME VIEWS THE WEB WINDOW OFFERS.** `level` is the resolution the
+    # harness draws at, and it was fixed here while the other window let a
+    # reader choose -- so the two windows could not be pointed at the same view.
+    # A reading is only comparable if both sides can be asked the same question.
     path = (f"/v1/topology/relations/{subject}" if subject
-            else f"/v1/topology/shape/{kind}")
+            else f"/v1/topology/shape/{kind}?level={level}")
     where = f"{root}{path}"
 
     try:

@@ -194,3 +194,68 @@ def test_the_flow_names_the_channel_it_cannot_carry():
     """A reader comparing this with the web view needs to know which axes are
     missing here, not to discover it by the two disagreeing."""
     assert "line_colour" in draw_flow(payload()).channels_dropped
+
+
+# --- navigating to the code, in this window too -------------------------------
+
+
+def test_a_box_shows_the_address_and_where_it_is_read():
+    """**THE SAME TWO THINGS THE WEB WINDOW PUTS ON THE SAME NODE.** An address
+    says which place a box names; a URL says where that place is read. Carrying
+    only one makes the two views similar rather than comparable.
+
+    Mutation: drop the content URL and this fails.
+    """
+    from dossier.topology import content_for
+
+    assert content_for("acme/dossier/delta/the-work") == \
+        "https://github.com/acme/dossier"
+
+    text = draw_flow(payload(), link=False).text()
+    assert "qm/dossier" in text
+    assert "https://github.com/qm/dossier" in text
+
+
+def test_the_url_is_written_out_even_where_it_cannot_be_clicked():
+    """THE ONE THAT MATTERS.
+
+    The unlinked form is for a file, a pull request body, or a terminal with no
+    click handler — all places where writing the address out is the *only* way a
+    reader reaches the code. It was shown only in the clickable form, which is
+    exactly backwards.
+
+    Mutation: show the URL only when `link` is true and this fails.
+    """
+    plain = draw_flow(payload(), link=False).text()
+    assert "https://github.com/" in plain
+    assert "@click" not in plain
+
+
+def test_a_box_that_is_not_a_place_gets_no_url():
+    """A gate is not a repository, and a link to nowhere looks like it goes
+    somewhere."""
+    from dossier.topology import content_for
+
+    assert content_for("gate") is None
+    assert content_for("") is None
+
+    text = draw_flow(payload(boxes=[
+        {"id": "g", "label": "route", "kind": "gate", "note": "",
+         "count": None}], arrows=[]), link=False).text()
+    assert "https://" not in text
+
+
+def test_the_forge_is_a_default_and_not_a_fact(monkeypatch):
+    """Both windows read the same setting for the same reason: two views onto
+    one topology must agree about where its content lives."""
+    from dossier.topology import content_for
+
+    monkeypatch.setenv("DOSSIER_FORGE", "https://git.example.com")
+    assert content_for("owner/repo") == "https://git.example.com/owner/repo"
+
+
+def test_mermaid_carries_the_address_as_its_click_target():
+    """A reader following the diagram elsewhere gets the same address, so the
+    third rendering is navigable too."""
+    source = as_mermaid(payload())
+    assert 'click r0 "qm/dossier"' in source

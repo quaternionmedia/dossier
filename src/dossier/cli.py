@@ -4763,11 +4763,15 @@ if __name__ == "__main__":
               help="a topology from the harness's own vocabulary")
 @click.option("--subject", default="",
               help="a project to read the thread archive for; wins over --kind")
+@click.option("--level", default=2, type=click.IntRange(0, 2), show_default=True,
+              help="the resolution the harness draws at, as the web window "
+                   "offers it: 0 is the black box, 2 is the flows")
 @click.option("--width", default=76, show_default=True,
               help="how wide to draw")
 @click.option("--list", "listing", is_flag=True,
               help="every topology the harness offers, and exit")
-def topology_command(kind: str, subject: str, width: int, listing: bool) -> None:
+def topology_command(kind: str, subject: str, level: int, width: int,
+                     listing: bool) -> None:
     """Draw a harness topology in this terminal.
 
     **THE ROUTE THAT WAS MISSING.** `dossier.topology` could draw and was
@@ -4792,7 +4796,7 @@ def topology_command(kind: str, subject: str, width: int, listing: bool) -> None
             click.echo(name)
         return
 
-    answer = threads.topology(kind=kind, subject=subject)
+    answer = threads.topology(kind=kind, subject=subject, level=level)
     if not answer.reachable:
         # Named, with the command that fixes it. A front end whose backend is
         # down is the ordinary case, not an exception.
@@ -4802,7 +4806,10 @@ def topology_command(kind: str, subject: str, width: int, listing: bool) -> None
         click.echo(f"  tried {answer.where}")
         raise SystemExit(1)
 
-    drawn = drawing.draw(answer.payload, width=width)
+    # The flow, with each box carrying the address it names and the URL where
+    # the code behind it is read -- the same two things the web window puts on
+    # the same node.
+    drawn = drawing.draw_flow(answer.payload, width=width, link=False)
     click.echo(drawn.text())
 
     unmeasured = sum(1 for line in drawn.lines if drawing.UNMEASURED in line)
