@@ -104,15 +104,43 @@ class Sweep:
         return len(self.shares)
 
     @property
-    def address(self) -> str:
+    def owner(self) -> str | None:
+        """Whose repositories this sweep touches, read off the shares.
+
+        **DERIVED, NOT TYPED IN.** The address here hardcoded `quaternionmedia`,
+        so a fork's sweep emitted an address belonging to somebody else's
+        organisation -- and `records/DRAFT-a-route-is-an-address.md` is the
+        reason that matters: an address is what says two readings are about the
+        same thing, so a wrong owner joins a fork's work to this org's.
+
+        None when the shares disagree or none names an owner. **A sweep across
+        two organisations is a real thing** -- it is also not something this can
+        name in one address, and picking the majority owner would file half the
+        work under the wrong one.
+        """
+        owners = {
+            share.project.split("/", 1)[0]
+            for share in self.shares
+            if "/" in share.project
+        }
+        return owners.pop() if len(owners) == 1 else None
+
+    @property
+    def address(self) -> str | None:
         """The sweep's own delta. Named for the change, not for the day it ran.
 
         A sweep named by date would be a different delta every time somebody
         re-ran it, and the second one would carry none of the first one's
         approvals.
+
+        None when the owner cannot be established -- an address nobody can
+        resolve is worse than no address, because it looks resolvable.
         """
+        owner = self.owner
+        if owner is None:
+            return None
         target = self.to_version or "current"
-        return f"quaternionmedia/sweep/delta/{self.package}-{target}"
+        return f"{owner}/sweep/delta/{self.package}-{target}"
 
     def by_shape(self) -> dict[str, list[Share]]:
         found: dict[str, list[Share]] = {shape: [] for shape in SHAPES}

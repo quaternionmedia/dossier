@@ -192,3 +192,51 @@ def test_the_one_route_list_is_the_actions_with_reasons():
     """Not a failure list — a list of decisions somebody wrote down."""
     for action in actions.one_route_only():
         assert action.only, f"{action.id} is in the list with no reason"
+
+
+# --- dialogs follow a convention rather than each inventing one ---------------
+
+
+def test_every_dialog_button_is_one_of_the_conventional_ids():
+    """**A DIALOG THAT INVENTS `ok-btn` IS THE PROBLEM THIS CATCHES.**
+
+    `cancel-btn` appears in eight dialogs and `add-btn` in five. They are not
+    eight cancellations and five additions -- they are one of each, performed
+    on whatever is open, which is why they are conventions and not actions.
+
+    The value of writing them down is that a ninth dialog using a different id
+    becomes visible. Nothing else in this codebase could have told you.
+
+    Mutation: rename one dialog's cancel button and this fails.
+    """
+    from dossier.actions import MODAL_CONVENTIONS
+
+    source = APP.read_text(encoding="utf-8")
+    # Buttons whose ids look generic -- no feature prefix -- are dialog
+    # buttons. A feature button is `btn-<something>`; a dialog button is
+    # `<verb>-btn`, which is the convention this checks.
+    dialog_like = set(re.findall(r'id="([a-z]+-btn)"', source))
+    unknown = sorted(dialog_like - set(MODAL_CONVENTIONS))
+    assert not unknown, (
+        f"dialog buttons outside the convention: {unknown}. Either use one of "
+        f"{sorted(MODAL_CONVENTIONS)} or add it with what it means.")
+
+
+def test_a_dialog_button_is_never_also_an_action():
+    """A button cannot mean "confirm this dialog" and "do this thing to the
+    dossier" at once.
+
+    Mutation: register a dialog button as an action and this fails.
+    """
+    from dossier.actions import MODAL_CONVENTIONS
+
+    declared = {a.button for a in REGISTRY if a.button}
+    overlap = sorted(declared & set(MODAL_CONVENTIONS))
+    assert not overlap, f"declared as both a convention and an action: {overlap}"
+
+
+def test_every_modal_convention_says_what_it_means():
+    from dossier.actions import MODAL_CONVENTIONS
+
+    for button, meaning in MODAL_CONVENTIONS.items():
+        assert len(meaning.strip()) > 15, f"{button}: the meaning is a label"

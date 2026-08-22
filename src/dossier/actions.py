@@ -90,6 +90,31 @@ CONVENTIONS: dict[str, str] = {
     "q": "close the screen (where it is not a text field)",
     "tab": "move focus forward",
     "shift+tab": "move focus back",
+    "?": "open help",
+}
+
+
+# The buttons every dialog has, and what each means. **A CONVENTION, EXACTLY AS
+# `escape` IS.** `cancel-btn` appears in eight dialogs and `add-btn` in five;
+# they are not eight cancellations and five additions, they are one of each,
+# performed on whatever is open.
+#
+# **SO THEY ARE NOT ACTIONS AND GET NO RING ROUTE.** Confirming a dialog you
+# opened is the completion of the act that opened it, not a second act. Giving
+# each a number would put eight cells in the ring that mean "yes" and can only
+# be pressed while a dialog is already in front of you.
+#
+# What this buys is the thing the four universes lacked: a dialog that invents
+# `ok-btn` is now visible, because the standard ids are written down and a test
+# compares them.
+MODAL_CONVENTIONS: dict[str, str] = {
+    "cancel-btn": "abandon the dialog, changing nothing",
+    "add-btn": "commit what the dialog collected",
+    "create-btn": "commit what the dialog collected",
+    "close-btn": "dismiss a dialog that only showed something",
+    "delete-btn": "commit a deletion the dialog described",
+    "remove-btn": "commit a removal the dialog described",
+    "reset-btn": "put the dialog's fields back as they were",
 }
 
 

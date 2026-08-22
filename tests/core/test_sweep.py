@@ -296,3 +296,72 @@ def _moves_backwards(declared: str, target: str) -> bool:
     import re
     found = re.search(r"(\d+(?:\.\d+)*)", declared or "")
     return bool(found) and Version(found.group(1)) > Version(target)
+
+
+# --- the address belongs to whoever the repositories belong to ----------------
+
+
+def test_the_sweep_address_takes_its_owner_from_the_repositories():
+    """**THE ADDRESS HARDCODED AN ORGANISATION.** It read
+    `quaternionmedia/sweep/delta/...` whoever was running it, so a fork's sweep
+    emitted an address belonging to somebody else.
+
+    `records/DRAFT-a-route-is-an-address.md` is why that matters: an address is
+    what says two readings are about the same thing. A wrong owner joins a
+    fork's work to this organisation's.
+
+    Mutation: put a literal owner back and this fails.
+    """
+    found = sweep_module.Sweep(
+        package="fastapi", to_version="1.0",
+        shares=[sweep_module.Share(project="acme/a", declared=">=1"),
+                sweep_module.Share(project="acme/b", declared=">=1")])
+    assert found.owner == "acme"
+    assert found.address == "acme/sweep/delta/fastapi-1.0"
+    assert "quaternionmedia" not in (found.address or "")
+
+
+def test_a_sweep_across_two_organisations_has_no_single_address():
+    """THE ONE THAT MATTERS.
+
+    A sweep spanning two organisations is a real thing. It is also not
+    something one address can name, and picking the majority owner would file
+    half the work under the wrong one — silently, and in the field whose whole
+    job is identity.
+
+    Mutation: return the first owner found and this fails.
+    """
+    found = sweep_module.Sweep(
+        package="fastapi", to_version="1.0",
+        shares=[sweep_module.Share(project="acme/a", declared=">=1"),
+                sweep_module.Share(project="other/b", declared=">=1")])
+    assert found.owner is None
+    assert found.address is None
+
+
+def test_a_share_with_no_owner_in_its_name_yields_no_address():
+    """An address nobody can resolve is worse than no address, because it looks
+    resolvable."""
+    found = sweep_module.Sweep(
+        package="x",
+        shares=[sweep_module.Share(project="bare-name", declared=None)])
+    assert found.owner is None and found.address is None
+
+
+def test_no_owner_is_hardcoded_anywhere_in_the_module():
+    """The scan that found this one. A literal organisation in a module that
+    builds addresses is a fork emitting somebody else's identity.
+
+    Mutation: reintroduce the literal and this fails.
+    """
+    import pathlib
+
+    source = pathlib.Path(sweep_module.__file__).read_text(encoding="utf-8")
+    code = "\n".join(
+        line for line in source.splitlines()
+        if not line.strip().startswith("#")
+    )
+    # The docstrings may name it as an example; the code may not.
+    for line in code.splitlines():
+        if "quaternionmedia" in line and 'f"' in line:
+            raise AssertionError(f"an owner is hardcoded into an address: {line}")
