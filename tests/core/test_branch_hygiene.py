@@ -268,3 +268,95 @@ def test_the_note_says_how_many_clones_it_could_read():
     ])
     assert "1 branch(es) at risk across 1 clone(s) read" in note
     assert "had no clone here to read" in note
+
+
+# --- the overview is on the startup path ---------------------------------------
+#
+# **A CORE REQUIREMENT IS RUNNING ON VERY UNDERPOWERED HARDWARE**, and the two
+# costs that grow worst there are process spawn and a network round trip. The
+# overview had both: `hygiene` ran git in every clone on the machine and
+# `threads` dialled the harness, together six seconds of an eight-second build.
+#
+# The rule is not "make them faster". It is that the reading which opens first
+# does not cross a process boundary at all.
+
+
+def test_a_facet_that_crosses_a_boundary_says_so():
+    """The two that do are declared, so the rule is checkable rather than
+    remembered."""
+    from dossier import facets
+
+    crossing = {f.key for f in facets.FACETS if f.beyond_the_database}
+    assert crossing == {"threads", "hygiene"}, crossing
+    for facet in facets.FACETS:
+        if facet.beyond_the_database:
+            assert len(facet.beyond_the_database) > 12, (
+                f"{facet.key}: say what it does, not that it is slow")
+
+
+def _watch(monkeypatch) -> list[str]:
+    """Record any attempt to spawn git or dial the harness.
+
+    Patched at the two calls that actually cross, not at the facets: `Facet` is
+    frozen, and patching the registry would test the arrangement rather than
+    the behaviour. What matters is whether a process gets spawned.
+    """
+    from dossier import branches, threads
+
+    reached: list[str] = []
+    monkeypatch.setattr(
+        threads, "fetch",
+        lambda *a, **k: reached.append("threads") or threads.Archive())
+    monkeypatch.setattr(
+        branches, "find_clone",
+        lambda *a, **k: reached.append("hygiene") or None)
+    return reached
+
+
+def test_the_startup_path_neither_spawns_nor_dials(test_session, monkeypatch):
+    """THE ONE THIS EXISTS FOR.
+
+    Asserting on the attempt rather than on a duration: a timing test on a
+    developer's machine would pass with the spawning restored, and the machine
+    this has to run on is not a developer's.
+
+    Mutation: read every facet unconditionally in `build` and this fails.
+    """
+    from dossier.overview import build
+
+    reached = _watch(monkeypatch)
+    build(test_session, limit=2)
+    assert reached == [], f"the startup path reached for {sorted(set(reached))}"
+
+
+def test_asking_for_them_reads_them(test_session, monkeypatch):
+    """The control. Without it this is satisfiable by never reading them at
+    all, which would delete the facet rather than move it off the hot path.
+
+    The session needs one project in it: `hygiene` surveys the repositories it
+    is given, so against an empty database it correctly reaches for nothing and
+    the control passes without proving anything.
+    """
+    from dossier.models import Project
+    from dossier.overview import build
+
+    test_session.add(Project(name="acme/thing", full_name="acme/thing",
+                             github_owner="acme"))
+    test_session.commit()
+
+    reached = _watch(monkeypatch)
+    build(test_session, limit=2, beyond_the_database=True)
+    assert sorted(set(reached)) == ["hygiene", "threads"], reached
+
+
+def test_a_skipped_reading_is_not_reported_as_an_empty_one(test_session):
+    """A heading with no rows and no sentence reads as a facet that failed.
+
+    Mutation: return a bare empty Section for a skipped facet and this fails.
+    """
+    from dossier.overview import build
+
+    section = build(test_session, limit=2).section("Branch hygiene")
+    assert section is not None
+    assert "Not read here" in section.note
+    assert "skipped reading, not an empty one" in section.note

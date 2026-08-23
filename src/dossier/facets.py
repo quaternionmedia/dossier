@@ -66,6 +66,19 @@ class Facet:
     org: Callable[..., Section]
     project: Callable[..., Section]
 
+    # **WHETHER READING THIS COSTS MORE THAN A QUERY.** Every facet backed by
+    # the database answers in about a millisecond. Two do not: `threads` asks
+    # the harness over HTTP, and `hygiene` spawns git in every clone on the
+    # machine. Together they were six seconds of an eight-second overview, and
+    # the overview is on the startup path.
+    #
+    # Process spawn and a network round trip are exactly the costs that grow on
+    # small hardware, and running on a very underpowered machine is a stated
+    # requirement here. So the overview skips these unless a caller asks for
+    # them, and says in the section where to get them. A person who typed
+    # `dossier overview` can wait; a dashboard opening cannot.
+    beyond_the_database: str = ""
+
     def at(self, session: Any, *, ids=None, project=None, limit: int = 12) -> Section:
         """Read this facet at whichever scope was given."""
         if project is not None:
@@ -721,10 +734,25 @@ def _surveys(names: list[str]) -> list[Any]:
 
 
 def hygiene_org(session: Any, ids, limit: int) -> Section:
-    """Branch hygiene across the repositories in scope, from local clones."""
+    """Branch hygiene across the repositories in scope, from local clones.
+
+    **SURVEYED IN FULL AND SORTED BEFORE SLICING.** The first version took the
+    first `limit` names alphabetically, so with a hundred repositories the rows
+    shown were whichever sorted first and any finding past `d` was invisible.
+    `_threads_rows` had already settled this: a row that is a finding sorts
+    above a row that is an entry.
+
+    Surveying every name is cheap where it matters -- a repository with no clone
+    here costs two path checks and stops, and only the clones that exist run git
+    at all.
+    """
     names = [n.split("/")[-1] for n in _repo_names(session).values() if n]
-    surveys = _surveys(names[:limit])
-    rows = tuple(_hygiene_row(s) for s in surveys)
+    surveys = _surveys(names)
+    # Findings first, then clones that were read, then the unreadable. Within
+    # each, most at risk first.
+    surveys.sort(key=lambda s: (not s.at_risk, not s.found, -len(s.at_risk),
+                                s.repo))
+    rows = tuple(_hygiene_row(s) for s in surveys[:limit])
     return Section("Branch hygiene", HYGIENE_COLUMNS, rows,
                    note=_hygiene_note(surveys))
 
@@ -762,12 +790,14 @@ FACETS: tuple[Facet, ...] = (
     Facet("waiting", "Waiting on a person", "Waiting",
           "tab-waiting", "waiting-table", waiting_org, waiting_project),
     Facet("threads", "Thread archive", "Threads",
-          "tab-threads", "threads-table", threads_org, threads_project),
+          "tab-threads", "threads-table", threads_org, threads_project,
+          beyond_the_database="asks the harness over HTTP"),
     # Its own tab, not `tab-branches`. `BY_TAB` is keyed by tab, so a second
     # facet sharing one silently replaces the first -- 12 facets became 11
     # entries and the Branches tab started resolving to this.
     Facet("hygiene", "Branch hygiene", "Branch hygiene",
-          "tab-hygiene", "hygiene-table", hygiene_org, hygiene_project),
+          "tab-hygiene", "hygiene-table", hygiene_org, hygiene_project,
+          beyond_the_database="runs git in every clone on this machine"),
 )
 
 BY_KEY = {facet.key: facet for facet in FACETS}
