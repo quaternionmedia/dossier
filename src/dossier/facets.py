@@ -668,6 +668,76 @@ def threads_project(session: Any, project: Any, limit: int) -> Section:
     return threads_org(session, None, limit)
 
 
+HYGIENE_COLUMNS = ("repo", "at risk", "merged", "contained", "permanent",
+                   "the branches only this machine has")
+
+
+def _hygiene_row(survey: Any) -> tuple[str, ...]:
+    if not survey.found:
+        # Unknown is a value. A repository with no clone here is not a
+        # repository with clean branches, and reporting zeros would say it was.
+        return (_trim(survey.repo, 24), "--", "--", "--", "--",
+                _trim(survey.reason, 44))
+
+    named = ", ".join(name for name, _ in survey.at_risk[:3])
+    if len(survey.at_risk) > 3:
+        named += f", +{len(survey.at_risk) - 3}"
+    counts = survey.counts
+    return (
+        _trim(survey.repo, 24),
+        str(counts.get("at risk", 0)) if counts.get("at risk") else "--",
+        str(counts.get("merged", 0)),
+        str(counts.get("contained", 0)),
+        str(counts.get("permanent", 0)),
+        _trim(named or "none", 44),
+    )
+
+
+def _hygiene_note(surveys: list[Any]) -> str:
+    read = [s for s in surveys if s.found]
+    at_risk = sum(len(s.at_risk) for s in read)
+    unread = len(surveys) - len(read)
+    note = (
+        "A branch carrying commits no other ref has is the only copy of "
+        "something; a merged one is a label over history somebody already has. "
+        "The Branches facet cannot tell those apart -- it reads the sync, which "
+        "knows a tip and not what is reachable from elsewhere. This reads "
+        "clones on this machine, so it answers what would be lost if this disk "
+        "died, which is a question no server can answer. "
+        f"{at_risk} branch(es) at risk across {len(read)} clone(s) read"
+    )
+    if unread:
+        note += f", and {unread} repositor(y/ies) had no clone here to read"
+    return note + (". Automation branches are counted separately and are "
+                   "nobody's to lose. A branch whose work reached the default "
+                   "branch by another route still shows at risk: git knows the "
+                   "commit is unique and cannot know the change is redundant.")
+
+
+def _surveys(names: list[str]) -> list[Any]:
+    from dossier.branches import find_clone, survey
+
+    return [survey(name, find_clone(name)) for name in sorted(set(names))]
+
+
+def hygiene_org(session: Any, ids, limit: int) -> Section:
+    """Branch hygiene across the repositories in scope, from local clones."""
+    names = [n.split("/")[-1] for n in _repo_names(session).values() if n]
+    surveys = _surveys(names[:limit])
+    rows = tuple(_hygiene_row(s) for s in surveys)
+    return Section("Branch hygiene", HYGIENE_COLUMNS, rows,
+                   note=_hygiene_note(surveys))
+
+
+def hygiene_project(session: Any, project: Any, limit: int) -> Section:
+    """One repository's branches, classified."""
+    name = (project.full_name or project.name or "").split("/")[-1]
+    surveys = _surveys([name]) if name else []
+    rows = tuple(_hygiene_row(s) for s in surveys)
+    return Section("Branch hygiene", HYGIENE_COLUMNS, rows,
+                   note=_hygiene_note(surveys))
+
+
 FACETS: tuple[Facet, ...] = (
     Facet("deltas", "On deck", "Deltas", "tab-deltas", "deltas-table",
           deltas_org, deltas_project),
@@ -693,6 +763,11 @@ FACETS: tuple[Facet, ...] = (
           "tab-waiting", "waiting-table", waiting_org, waiting_project),
     Facet("threads", "Thread archive", "Threads",
           "tab-threads", "threads-table", threads_org, threads_project),
+    # Its own tab, not `tab-branches`. `BY_TAB` is keyed by tab, so a second
+    # facet sharing one silently replaces the first -- 12 facets became 11
+    # entries and the Branches tab started resolving to this.
+    Facet("hygiene", "Branch hygiene", "Branch hygiene",
+          "tab-hygiene", "hygiene-table", hygiene_org, hygiene_project),
 )
 
 BY_KEY = {facet.key: facet for facet in FACETS}
