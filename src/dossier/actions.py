@@ -197,6 +197,12 @@ REGISTRY: tuple[Action, ...] = (
            only="not applied yet; the ring says so rather than hiding it"),
     Action("reach.ingest", "Ingest deltas", button="btn-ingest-threads",
            rad="4.6"),
+    # No key. The direct route is selecting the row -- `DataTable.RowSelected`
+    # fires on a click and on Enter alike -- and a tab-local act does not earn a
+    # global letter. `r` is Refresh, and taking it would be the fourth-universe
+    # problem this file exists to end.
+    Action("reach.read", "Read conversation", button="btn-read-thread",
+           rad="4.4"),
     Action("reach.reconcile", "Reconcile", rad="4.2",
            only="not applied yet outside the ring"),
 

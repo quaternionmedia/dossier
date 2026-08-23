@@ -47,6 +47,7 @@ same cell.
 | `4.8` | `m` `4` `8` | &nbsp;&nbsp;Open in qmcp | `reach.qmcp` | **not yet** |
 | `4.6` | `m` `4` `6` | &nbsp;&nbsp;Ingest deltas | `reach.ingest` | yes |
 | `4.2` | `m` `4` `2` | &nbsp;&nbsp;Reconcile | `reach.reconcile` | yes |
+| `4.4` | `m` `4` `4` | &nbsp;&nbsp;Read conversation | `reach.read` | yes |
 
 ## `6.2` -- making the view current
 

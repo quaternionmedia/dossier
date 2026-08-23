@@ -65,5 +65,9 @@ def resolve(context: Any = None) -> tuple[Wedge, ...]:
             Wedge("reach.qmcp", "Open in qmcp", action="reach.qmcp"),
             Wedge("reach.ingest", "Ingest deltas", action="reach.ingest"),
             Wedge("reach.reconcile", "Reconcile", action="reach.reconcile"),
+            # Fourth in this group, so `PLACEMENT` gives it 4 -- route 4.4.
+            # The number is not chosen here; it is what the ring assigns, and
+            # `actions.py` declares the same one so the two can be compared.
+            Wedge("reach.read", "Read conversation", action="reach.read"),
         )),
     )
