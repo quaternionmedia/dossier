@@ -173,10 +173,12 @@ async def test_a_quoted_path_is_accepted(monkeypatch):
         app._apply_rad_intent(Intent("reach.ingest"))
         await pilot.pause()
         await pilot.pause()
+        # leaks: allow an invented export path, to prove quotes are stripped
         app.query_one("#thread-export-path", Input).value = '"C:\\Users\\x\\export"'
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
         await pilot.pause()
 
+    # leaks: allow an invented export path, to prove quotes are stripped
     assert asked == ["C:\\Users\\x\\export"], "the quotes were not stripped"

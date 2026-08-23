@@ -1,6 +1,7 @@
 """Pytest configuration and shared fixtures."""
 
 import os
+import re
 import subprocess
 import pytest
 from datetime import datetime, timezone
@@ -421,6 +422,35 @@ def screenshot_path(request):
     return SCREENSHOTS_DIR / f"{safe_name}.svg"
 
 
+# leaks: allow the example below is the leak this function removes
+# **A SCREENSHOT IS A PUBLISHED ARTIFACT, AND IT CAPTURES WHATEVER WAS ON
+# SCREEN.** Two committed screenshots of the settings tab carried
+# `C:\Users\<account>\.dossier\dossier.db` — the operator's username, in a
+# public repository, in a file nobody re-reads after it is generated. Written
+# `<account>` here for the same reason it was taken out of the screenshots.
+#
+# It is not a mistake anybody made once: the settings tab lists every candidate
+# database by its real path, correctly, and any capture on any machine picks up
+# whoever is logged in. Redacting the committed files alone would have lasted
+# until the next regeneration.
+#
+# So it happens here, at the one point every screenshot passes through. The
+# replacement keeps the shape of a path — a reader still sees that this is a
+# home directory — and drops the identity.
+HOME_IN_TEXT = re.compile(
+    r"(?i)(?P<prefix>[A-Z]:[\\/]{1,2}Users[\\/]{1,2}|/home/|/Users/)"
+    r"(?P<who>[^\\/\s<>\"']+)")
+
+
+def redact_home(svg: str) -> str:
+    """Replace the account name in any path with a placeholder.
+
+    Applied to the SVG text rather than to the app: what a screenshot shows is
+    decided by the app and by the machine, and only the artifact is published.
+    """
+    return HOME_IN_TEXT.sub(lambda m: m.group("prefix") + "you", svg)
+
+
 class ScreenshotHelper:
     """Helper class for taking TUI screenshots in tests."""
     
@@ -450,7 +480,10 @@ class ScreenshotHelper:
         # Use Textual's built-in screenshot functionality
         # path is the directory, filename is the file name
         app.save_screenshot(filename=filename, path=str(self.output_dir))
-        return self.output_dir / filename
+        written = self.output_dir / filename
+        written.write_text(
+            redact_home(written.read_text(encoding="utf-8")), encoding="utf-8")
+        return written
     
     def capture_sync(self, app, name: str, title: str = None) -> Path | None:
         """Synchronous version of capture for non-async contexts."""
@@ -461,7 +494,10 @@ class ScreenshotHelper:
         filename = f"{safe_name}.svg"
         
         app.save_screenshot(filename=filename, path=str(self.output_dir))
-        return self.output_dir / filename
+        written = self.output_dir / filename
+        written.write_text(
+            redact_home(written.read_text(encoding="utf-8")), encoding="utf-8")
+        return written
 
 
 @pytest.fixture
