@@ -422,10 +422,12 @@ def screenshot_path(request):
     return SCREENSHOTS_DIR / f"{safe_name}.svg"
 
 
+# leaks: allow the example below is the leak this function removes
 # **A SCREENSHOT IS A PUBLISHED ARTIFACT, AND IT CAPTURES WHATEVER WAS ON
 # SCREEN.** Two committed screenshots of the settings tab carried
-# `C:\Users\peter\.dossier\dossier.db` — the operator's username, in a public
-# repository, in a file nobody re-reads after it is generated.
+# `C:\Users\<account>\.dossier\dossier.db` — the operator's username, in a
+# public repository, in a file nobody re-reads after it is generated. Written
+# `<account>` here for the same reason it was taken out of the screenshots.
 #
 # It is not a mistake anybody made once: the settings tab lists every candidate
 # database by its real path, correctly, and any capture on any machine picks up
