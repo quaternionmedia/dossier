@@ -515,6 +515,22 @@ def locate(delta_name: str, base: str | None = None,
     if not found.reachable:
         return None
     for row in found.threads:
-        if row.get("address") == delta_name and row.get("source") and row.get("id"):
+        if not (row.get("source") and row.get("id")):
+            continue
+        # **THE TABLE SHOWS THE LAST SEGMENT, NOT THE WHOLE ADDRESS.**
+        # `facets._delta_name` renders `owner/repo/delta/thread-abc` as
+        # `thread-abc`, because what a column can hold is not what an address
+        # is. Comparing the cell against the full address matched nothing, and
+        # every read reported that the harness did not have the thread -- a
+        # true-sounding sentence about the wrong comparison.
+        #
+        # Both forms are accepted rather than the displayed one alone: a caller
+        # holding a real address should not have to trim it first, and matching
+        # only the tail would silently accept a thread from another project
+        # whose name happened to end the same way.
+        address = str(row.get("address") or "")
+        if not address:
+            continue
+        if delta_name in (address, address.rsplit("/", 1)[-1]):
             return str(row["source"]), str(row["id"])
     return None

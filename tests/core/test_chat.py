@@ -220,3 +220,56 @@ def test_nothing_here_offers_to_write_a_transcript_to_disk():
     assert "open(" not in source and "write_text" not in source, (
         "chat.py writes to a file. See the module docstring: turns are drawn "
         "and dropped.")
+
+
+# --- what the table shows is not what an address is ---------------------------
+
+
+def test_the_name_the_table_shows_locates_the_thread(monkeypatch):
+    """THE ONE THE FIRST VERSION GOT WRONG.
+
+    `facets._delta_name` renders `owner/repo/delta/thread-abc` as `thread-abc`,
+    because a column cannot hold an address. Comparing the cell against the full
+    address matched nothing, and every read reported that the harness did not
+    have the thread — a true-sounding sentence about the wrong comparison.
+
+    Mutation: compare against the full address only and this fails.
+    """
+    monkeypatch.setattr(threads, "fetch", lambda **kw: threads.Archive(
+        reachable=True, indexed=True,
+        threads=[{"address": "acme/proj/delta/thread-abc",
+                  "source": "claude", "id": "xyz-1"}]))
+    assert threads.locate("thread-abc") == ("claude", "xyz-1")
+
+
+def test_a_full_address_locates_it_too(monkeypatch):
+    """A caller holding a real address should not have to trim it first."""
+    monkeypatch.setattr(threads, "fetch", lambda **kw: threads.Archive(
+        reachable=True, indexed=True,
+        threads=[{"address": "acme/proj/delta/thread-abc",
+                  "source": "claude", "id": "xyz-1"}]))
+    assert threads.locate("acme/proj/delta/thread-abc") == ("claude", "xyz-1")
+
+
+def test_a_tail_that_matches_a_different_project_is_not_accepted(monkeypatch):
+    """**THE HAZARD OF MATCHING THE TAIL.** Two projects can hold a thread whose
+    name ends the same way, and an address exists precisely to tell them apart.
+    A full address given by the caller must match that address and no other.
+
+    Mutation: match only on the tail and this fails.
+    """
+    monkeypatch.setattr(threads, "fetch", lambda **kw: threads.Archive(
+        reachable=True, indexed=True,
+        threads=[{"address": "other/proj/delta/thread-abc",
+                  "source": "chatgpt", "id": "wrong"}]))
+    assert threads.locate("acme/proj/delta/thread-abc") is None
+
+
+def test_a_row_with_no_address_at_all_is_skipped(monkeypatch):
+    """A harness older than the delta fields sends none, and the facet draws
+    `--`. It must not match an empty name."""
+    monkeypatch.setattr(threads, "fetch", lambda **kw: threads.Archive(
+        reachable=True, indexed=True,
+        threads=[{"source": "claude", "id": "xyz-1"}]))
+    assert threads.locate("") is None
+    assert threads.locate("--") is None
