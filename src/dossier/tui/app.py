@@ -625,6 +625,106 @@ class StatsWidget(Static):
         )
 
 
+class ChatScreen(ModalScreen):
+    """One archived conversation, read top to bottom.
+
+    **THE ARCHIVE TABLE SAYS WHAT A THREAD IS; THIS SAYS WHAT IT SAID.** The
+    Threads tab has listed four hundred conversations since it was built, and
+    there has been no way to read one — the row is an address, a title cut to
+    thirty characters, and a turn count, and none of those is the conversation.
+
+    `escape` and `q` close it, as everywhere. The transcript is a scrollable
+    Static rather than a MarkdownViewer: an archived turn is somebody's text,
+    and rendering it as markdown would let a stray backtick or hash silently
+    restyle what they wrote.
+
+    **NOTHING HERE OFFERS TO SAVE IT.** The archive is personal material the
+    organisation has decided must never be published; a Save button on this
+    screen would be that decision, made in passing. `tests/core/test_chat.py`
+    holds the check that keeps it that way.
+    """
+
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("q", "close", "Close"),
+    ]
+
+    CSS = """
+    ChatScreen {
+        align: center middle;
+    }
+
+    #chat-dialog {
+        width: 90%;
+        height: 90%;
+        background: $surface;
+        border: solid $primary;
+    }
+
+    #chat-header {
+        height: auto;
+        padding: 1;
+        background: $primary-darken-2;
+    }
+
+    #chat-title {
+        text-style: bold;
+    }
+
+    #chat-transcript {
+        height: 1fr;
+        padding: 1;
+    }
+
+    #chat-footer {
+        height: 3;
+        padding: 0 1;
+        background: $surface-darken-1;
+        align: left middle;
+    }
+
+    #chat-footer Button {
+        margin: 0 1;
+        min-width: 8;
+    }
+
+    #chat-note {
+        margin: 0 1;
+        color: $text-muted;
+        width: auto;
+    }
+    """
+
+    def __init__(self, conversation, drawn) -> None:
+        super().__init__()
+        self.conversation = conversation
+        self.drawn = drawn
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="chat-dialog"):
+            with Horizontal(id="chat-header"):
+                yield Static(f"💬 {self.conversation.title or '(untitled)'}",
+                             id="chat-title")
+            with VerticalScroll(id="chat-transcript"):
+                yield Static(self.drawn.text(), id="chat-body")
+            with Horizontal(id="chat-footer"):
+                yield Button("Close", id="btn-close", variant="default")
+                # Named rather than omitted: a reader comparing this with the
+                # original conversation needs to know which channels this window
+                # cannot carry, not to discover it by the two disagreeing.
+                yield Static(
+                    "this window cannot carry: "
+                    + ", ".join(self.drawn.channels_dropped),
+                    id="chat-note")
+
+    @on(Button.Pressed, "#btn-close")
+    def on_close_pressed(self) -> None:
+        self.dismiss()
+
+    def action_close(self) -> None:
+        self.dismiss()
+
+
 class DossierApp(App):
     """Main Dossier TUI application for project tracking."""
     
@@ -1136,6 +1236,8 @@ class DossierApp(App):
                                         id="thread-export-path")
                             yield Button("Ingest", id="btn-ingest-threads",
                                          variant="primary")
+                            yield Button("Read", id="btn-read-thread",
+                                         variant="default")
                         yield WorkProgress(id="thread-progress")
                     with TabPane("Governance", id="tab-governance"):
                         with Vertical():
@@ -1242,6 +1344,7 @@ class DossierApp(App):
     RAD_ACTIONS: dict[str, str] = {
         "project.sync": "_sync_current_view",
         "reach.ingest": "_begin_thread_ingest",
+        "reach.read": "_open_selected_thread",
         "sweep.review": "_begin_sweep_review",
         "reach.reconcile": "_begin_reconcile",
         "delta.advance": "action_advance_delta_phase",
@@ -4292,6 +4395,91 @@ class DossierApp(App):
         self.query_one("#topology-note", Static).update("")
         self._progress_finish("the harness did not answer")
 
+
+    # --- reading one archived conversation ---------------------------------
+
+    @on(Button.Pressed, "#btn-read-thread")
+    def on_read_thread(self, event: Button.Pressed) -> None:
+        event.stop()
+        self._open_selected_thread()
+
+    @on(DataTable.RowSelected, "#threads-table")
+    def on_threads_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Selecting a row reads it. This is the direct route the registry
+        promises for `reach.read`, and `DataTable.RowSelected` fires on a click
+        and on Enter alike — so the mouse and the keyboard reach it without a
+        global letter being taken for a tab-local act.
+        """
+        event.stop()
+        self._open_selected_thread()
+
+    def _open_selected_thread(self) -> None:
+        """Read whichever conversation the archive table is pointing at.
+
+        **THE TABLE HAS LISTED CONVERSATIONS SINCE IT WAS BUILT AND NOTHING
+        COULD OPEN ONE.** A row is an address, a title cut to thirty characters,
+        and a turn count — none of which is the conversation.
+        """
+        try:
+            table = self.query_one("#threads-table", DataTable)
+        except Exception:                          # noqa: BLE001
+            return
+        if table.row_count == 0:
+            self.notify("The archive table is empty. Ingest an export first.",
+                        severity="warning")
+            return
+        try:
+            row = table.get_row_at(table.cursor_row)
+        except Exception:                          # noqa: BLE001
+            self.notify("Select a conversation first.", severity="warning")
+            return
+
+        # Column 0 is the delta name, which is the addressable field -- the
+        # title beside it is trimmed for width and is not an address.
+        name = str(row[0]) if row else ""
+        if not name or name == "--":
+            self.notify(
+                "That row carries no address, so there is nothing to look up. "
+                "A harness older than the delta fields sends none.",
+                severity="warning")
+            return
+
+        self._progress_start("reading the conversation")
+        self._read_thread(name)
+
+    @work(thread=True, exclusive=True, group="chat")
+    def _read_thread(self, name: str) -> None:
+        """Fetch the turns off the UI thread; the archive is over HTTP."""
+        from dossier import chat, threads
+
+        located = threads.locate(name)
+        if located is None:
+            self.call_from_thread(
+                self._thread_not_found, name)
+            return
+        source, identifier = located
+        found = threads.conversation(source, identifier)
+        self.call_from_thread(self._thread_read, found, chat.draw(found))
+
+    def _thread_not_found(self, name: str) -> None:
+        self._progress_finish("the archive did not have it")
+        self.notify(
+            f"{name} is not in the archive the harness is serving. Either the "
+            f"harness is not running, or the index predates this row.",
+            severity="warning")
+
+    def _thread_read(self, conversation, drawn) -> None:
+        """Show it, whether or not the harness answered.
+
+        An unreachable harness opens the screen too, carrying the problem and
+        the remedy: a notification would vanish, and the reader would be left
+        looking at the same table wondering what happened.
+        """
+        self._progress_finish(
+            "read the conversation" if conversation.reachable
+            else "the harness did not answer")
+        self.push_screen(ChatScreen(conversation, drawn))
+
     @on(Input.Submitted, "#topology-subject")
     def on_topology_subject_submitted(self, event: Input.Submitted) -> None:
         """Enter in the field does what Draw does.
@@ -6926,6 +7114,18 @@ class DossierApp(App):
         of them.
         """
         table = self.query_one(f"#{table_id}", DataTable)
+        # **A FACET IS A LIST OF ROWS, SO THE CURSOR SELECTS ROWS.** Set here
+        # rather than per table in `on_mount`, because here is the one place
+        # that knows a table is showing a facet.
+        #
+        # `#threads-table` had never had it set at all: `on_mount` appears to,
+        # but the variable named `threads_table` there is
+        # `#governance-threads-table` — a different widget on a different tab.
+        # So the archive table has been cell-cursored since it was built, and a
+        # `DataTable.RowSelected` handler on it could never have fired. That is
+        # why nothing could open a conversation from it: not a missing handler,
+        # a cursor that emits a different message.
+        table.cursor_type = "row"
         table.clear(columns=True)
         table.add_columns(*section.headers)
         if not section.rows:

@@ -411,3 +411,110 @@ def topologies(base: str | None = None, timeout: float = 10.0) -> list[str]:
     except Exception:                              # noqa: BLE001
         return []
     return [str(t.get("topology", "")) for t in document.get("topologies", [])]
+
+
+@dataclass
+class Conversation:
+    """One archived conversation as the harness served it, or why it did not.
+
+    **THE INDEX SAYS WHAT A THREAD IS; THIS SAYS WHAT IT SAID.** The two are
+    different documents on purpose — `/v1/threads` carries an addressable row
+    per thread and no text at all, because four hundred transcripts is not a
+    listing. The turns are fetched only when somebody asks to read one.
+
+    **THIS IS PERSONAL MATERIAL AND IT DOES NOT GET WRITTEN DOWN.** The archive
+    carries conversation titles, session identifiers and repository names that
+    the organisation has decided must never be published. Nothing here caches a
+    transcript to disk, and nothing renders one into a document a gate would
+    check — it is fetched, drawn on a screen, and dropped. Anything that wants
+    to change that is a decision, not a convenience.
+    """
+
+    reachable: bool
+    where: str
+    source: str = ""
+    identifier: str = ""
+    title: str = ""
+    started_at: str = ""
+    url: str = ""
+    partial: bool = False
+    turns: list[dict[str, Any]] = field(default_factory=list)
+    problem: str = ""
+    remedy: str = ""
+
+
+def conversation(source: str, identifier: str, base: str | None = None,
+                 timeout: float = 10.0) -> Conversation:
+    """One thread's turns, from the harness that owns the archive.
+
+    Never raises, for the same reason `topology` does not: the harness is a
+    separate process on a separate port and is very often not running, and the
+    caller wants a sentence to print rather than a traceback to show.
+    """
+    import json
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    root = (base or base_url()).rstrip("/")
+    # Quoted: an identifier is somebody else's, and archive identifiers have
+    # carried slashes and spaces. An unquoted one silently addresses a
+    # different route and the 404 blames the archive.
+    where = (f"{root}/v1/threads/{urllib.parse.quote(source, safe='')}"
+             f"/{urllib.parse.quote(identifier, safe='')}")
+
+    try:
+        with urllib.request.urlopen(where, timeout=timeout) as answer:
+            document = json.loads(answer.read())
+    except urllib.error.HTTPError as error:
+        detail = ""
+        try:
+            detail = str(json.loads(error.read()).get("detail", ""))
+        except Exception:                          # noqa: BLE001
+            pass
+        return Conversation(
+            False, where, source=source, identifier=identifier,
+            problem=f"the harness answered {error.code}"
+                    + (f": {detail}" if detail else ""),
+            remedy=("`uv run qmcp threads index --write` builds an archive"
+                    if error.code == 404 else ""))
+    except Exception:                              # noqa: BLE001
+        return Conversation(
+            False, where, source=source, identifier=identifier,
+            problem=f"nothing is answering at {root}",
+            remedy="`uv run qm dashboard --start harness`")
+
+    return Conversation(
+        True, where,
+        source=str(document.get("source") or source),
+        identifier=str(document.get("id") or identifier),
+        title=str(document.get("title") or ""),
+        started_at=str(document.get("started_at") or ""),
+        url=str(document.get("url") or ""),
+        partial=bool(document.get("partial")),
+        turns=list(document.get("turns") or []),
+    )
+
+
+def locate(delta_name: str, base: str | None = None,
+           timeout: float = TIMEOUT) -> tuple[str, str] | None:
+    """The (source, identifier) behind a delta name shown in the archive table.
+
+    **THE TABLE SHOWS AN ADDRESS AND THE ROUTE NEEDS TWO FIELDS.** The archive
+    row carries `source` and `id`; the table renders the delta name the harness
+    built from them. Rebuilding the pair by splitting that name would be a
+    second copy of somebody else's naming rule, and the two would agree right up
+    until the day the prefix changed — which is the reason `_delta_name` in
+    `facets.py` does not derive the address either.
+
+    So it is looked up rather than parsed. Returns None when the archive is not
+    reachable or holds no such row, which the caller must tell apart from a
+    thread that is there and empty.
+    """
+    found = fetch(base=base, timeout=timeout)
+    if not found.reachable:
+        return None
+    for row in found.threads:
+        if row.get("address") == delta_name and row.get("source") and row.get("id"):
+            return str(row["source"]), str(row["id"])
+    return None
