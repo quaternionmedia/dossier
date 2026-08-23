@@ -1180,6 +1180,8 @@ class DossierApp(App):
                         yield DataTable(id="languages-table")
                     with TabPane("Branches", id="tab-branches"):
                         yield DataTable(id="branches-table")
+                    with TabPane("Hygiene", id="tab-hygiene"):
+                        yield DataTable(id="hygiene-table")
                     with TabPane("Dependencies", id="tab-dependencies"):
                         yield DataTable(id="dependencies-table")
                     with TabPane("Contributors", id="tab-contributors"):
@@ -3531,6 +3533,7 @@ class DossierApp(App):
             "tab-docs": self._load_docs_tab,
             "tab-languages": self._load_languages_tab,
             "tab-branches": self._load_branches_tab,
+            "tab-hygiene": self._load_hygiene_tab,
             "tab-dependencies": self._load_dependencies_tab,
             "tab-contributors": self._load_contributors_tab,
             "tab-issues": self._load_issues_tab,
@@ -3652,6 +3655,16 @@ class DossierApp(App):
         the same column, and nothing fails when they do.
         """
         self._render_facet_for_project(FACET_BY_TAB["tab-branches"], project)
+
+    def _load_hygiene_tab(self, project=None) -> None:
+        """Render the `hygiene` facet: which branches only this machine has.
+
+        Unscoped when no project is given, like Threads and Topology. Branch
+        hygiene is a property of the clones on this disk rather than of one
+        repository, and the question it answers -- what would be lost if this
+        machine died -- is the same question at either scope.
+        """
+        self._render_facet_for_project(FACET_BY_TAB["tab-hygiene"], project)
 
     def _load_dependencies_tab(self, project: Project) -> None:
         """Render the `dependencies` facet for one repository.
