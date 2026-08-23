@@ -377,8 +377,33 @@ def _horizon_phrase(days: float | None) -> str:
     return f"most recent sync {age}" if age == "today" else f"most recent sync {age} ago"
 
 
+def _facet_section(facet: Any, session: Any, ids: Any, limit: int,
+                   allowed: bool) -> Section:
+    """One facet's section, or a placeholder saying where to get it.
+
+    **THE OVERVIEW IS ON THE STARTUP PATH AND MUST NOT SPAWN OR DIAL.** A facet
+    that reads only the database answers in about a millisecond; the two that
+    cross a process boundary were six seconds of an eight-second build. Those
+    costs are the ones that grow worst on small hardware, and this panel is
+    meant to run on some.
+
+    Skipped is not empty, and the section says which it is. A heading with no
+    rows and no sentence reads as a facet that failed.
+    """
+    if facet.beyond_the_database and not allowed:
+        return Section(
+            facet.title, ("",), (),
+            note=(f"Not read here: it {facet.beyond_the_database}, and the "
+                  f"overview is what opens first. Open the "
+                  f"{facet.tab.removeprefix('tab-')} tab, which reads it on "
+                  f"demand because by then a person has asked and can wait. "
+                  f"This is a skipped reading, not an empty one."))
+    return facet.at(session, ids=ids, limit=limit)
+
+
 def build(session: Any, limit: int = 12, now: datetime | None = None,
-          owner: str | None = None, include_forks: bool = False) -> OrgOverview:
+          owner: str | None = None, include_forks: bool = False,
+          beyond_the_database: bool = False) -> OrgOverview:
     """Everything the overview shows, from one session.
 
     `now` is injectable so a test can assert an age rather than assert around
@@ -398,7 +423,8 @@ def build(session: Any, limit: int = 12, now: datetime | None = None,
         masthead=_masthead(session, now, ids),
         sections=(
             _governance(session, now),
-            *(facet.at(session, ids=ids, limit=limit) for facet in FACETS),
+            *(_facet_section(facet, session, ids, limit, beyond_the_database)
+              for facet in FACETS),
             _deltas(session, now, ids),
             _harness_totals(session, now),
             _attention(session, now, limit, ids),
