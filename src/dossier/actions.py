@@ -118,6 +118,43 @@ MODAL_CONVENTIONS: dict[str, str] = {
 }
 
 
+# The button a dialog's text fields commit to, in the order a dialog would be
+# read. **ENTER IN A FIELD IS A CONVENTION, EXACTLY AS `escape` IS**, and it is
+# here for the same reason `cancel-btn` is: five dialogs collecting text are not
+# five different meanings of Enter.
+#
+# It is written down because the app kept getting it wrong one field at a time.
+# `#thread-export-path` was fixed once, `#topology-subject` a second time, each
+# with a comment calling it "the same one-key-short failure this app already
+# fixed once" -- and nine fields were still mouse-only when they were counted.
+# A field that only a mouse can submit is worse than no field, because it looks
+# finished.
+#
+# Ordered, not a set: a dialog offering two of these would otherwise commit to
+# whichever the query happened to return first.
+COMMIT_BUTTONS: tuple[str, ...] = (
+    "create-btn", "add-btn", "delete-btn", "remove-btn",
+)
+
+
+# Text fields whose Enter means something other than "commit this dialog", each
+# with what it does instead. These are not dialogs; they are fields on a panel,
+# and the panel decides. Listed so that `every field can be submitted` is
+# checkable without the check having to understand any of them.
+FIELDS_WITH_THEIR_OWN_MEANING: dict[str, str] = {
+    "search-input": "runs the search, or the `:command` typed into it",
+    "topology-subject": "draws the topology for that subject",
+    "thread-export-path": "writes the export to that path",
+    # Settings, not a form. Both carry `@on(Input.Changed)` handlers that
+    # validate and `_auto_save()` on every keystroke, so the value is already
+    # persisted by the time Enter could do anything. Declared rather than
+    # silently skipped: "Enter does nothing here, and that is correct" is a
+    # different fact from "nobody wired Enter", and only one of them is fine.
+    "sync-batch-size": "nothing; the value is saved as it is typed",
+    "sync-delay": "nothing; the value is saved as it is typed",
+}
+
+
 # One reason, carried in full by each action that has it. **Not "as above"** --
 # a reader landing on `view.disk` in a failure message gets the reason, not a
 # pointer to a line they cannot see. The variable is what keeps the wording

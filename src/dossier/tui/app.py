@@ -87,6 +87,7 @@ def extract_file_path(source_file: str | None) -> str | None:
     return source_file
 
 
+from dossier import actions
 from dossier.facets import BY_TAB as FACET_BY_TAB, BY_TITLE as FACET_BY_TITLE
 from dossier.tui.delta_board import DeltaBoard
 from dossier.tui.intersections_panel import IntersectionsPanel
@@ -4295,12 +4296,46 @@ class DossierApp(App):
     def on_topology_subject_submitted(self, event: Input.Submitted) -> None:
         """Enter in the field does what Draw does.
 
-        **THE SAME ONE-KEY-SHORT FAILURE THIS APP ALREADY FIXED ONCE**, for
-        `#thread-export-path`: a field that only a mouse can submit is a worse
-        outcome than no field, because it looks finished.
+        One of the three fields in `FIELDS_WITH_THEIR_OWN_MEANING`: this is a
+        panel, not a dialog, so there is no commit button for Enter to reach.
         """
         event.stop()
         self._load_topology_tab()
+
+    @on(Input.Submitted)
+    def on_any_field_submitted(self, event: Input.Submitted) -> None:
+        """Enter in a dialog's text field commits the dialog.
+
+        **THE THIRD TIME THIS WAS FIXED, AND THE FIRST TIME IT WAS FIXED FOR
+        EVERY FIELD.** `#thread-export-path` got its own handler, then
+        `#topology-subject` got one with a comment calling it "the same
+        one-key-short failure this app already fixed once" — and nine fields
+        were still mouse-only after both. A field only a mouse can submit is
+        worse than no field, because it looks finished.
+
+        So this is a convention rather than a handler per field, for the same
+        reason `escape` is: five dialogs collecting text are not five meanings
+        of Enter. A dialog that invents its own commit button id gets no Enter
+        and the structural test says which one.
+
+        Textual runs every handler whose selector matches, so the three fields
+        that mean something else must be skipped here rather than relying on a
+        more specific handler winning — nothing makes it win.
+        """
+        # **THE FIELD'S OWN SCREEN, NOT THE APP'S.** These dialogs are
+        # `ModalScreen`s, and the message bubbles up to the app -- so querying
+        # from here would search whatever the app considers current and could
+        # press a button belonging to a different screen entirely. The commit
+        # button that means anything is the one in the same dialog as the field.
+        if event.input.id in actions.FIELDS_WITH_THEIR_OWN_MEANING:
+            return
+        screen = event.input.screen
+        for button_id in actions.COMMIT_BUTTONS:
+            found = screen.query(f"#{button_id}")
+            if found:
+                event.stop()
+                found.first(Button).press()
+                return
 
     @on(Button.Pressed, "#btn-topology-mermaid")
     def on_topology_mermaid(self, event: Button.Pressed) -> None:
