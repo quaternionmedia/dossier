@@ -1213,6 +1213,11 @@ class DossierApp(App):
                     # inside of rather than a thing you can leave and return to.
                     with TabPane("Sweep", id="tab-sweep"):
                         with Vertical():
+                            with Horizontal(id="sweep-picker"):
+                                yield Input(
+                                    placeholder="a package, to sweep; blank "
+                                                "takes the widest-shared",
+                                    id="sweep-package")
                             yield Static("", id="sweep-summary")
                             yield DataTable(id="sweep-table")
                             yield Static("", id="sweep-note")
@@ -1515,8 +1520,17 @@ class DossierApp(App):
     panel came to sweep one package while a reader was looking at another.
     """
 
+    _sweep_typed: str = ""
+    """The package typed into the Sweep tab, captured before the worker starts.
+
+    **READ HERE BECAUSE THE WORKER IS ON A THREAD.** `_run_sweep_review` runs
+    off the UI loop, and reaching into a widget from there is a read racing a
+    repaint. The field is sampled at the moment the review is asked for, which
+    is also the moment a person means.
+    """
+
     def _begin_sweep_review(self) -> None:
-        """`6.4`. Review the widest-shared dependency across the organisation.
+        """`6.4`. Review a shared dependency across the organisation.
 
         Opens the tab first and fills it from a worker: the sweep reads every
         declared dependency in the database and runs a worker per share, which
@@ -1526,6 +1540,11 @@ class DossierApp(App):
             self.query_one("#project-tabs").active = "tab-sweep"
         except Exception:
             pass
+        try:
+            self._sweep_typed = self.query_one(
+                "#sweep-package", Input).value.strip()
+        except Exception:
+            self._sweep_typed = ""
         self._progress_start("working out what a sweep would touch")
         self._run_sweep_review()
 
@@ -1536,16 +1555,33 @@ class DossierApp(App):
 
         try:
             with self.session_factory() as session:
-                package = self.selected_dependency
-                chosen_by = "chosen in Dependencies"
+                # **THREE WAYS TO SAY WHICH PACKAGE, MOST DELIBERATE
+                # FIRST.** For a while there was one -- select a row in
+                # Dependencies -- and one fallback, the widest-shared. The
+                # fallback is not a hardcoded package, but it does resolve to
+                # the same package every time it is taken, because breadth is a
+                # property of the data and the data changes slowly. So a person
+                # who never opened Dependencies had no way to sweep anything
+                # else, and the panel looked like it only knew one package.
+                #
+                # The field is the way to say it in the place the answer
+                # appears. Which of the three was used is carried to the screen
+                # either way: a fallback that reads as a choice is how this
+                # panel came to sweep one package while somebody watched
+                # another.
+                package = self._sweep_typed
+                chosen_by = "typed in Sweep"
+                if not package:
+                    package = self.selected_dependency
+                    chosen_by = "chosen in Dependencies"
                 if not package:
                     widest = shared_needs(session, at_least=2)
                     if not widest:
                         self.call_from_thread(
                             self._sweep_review_failed,
                             "nothing is declared by two repositories, so there "
-                            "is nothing to sweep. Choose a dependency in the "
-                            "Dependencies tab to sweep it anyway")
+                            "is nothing to sweep. Name a package in the Sweep "
+                            "field to sweep it anyway")
                         return
                     package, _ = widest[0]
                     chosen_by = ("nothing chosen, so the widest-shared package"
@@ -4507,6 +4543,17 @@ class DossierApp(App):
             "read the conversation" if conversation.reachable
             else "the harness did not answer")
         self.push_screen(ChatScreen(conversation, drawn))
+
+    @on(Input.Submitted, "#sweep-package")
+    def on_sweep_package_submitted(self, event: Input.Submitted) -> None:
+        """Enter in the field runs the review for that package.
+
+        In `FIELDS_WITH_THEIR_OWN_MEANING` for the reason the topology field
+        is: this is a panel, not a dialog, so there is no commit button for
+        Enter to reach.
+        """
+        event.stop()
+        self._begin_sweep_review()
 
     @on(Input.Submitted, "#topology-subject")
     def on_topology_subject_submitted(self, event: Input.Submitted) -> None:

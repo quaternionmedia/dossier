@@ -89,6 +89,16 @@ class Review:
     """
 
     sweep: str
+    change: str = ""
+    """What is being swept, in words -- the package, the version, and how the
+    package came to be chosen.
+
+    **ON THE REVIEW, BECAUSE THE SUMMARY IS WHAT GETS READ.** This was carried
+    only into each batch's name, so a sweep where every share was queued named
+    the package nowhere on screen: a reader saw an address and two counts. The
+    address identifies the work and does not describe it.
+    """
+
     batches: list[Batch] = field(default_factory=list)
     queue: list[Item] = field(default_factory=list)
 
@@ -117,11 +127,12 @@ class Review:
         summary leading with nine approvals reads as done, and the twenty-four
         is the number that matters.
         """
+        said = self.change or self.sweep
         if not self.total:
-            return f"{self.sweep}: nothing to review"
+            return f"{said}: nothing to review"
         waiting = len(self.queue)
         count = len(self.batches)
-        return (f"{self.sweep}: {waiting} waiting on a person, "
+        return (f"{said}: {waiting} waiting on a person, "
                 f"{self.approvable} ready in {count} "
                 f"batch{'' if count == 1 else 'es'} "
                 f"({self.total} in the sweep)")
@@ -164,7 +175,8 @@ def review(sweep_address: str, change: str,
     batches.sort(key=lambda b: (-b.size, b.change))
 
     queue.sort(key=lambda item: (item.asking, item.project))
-    return Review(sweep=sweep_address, batches=batches, queue=queue)
+    return Review(sweep=sweep_address, change=change, batches=batches,
+                  queue=queue)
 
 
 def batch_is_uniform(batch: Batch) -> bool:

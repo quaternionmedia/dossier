@@ -282,3 +282,96 @@ def test_the_review_runs_without_the_harness_installed(monkeypatch):
     assert len(outcomes) == 1
     assert outcomes[0].state == "done"
     assert outcomes[0].edit == ">=0.116.0"
+
+
+# --- which package ------------------------------------------------------------
+#
+# **THE WIDEST-SHARED PACKAGE IS A STARTING POINT, NOT A TARGET.** It is not a
+# hardcoded constant -- it is read from the data -- but it resolves to the same
+# package every time it is taken, because breadth changes slowly. With one way
+# to override it (select a row in the Dependencies tab), a person who never
+# opened that tab could not sweep anything else, and the panel behaved exactly
+# as if `fastapi` were written into it.
+
+
+@pytest.mark.asyncio
+async def test_a_typed_package_is_what_gets_swept(session):
+    """THE ONE THIS EXISTS FOR.
+
+    `sqlmodel` is declared by two repositories and `fastapi` by three, so the
+    fallback would take `fastapi`. Typing the other one must win.
+
+    Mutation: drop the `#sweep-package` read from `_begin_sweep_review` and
+    this fails.
+    """
+    from textual.widgets import Input
+
+    for repo in ("org/a", "org/b", "org/c"):
+        declare(session, repo, "fastapi", ">=0.100.0")
+    declare(session, "org/a", "sqlmodel", ">=0.0.20")
+    declare(session, "org/b", "sqlmodel", ">=0.0.30")
+
+    app = app_for(session)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app.query_one("#project-tabs").active = "tab-sweep"
+        app.query_one("#sweep-package", Input).value = "sqlmodel"
+        app._apply_rad_intent(Intent("sweep.review"))
+        assert await settle(pilot, app), "the review never arrived"
+
+        assert app._sweep_review.change.startswith("sqlmodel to "), (
+            app._sweep_review.change)
+        assert "typed in Sweep" in app._sweep_review.change
+
+
+@pytest.mark.asyncio
+async def test_the_screen_says_which_of_the_three_ways_was_used(session):
+    """A fallback that reads as a choice is how this panel came to sweep one
+    package while somebody was looking at another. All three routes are named
+    in the subject, and the fallback names itself as one.
+
+    Mutation: drop `change=change` from the `Review` this returns, and both
+    this and `test_a_typed_package_is_what_gets_swept` fail.
+    """
+    declare(session, "org/a", "fastapi", ">=0.100.0")
+    declare(session, "org/b", "fastapi", ">=0.110.0")
+
+    app = app_for(session)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._apply_rad_intent(Intent("sweep.review"))
+        assert await settle(pilot, app)
+
+        assert "widest-shared" in app._sweep_review.change
+
+
+@pytest.mark.asyncio
+async def test_enter_in_the_field_runs_the_review(session):
+    """A field only a mouse can submit is worse than no field, because it looks
+    finished. `#sweep-package` is a panel field, so it declares its own meaning
+    rather than reaching for a dialog's commit button.
+
+    Mutation: remove the `@on(Input.Submitted, "#sweep-package")` handler and
+    this fails.
+    """
+    from textual.widgets import Input
+
+    from dossier import actions
+
+    assert "sweep-package" in actions.FIELDS_WITH_THEIR_OWN_MEANING
+
+    declare(session, "org/a", "httpx", ">=0.24.0")
+    declare(session, "org/b", "httpx", ">=0.27.0")
+
+    app = app_for(session)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app.query_one("#project-tabs").active = "tab-sweep"
+        field = app.query_one("#sweep-package", Input)
+        field.value = "httpx"
+        field.focus()
+        await pilot.pause()
+        await pilot.press("enter")
+        assert await settle(pilot, app), "enter did not run the review"
+
+        assert app._sweep_review.change.startswith("httpx to ")

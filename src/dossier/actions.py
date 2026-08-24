@@ -144,6 +144,7 @@ COMMIT_BUTTONS: tuple[str, ...] = (
 FIELDS_WITH_THEIR_OWN_MEANING: dict[str, str] = {
     "search-input": "runs the search, or the `:command` typed into it",
     "topology-subject": "draws the topology for that subject",
+    "sweep-package": "reviews a sweep of that package",
     "thread-export-path": "writes the export to that path",
     # Settings, not a form. Both carry `@on(Input.Changed)` handlers that
     # validate and `_auto_save()` on every keystroke, so the value is already

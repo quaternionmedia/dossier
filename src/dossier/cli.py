@@ -784,6 +784,147 @@ def projects_rename(old_name: str, new_name: str) -> None:
 
 
 @cli.command()
+@click.option("--owner", "-o", default=None,
+              help="Scope to one owner. Default: the owner most repositories share.")
+@click.option("--limit", "-n", default=8, show_default=True,
+              help="Rows per section.")
+@click.option("--section", "-s", "only", default=None,
+              help="Print one section by title, case-insensitive substring.")
+@click.option("--forks/--no-forks", default=False, show_default=True,
+              help="Include forks in scope.")
+@click.option("--fast", is_flag=True, default=False,
+              help="Skip the readings that spawn git or dial the harness.")
+def overview(owner: Optional[str], limit: int, only: Optional[str],
+             forks: bool, fast: bool) -> None:
+    """Every repository in one reading: the org overview, as text.
+
+    **THE OVERVIEW EXISTED AND ONLY THE TUI COULD SHOW IT.** `overview.build`
+    assembles a masthead and every facet at org scope, and the only consumer was
+    the dashboard -- so the cohesive picture required an interactive terminal,
+    could not be piped, quoted, or put in a pull request, and could not be read
+    at all over a connection that will not carry a full-screen application.
+
+    Same builder, same facets, same notes. Nothing here computes a figure: a
+    second way of counting is how two views of one number start disagreeing.
+    """
+    from dossier.overview import build, dominant_owner
+
+    with get_session() as session:
+        scope_owner = owner or dominant_owner(session)
+        # Everything, unless asked otherwise. Two facets cross a process
+        # boundary and cost seconds; the dashboard skips them because it is on
+        # the startup path, and this is not -- somebody typed the command.
+        picture = build(session, limit=limit, owner=scope_owner,
+                        include_forks=forks, beyond_the_database=not fast)
+
+        click.echo("=" * 78)
+        click.echo(f"  {picture.scope}")
+        click.echo(f"  read from a sync {picture.generated_from}")
+        click.echo("=" * 78)
+
+        if picture.masthead and not only:
+            click.echo()
+            for cell in picture.masthead:
+                label = getattr(cell, "label", "")
+                value = getattr(cell, "value", "")
+                note = getattr(cell, "note", "") or ""
+                click.echo(f"  {label:<28} {value}"
+                           + (f"   {note}" if note else ""))
+
+        for section in picture.sections:
+            if only and only.lower() not in section.title.lower():
+                continue
+            click.echo()
+            click.echo(f"--- {section.title} " + "-" * max(0, 74 - len(section.title)))
+            if section.is_empty:
+                # An empty section is a fact about the data, not a reason to
+                # print nothing: a heading with no rows and no sentence reads
+                # as a section that failed to load.
+                click.echo("    (nothing in scope)")
+            else:
+                widths = [
+                    max(len(str(section.headers[i])),
+                        max(len(str(row[i])) for row in section.rows))
+                    for i in range(len(section.headers))
+                ]
+                click.echo("    " + "  ".join(
+                    str(h).ljust(widths[i])
+                    for i, h in enumerate(section.headers)))
+                click.echo("    " + "  ".join("-" * w for w in widths))
+                for row in section.rows:
+                    click.echo("    " + "  ".join(
+                        str(cell).ljust(widths[i])
+                        for i, cell in enumerate(row)))
+            if section.note:
+                click.echo()
+                for line in textwrap.wrap(section.note, width=72):
+                    click.echo(f"    {line}")
+
+        click.echo()
+        click.echo("-" * 78)
+        click.echo("  Every figure is from the last sync, not from now. A section's")
+        click.echo("  note says what its rows do and do not mean; read it before")
+        click.echo("  quoting a number out of the table above it.")
+
+
+@cli.command()
+@click.argument("package", required=False)
+@click.option("--at-least", default=2, show_default=True,
+              help="How many repositories must declare a package for it to "
+                   "count as shared.")
+def sweep(package: Optional[str], at_least: int) -> None:
+    """What a sweep of PACKAGE would touch, and the version it would reach.
+
+    PACKAGE is optional. Without it this lists what is shared and stops,
+    because there is no such thing as *the* package to sweep -- the
+    widest-shared one is where a panel starts when nobody has said, and that is
+    a starting point rather than an answer.
+
+    The target version is derived from the shares, never given: see
+    `sweep.furthest_ahead`.
+
+    Reads and prints. Nothing is written and no pull request is opened.
+    """
+    from dossier.sweep import find, furthest_ahead, plan, shared_needs
+
+    with get_session() as session:
+        if not package:
+            shared = shared_needs(session, at_least=at_least)
+            if not shared:
+                click.echo(f"No package is declared by {at_least} or more "
+                           f"repositories.")
+                return
+            click.echo(f"Declared by {at_least} or more repositories, widest "
+                       f"first. Name one to see what a sweep would touch:")
+            for name, count in shared:
+                click.echo(f"  {name:<32} {count}")
+            return
+
+        found = find(session, package)
+        if not found.shares:
+            click.echo(f"No repository declares {package}.", err=True)
+            raise SystemExit(1)
+
+        to_version = furthest_ahead(found)
+        if not to_version:
+            click.echo(f"{package} is declared by {found.blast_radius} "
+                       f"repository(ies) and none states a comparable version, "
+                       f"so there is no target to sweep to. That is a person's "
+                       f"call, not this command's.", err=True)
+            raise SystemExit(1)
+
+        planned = plan(found, to_version)
+        click.echo(f"{planned.package} to {to_version} across "
+                   f"{planned.blast_radius} repository(ies)")
+        click.echo("")
+        for share in sorted(planned.shares, key=lambda s: s.project):
+            declared = share.declared if share.declared else "no version"
+            click.echo(f"  {share.project:<28} {declared:<16} {share.shape}")
+            if share.why:
+                click.echo(f"  {'':<28} {share.why}")
+
+
+@cli.command()
 @click.argument("project_name")
 @click.argument("path", type=click.Path(exists=True))
 def parse(project_name: str, path: str) -> None:
