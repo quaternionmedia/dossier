@@ -1,7 +1,7 @@
 """One change, carried across every repository that needs it.
 
-    dossier sweep find <package>
-    dossier sweep plan <package> --to <version>
+    dossier sweep                 what is shared, widest first
+    dossier sweep <package>       what a sweep of it would touch
 
 **A SWEEP IS ONE DELTA WITH MANY PARTS.** Bumping `fastapi` is not twenty-four
 pieces of work that happen to look alike; it is one piece of work with a

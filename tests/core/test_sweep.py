@@ -365,3 +365,111 @@ def test_no_owner_is_hardcoded_anywhere_in_the_module():
     for line in code.splitlines():
         if "quaternionmedia" in line and 'f"' in line:
             raise AssertionError(f"an owner is hardcoded into an address: {line}")
+
+
+# --- the route the module docstring advertises --------------------------------
+#
+# It advertised two subcommands and a `--to` for four months and had neither.
+# `--to` is also the constant `furthest_ahead` replaced, so the route that got
+# built is the one that derives its target.
+
+
+def _declared(session, repo, package, spec):
+    from dossier.models.schemas import Project, ProjectDependency
+
+    project = Project(name=repo, full_name=f"org/{repo}", github_owner="org")
+    session.add(project)
+    session.commit()
+    session.refresh(project)
+    session.add(ProjectDependency(project_id=project.id, name=package,
+                                  version_spec=spec, source="pyproject.toml",
+                                  dep_type="runtime"))
+    session.commit()
+
+
+def test_the_route_exists():
+    """A documented command with nothing behind it is worse than no command.
+
+    Mutation: remove the `sweep` command from `cli.py` and this fails.
+    """
+    from dossier.cli import cli
+
+    assert "sweep" in cli.list_commands(None)
+
+
+def test_with_no_package_it_lists_rather_than_picking_one(tmp_path,
+                                                          monkeypatch):
+    """THE ONE THIS EXISTS FOR.
+
+    There is no such thing as *the* package to sweep. The widest-shared one is
+    where a panel starts when nobody has said, and a command that silently
+    swept it would make a starting point look like an answer.
+
+    Mutation: sweep the widest-shared package when none is named and this
+    fails.
+    """
+    from click.testing import CliRunner
+    from sqlmodel import Session, SQLModel, create_engine
+
+    from dossier import cli as cli_module
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'd.db'}")
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        _declared(session, "a", "fastapi", ">=0.100.0")
+        _declared(session, "b", "fastapi", ">=0.110.0")
+        _declared(session, "c", "httpx", ">=0.24.0")
+        _declared(session, "d", "httpx", ">=0.27.0")
+
+    monkeypatch.setattr(cli_module, "get_session", lambda: Session(engine))
+
+    result = CliRunner().invoke(cli_module.cli, ["sweep"])
+    assert result.exit_code == 0, result.output
+    assert "fastapi" in result.output and "httpx" in result.output
+    # Listed, not swept: no target version, no per-repository shape.
+    assert "mechanical" not in result.output
+    assert " to 0.110.0" not in result.output
+
+
+def test_a_named_package_gets_its_own_derived_target(tmp_path, monkeypatch):
+    """The target follows the package. A constant applied to whatever package
+    the sweep landed on offered an unrelated project's version.
+
+    Mutation: pass `fastapi`'s target to any package and this fails.
+    """
+    from click.testing import CliRunner
+    from sqlmodel import Session, SQLModel, create_engine
+
+    from dossier import cli as cli_module
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'd.db'}")
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        _declared(session, "a", "fastapi", ">=0.100.0")
+        _declared(session, "b", "fastapi", ">=0.110.0")
+        _declared(session, "c", "httpx", ">=0.24.0")
+        _declared(session, "d", "httpx", ">=0.27.0")
+
+    monkeypatch.setattr(cli_module, "get_session", lambda: Session(engine))
+
+    result = CliRunner().invoke(cli_module.cli, ["sweep", "httpx"])
+    assert result.exit_code == 0, result.output
+    assert "httpx to 0.27.0" in result.output
+    assert "0.110.0" not in result.output, "it reached for fastapi's version"
+
+
+def test_a_package_nobody_declares_is_said_rather_than_drawn_empty(
+        tmp_path, monkeypatch):
+    """An empty listing is a claim that a sweep would touch nothing."""
+    from click.testing import CliRunner
+    from sqlmodel import Session, SQLModel, create_engine
+
+    from dossier import cli as cli_module
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'd.db'}")
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(cli_module, "get_session", lambda: Session(engine))
+
+    result = CliRunner().invoke(cli_module.cli, ["sweep", "nobody-has-this"])
+    assert result.exit_code == 1
+    assert "No repository declares nobody-has-this" in result.output
