@@ -1964,8 +1964,23 @@ class DossierApp(App):
         self._update_filter_ui()
         self._update_sort_ui()
         
-        # Restore view state - load projects and select last viewed project
-        self._restore_view_state()
+        # **THE SKELETON PAINTS FIRST, THE DATA ARRIVES AFTER.**
+        # `_restore_view_state` builds the whole project tree and selects the
+        # last project, which loads that project's tabs. Called here it ran
+        # before the first frame: two seconds of profile dominated by tree
+        # nodes and ORM rows, with nothing on screen. Responsiveness and data
+        # completeness are not the same requirement, and only one of them has
+        # to be instant.
+        #
+        # `call_after_refresh` runs it once the screen has been painted, so the
+        # shell is up and the sidebar fills in visibly. The tree says it is
+        # loading rather than looking empty -- an empty sidebar is a claim that
+        # there are no projects.
+        try:
+            self.query_one("#project-tree", Tree).loading = True
+        except Exception:                          # noqa: BLE001
+            pass
+        self.call_after_refresh(self._restore_view_state)
 
         # An explicitly requested tab wins over the restored state, and is
         # applied last for that reason: _restore_view_state may select a
@@ -7205,7 +7220,17 @@ class DossierApp(App):
             return bool(session.exec(stmt).one())
 
     def _restore_view_state(self) -> None:
-        """Restore view state from config on app mount."""
+        """Restore view state from config, after the first paint.
+
+        Called through `call_after_refresh` from `on_mount`, so anything here
+        happens with the shell already on screen. It is still on the UI thread:
+        it manipulates widgets throughout, and a thread worker would need every
+        one of those marshalled back.
+        """
+        try:
+            self.query_one("#project-tree", Tree).loading = False
+        except Exception:                          # noqa: BLE001
+            pass
         vs = self._config.view_state
 
         # A restored filter that now matches nothing empties the sidebar with

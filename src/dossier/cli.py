@@ -8,7 +8,6 @@ from typing import Optional
 
 import click
 from sqlmodel import Session, SQLModel, create_engine, select
-from trogon import tui
 
 from dossier.models import (
     DocumentationLevel,
@@ -23,7 +22,6 @@ from dossier.models import (
     ProjectPullRequest,
     ProjectRelease,
 )
-from dossier.parsers import GitHubParser, ParserRegistry
 
 
 # Database setup
@@ -163,6 +161,35 @@ class DossierGroup(click.Group):
     other route. This is the whole class, in one place.
     """
 
+    # **THE COMMAND EXPLORER IS LOADED WHEN IT IS ASKED FOR.** `@tui()` from
+    # trogon decorates the group, so importing this module imported trogon --
+    # 0.21s of a 0.86s import, on every invocation, for a command almost nobody
+    # runs. Registering it here instead means `dossier tui` still exists and
+    # still appears in `--help`, and nothing else pays for it.
+    #
+    # A stated requirement is running on very underpowered hardware, where
+    # import time is the whole of what "start" means.
+    _EXPLORER = "tui"
+
+    def _explorer(self) -> click.Command | None:
+        from trogon import tui as _trogon_tui
+
+        holder = click.Group(name="_holder")
+        _trogon_tui()(holder)
+        return holder.commands.get(self._EXPLORER)
+
+    def get_command(self, ctx, name):
+        if name == self._EXPLORER and name not in self.commands:
+            found = self._explorer()
+            if found is not None:
+                self.add_command(found, self._EXPLORER)
+        return super().get_command(ctx, name)
+
+    def list_commands(self, ctx):
+        # Named without importing, so `--help` lists it and costs nothing.
+        listed = set(super().list_commands(ctx)) | {self._EXPLORER}
+        return sorted(listed)
+
     def invoke(self, ctx):
         from dossier.ratelimit import advice, is_rate_limit
 
@@ -177,7 +204,6 @@ class DossierGroup(click.Group):
             raise
 
 
-@tui()
 @click.group(cls=DossierGroup)
 @click.version_option(version="0.1.0", prog_name="dossier")
 def cli() -> None:
@@ -775,6 +801,8 @@ def parse(project_name: str, path: str) -> None:
             click.echo(f"Error: Project '{project_name}' not found.", err=True)
             raise SystemExit(1)
         
+        from dossier.parsers import ParserRegistry
+
         registry = ParserRegistry.default()
         path_obj = Path(path)
         files_to_parse: list[Path] = []
@@ -938,6 +966,8 @@ def github_sync(
     from dossier.models import utcnow
     
     with get_session() as session:
+        from dossier.parsers import GitHubParser
+
         with GitHubParser(token) as parser:
             click.echo(f"Fetching repository: {repo_url}")
             
@@ -1280,6 +1310,8 @@ def _sync_repos_batch(
         except Exception:
             pass  # Continue without rate info
         
+        from dossier.parsers import GitHubParser
+
         with GitHubParser(token) as parser:
             # Process in batches
             for batch_start in range(0, total, batch_size):
