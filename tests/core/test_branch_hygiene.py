@@ -233,18 +233,40 @@ def test_a_name_nothing_matches_is_none(tmp_path: Path):
 # --- the facet ----------------------------------------------------------------
 
 
-def test_the_facet_has_its_own_tab():
-    """**`BY_TAB` IS KEYED BY TAB, SO TWO FACETS SHARING ONE REPLACES THE
-    FIRST.** Registered on `tab-branches` at first, this silently took over the
-    Branches tab: twelve facets became eleven entries.
+def test_it_shares_the_branches_tab_without_displacing_it():
+    """**A ONE-TO-ONE `BY_TAB` LOST WHICHEVER FACET REGISTERED FIRST.**
+    Pointed at `tab-branches` when it was a plain dict, hygiene silently took
+    the tab over: twelve facets became eleven entries and nothing raised.
 
-    Mutation: point the hygiene facet at another facet's tab and this fails.
+    The tuple is what makes sharing a tab safe, so the guard is no longer
+    "every facet has a tab to itself" -- it is that every facet is reachable
+    through exactly one tab, which still catches a silent replacement.
+
+    Mutation: make `_by_tab` keep only the last facet per tab and this fails.
     """
     from dossier import facets
 
-    assert len(facets.BY_TAB) == len(facets.FACETS)
-    assert facets.BY_TAB["tab-branches"].key == "branches"
-    assert facets.BY_TAB["tab-hygiene"].key == "hygiene"
+    reachable = [f for found in facets.BY_TAB.values() for f in found]
+    assert len(reachable) == len(facets.FACETS), "a facet fell out of BY_TAB"
+    assert len(set(id(f) for f in reachable)) == len(facets.FACETS)
+
+    on_branches = [f.key for f in facets.BY_TAB["tab-branches"]]
+    assert on_branches == ["branches", "hygiene"], on_branches
+    assert "tab-hygiene" not in facets.BY_TAB
+
+
+def test_only_on_refuses_a_shared_tab():
+    """A caller that means one reading must not silently get the earlier one.
+
+    Mutation: return `found[0]` instead of raising and this fails.
+    """
+    import pytest
+
+    from dossier import facets
+
+    assert facets.only_on("tab-issues").key == "issues"
+    with pytest.raises(KeyError):
+        facets.only_on("tab-branches")
 
 
 def test_a_repository_with_no_clone_renders_dashes_not_zeros():

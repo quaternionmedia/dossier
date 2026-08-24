@@ -184,10 +184,8 @@ AVAILABLE_TABS = [
     ("tab-dependencies", "Dependencies"),
     ("tab-contributors", "Contributors"),
     ("tab-issues", "Issues"),
-    ("tab-prs", "Pull Requests"),
     ("tab-releases", "Releases"),
     ("tab-governance", "Governance"),
-    ("tab-components", "Components"),
     ("tab-deltas", "Deltas"),
 ]
 

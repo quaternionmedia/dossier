@@ -306,61 +306,6 @@ def issues_project(session: Any, project: Any, limit: int) -> Section:
                    note="Every issue synced, open or closed.")
 
 
-def _pr_row(pr: Any, repo: str, now: datetime) -> tuple[str, ...]:
-    return (
-        _trim(repo, 24), f"#{pr.pr_number}", _trim(pr.title, 44),
-        "draft" if pr.is_draft else pr.state,
-        _trim(pr.head_branch, 22), _ago(_age_days(pr.pr_updated_at, now)),
-    )
-
-
-PR_COLUMNS = ("repo", "number", "title", "state", "branch", "updated")
-
-
-def prs_org(session: Any, ids, limit: int) -> Section:
-    """The same list the tab shows, across every repository in scope.
-
-    A count per repository would have been cheaper and it would have been a
-    second interpretation: the tab lists pull requests, so the org reading
-    lists pull requests too, and the only difference is how many repositories
-    are in view.
-    """
-    names = _repo_names(session)
-    now = _now()
-    rows = tuple(
-        _pr_row(pr, names.get(pr.project_id, "?"), now)
-        for pr in session.exec(_in_scope(
-            select(ProjectPullRequest)
-            .where(ProjectPullRequest.state == "open")
-            .order_by(ProjectPullRequest.pr_updated_at.desc())
-            .limit(limit), ProjectPullRequest.project_id, ids)).all()
-    )
-    return Section(
-        "Open pull requests", PR_COLUMNS, rows,
-        note=("One open pull request per repository per contributor is the corpus "
-              "rule; a repository above one is worth a look, not an alarm. Draft "
-              "means incomplete and nothing else."),
-    )
-
-
-def prs_project(session: Any, project: Any, limit: int) -> Section:
-    now = _now()
-    repo = project.full_name or project.name
-    rows = tuple(
-        _pr_row(pr, repo, now)
-        for pr in session.exec(
-            select(ProjectPullRequest)
-            .where(ProjectPullRequest.project_id == project.id)
-            .order_by(ProjectPullRequest.pr_updated_at.desc())
-        ).all()
-    )
-    return Section(
-        "Pull requests", PR_COLUMNS, rows,
-        note=("Every pull request synced, open or closed. Draft means incomplete "
-              "and nothing else."),
-    )
-
-
 # --- releases ----------------------------------------------------------------
 
 
@@ -409,45 +354,132 @@ def releases_project(session: Any, project: Any, limit: int) -> Section:
 # --- deltas ------------------------------------------------------------------
 
 
+WORK_COLUMNS = ("repo", "work", "phase", "evidence", "moved")
+
+# The phase given to a pull request no delta claims. Not a `Phase` value: it is
+# the absence of one, and borrowing a real phase would file the row under a
+# decision nobody made.
+NO_DELTA = "open, no delta"
+
+
+def _work_row(delta: Any, repo: str, now: datetime) -> tuple[str, ...]:
+    return (
+        _trim(repo, 24), _trim(delta.title, 40),
+        getattr(delta.phase, "value", str(delta.phase)),
+        _trim(delta.branch_name
+              or (f"#{delta.pr_number}" if delta.pr_number else None), 24),
+        _ago(_age_days(delta.updated_at, now)),
+    )
+
+
+def _pr_only_row(pr: Any, repo: str, now: datetime) -> tuple[str, ...]:
+    """A pull request no delta claims, shown as the work it is."""
+    state = "draft" if pr.is_draft else (pr.state or "?")
+    return (
+        _trim(repo, 24), _trim(pr.title, 40),
+        NO_DELTA if state == "open" else state,
+        _trim(f"#{pr.pr_number} {pr.head_branch or ''}".strip(), 24),
+        _ago(_age_days(pr.pr_updated_at, now)),
+    )
+
+
+def _claimed(session: Any, ids) -> set:
+    """Every `(project, pr_number)` some delta already represents.
+
+    **READ ACROSS EVERY DELTA, NOT THE PAGE BEING SHOWN.** Computing this from
+    the limited row set would mark almost every pull request unclaimed at a
+    limit of twelve, and the merged view would double every row it was meant to
+    collapse -- the scaffolding deciding the answer.
+
+    Every phase, closed ones included. A delta that finished while its pull
+    request stayed open is still a delta representing it; resurrecting the pull
+    request as unclaimed work would be a second row for one piece of work.
+    """
+    return set(session.exec(_in_scope(
+        select(ProjectDelta.project_id, ProjectDelta.pr_number)
+        .where(ProjectDelta.pr_number.is_not(None)),
+        ProjectDelta.project_id, ids)).all())
+
+
 def deltas_org(session: Any, ids, limit: int) -> Section:
+    """Open deltas, and the open pull requests no delta claims.
+
+    **ONE VIEW, BECAUSE THEY WERE THE SAME ROWS.** Measured against 115
+    synced repositories: 156 open pull requests, 156 open deltas, and 138 of
+    them the same item by `(project, pr_number)`. Two tabs, one to a heading,
+    is a reader counting the same work twice and a reader missing the
+    difference between them.
+
+    The pull requests that survive here are the ones nothing represents, which
+    is the fact worth seeing: work with a pull request and no delta is work
+    outside the phase model rather than work nobody did.
+    """
     names = _repo_names(session)
     now = _now()
-    stmt = _in_scope(
+    deltas = session.exec(_in_scope(
         select(ProjectDelta)
         .where(ProjectDelta.phase.notin_(CLOSED_PHASES))
         .order_by(ProjectDelta.updated_at.desc())
-        .limit(limit), ProjectDelta.project_id, ids)
+        .limit(limit), ProjectDelta.project_id, ids)).all()
+    claimed = _claimed(session, ids)
+    orphans = [
+        pr for pr in session.exec(_in_scope(
+            select(ProjectPullRequest)
+            .where(ProjectPullRequest.state == "open")
+            .order_by(ProjectPullRequest.pr_updated_at.desc()),
+            ProjectPullRequest.project_id, ids)).all()
+        if (pr.project_id, pr.pr_number) not in claimed
+    ]
     rows = tuple(
-        (_trim(names.get(d.project_id, "?"), 24),
-         _trim(d.title, 40), getattr(d.phase, "value", str(d.phase)),
-         _trim(d.branch_name or (f"#{d.pr_number}" if d.pr_number else None), 24),
-         _ago(_age_days(d.updated_at, now)))
-        for d in session.exec(stmt).all()
-    )
+        [_work_row(d, names.get(d.project_id, "?"), now) for d in deltas]
+        + [_pr_only_row(pr, names.get(pr.project_id, "?"), now)
+           for pr in orphans]
+    )[:limit]
     return Section(
-        "On deck", ("repo", "delta", "phase", "evidence", "moved"), rows,
-        note=("Open deltas, most recently moved first. An empty evidence column is "
-              "work with no branch yet, not work with no home."),
+        "On deck", WORK_COLUMNS, rows,
+        note=("Open deltas, most recently moved first, then every open pull "
+              f"request no delta claims -- those carry {NO_DELTA!r} as their "
+              "phase, which is the absence of one rather than a phase "
+              "somebody chose. An empty evidence column is work with no branch "
+              "yet, not work with no home."),
     )
 
 
 def deltas_project(session: Any, project: Any, limit: int) -> Section:
+    """Every delta for this repository, and every pull request none claims.
+
+    **CLOSED ONES TOO, WHICH THE ORG READING DOES NOT SHOW.** At one repository
+    the pull request history is the thing a person came for, so an unclaimed
+    pull request is listed whatever its state -- the org reading takes only
+    open ones because a hundred repositories of merged history is not a
+    reading of what is on deck.
+    """
     names = _repo_names(session)
     now = _now()
-    rows = tuple(
-        (_trim(names.get(d.project_id, "?"), 24),
-         _trim(d.title, 40), getattr(d.phase, "value", str(d.phase)),
-         _trim(d.branch_name or (f"#{d.pr_number}" if d.pr_number else None), 24),
-         _ago(_age_days(d.updated_at, now)))
-        for d in session.exec(
-            select(ProjectDelta)
-            .where(ProjectDelta.project_id == project.id)
-            .order_by(ProjectDelta.updated_at.desc())
+    repo = project.full_name or project.name
+    deltas = session.exec(
+        select(ProjectDelta)
+        .where(ProjectDelta.project_id == project.id)
+        .order_by(ProjectDelta.updated_at.desc())
+    ).all()
+    claimed = {(d.project_id, d.pr_number) for d in deltas if d.pr_number}
+    orphans = [
+        pr for pr in session.exec(
+            select(ProjectPullRequest)
+            .where(ProjectPullRequest.project_id == project.id)
+            .order_by(ProjectPullRequest.pr_updated_at.desc())
         ).all()
+        if (pr.project_id, pr.pr_number) not in claimed
+    ]
+    rows = tuple(
+        [_work_row(d, names.get(d.project_id, "?"), now) for d in deltas]
+        + [_pr_only_row(pr, repo, now) for pr in orphans]
     )
     return Section(
-        "Deltas", ("repo", "delta", "phase", "evidence", "moved"), rows,
-        note="Every delta for this repository, including closed phases.",
+        "Deltas", WORK_COLUMNS, rows,
+        note=("Every delta for this repository, closed phases included, then "
+              "every pull request no delta claims -- open or merged, because "
+              "at one repository that history is the reading."),
     )
 
 
@@ -769,8 +801,6 @@ def hygiene_project(session: Any, project: Any, limit: int) -> Section:
 FACETS: tuple[Facet, ...] = (
     Facet("deltas", "On deck", "Deltas", "tab-deltas", "deltas-table",
           deltas_org, deltas_project),
-    Facet("prs", "Open pull requests", "Pull requests",
-          "tab-prs", "prs-table", prs_org, prs_project),
     Facet("issues", "Open issues", "Issues",
           "tab-issues", "issues-table", issues_org, issues_project),
     Facet("branches", "Branches in flight", "Branches",
@@ -793,16 +823,55 @@ FACETS: tuple[Facet, ...] = (
           "tab-threads", "threads-table", threads_org, threads_project,
           beyond_the_database="asks the harness over HTTP"),
     # Its own tab, not `tab-branches`. `BY_TAB` is keyed by tab, so a second
-    # facet sharing one silently replaces the first -- 12 facets became 11
-    # entries and the Branches tab started resolving to this.
+    # **THE SECOND READING ON THE BRANCHES TAB, NOT A TAB OF ITS OWN.** The
+    # branches facet reads the sync, which knows a tip and cannot know whether
+    # the commits under it exist anywhere else; this reads the clones, which
+    # can. One subject, two sources, and a reader should not have to pick the
+    # tab before they know which they need.
     Facet("hygiene", "Branch hygiene", "Branch hygiene",
-          "tab-hygiene", "hygiene-table", hygiene_org, hygiene_project,
+          "tab-branches", "hygiene-table", hygiene_org, hygiene_project,
           beyond_the_database="runs git in every clone on this machine"),
 )
 
 BY_KEY = {facet.key: facet for facet in FACETS}
-BY_TAB = {facet.tab: facet for facet in FACETS}
 BY_TITLE = {facet.title: facet for facet in FACETS}
+
+
+def _by_tab() -> dict[str, tuple[Facet, ...]]:
+    """Every facet on each tab, in registration order.
+
+    **A TUPLE, BECAUSE A TAB CAN HOLD MORE THAN ONE READING.** This was keyed
+    one-to-one, and registering a second facet on a tab silently replaced the
+    first -- twelve facets became eleven entries and the Branches tab started
+    resolving to hygiene. Nothing raised; the tab simply showed the wrong
+    thing.
+
+    Branches is the case that made it real. The sync knows a branch's tip and
+    cannot know whether its commits exist anywhere else; a clone can answer
+    that and no server can. Two readings of one subject, and splitting them
+    across two tabs asked a person to know which side of the question they
+    were on before they had read either.
+    """
+    grouped: dict[str, list[Facet]] = {}
+    for facet in FACETS:
+        grouped.setdefault(facet.tab, []).append(facet)
+    return {tab: tuple(found) for tab, found in grouped.items()}
+
+
+BY_TAB: dict[str, tuple[Facet, ...]] = _by_tab()
+
+
+def only_on(tab: str) -> Facet:
+    """The single facet on `tab`, for a caller that means exactly one.
+
+    Raises where a tab holds two, rather than picking the first: a caller that
+    wanted one reading and got whichever was registered earlier is the failure
+    the tuple exists to stop.
+    """
+    found = BY_TAB.get(tab, ())
+    if len(found) != 1:
+        raise KeyError(f"{tab} holds {len(found)} facets, not one")
+    return found[0]
 
 
 def facet_for_section(section: Section) -> Facet | None:

@@ -112,9 +112,7 @@ PROJECT_TABS = [
     ("tab-dependencies", "Dependencies"),
     ("tab-contributors", "Contributors"),
     ("tab-issues", "Issues"),
-    ("tab-prs", "Pull Requests"),
     ("tab-releases", "Releases"),
-    ("tab-components", "Components"),
 ]
 
 MAIN_TAB_IDS = {tab_id for tab_id, _ in MAIN_TABS}
