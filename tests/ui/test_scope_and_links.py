@@ -179,7 +179,7 @@ async def test_selecting_an_overview_row_opens_the_tab_holding_its_detail(sessio
         await pilot.pause()
         panel = app.query_one(OverviewPanel)
         index = next(i for i, s in enumerate(panel.overview.sections)
-                     if s.title == "Open pull requests")
+                     if s.title == "On deck")
         table = app.query_one(f"#overview-section-{index}", DataTable)
         table.focus()
         table.cursor_coordinate = (0, 0)
@@ -191,7 +191,7 @@ async def test_selecting_an_overview_row_opens_the_tab_holding_its_detail(sessio
         table.action_select_cursor()
         await pilot.pause()
         await pilot.pause()
-        assert app.query_one("#project-tabs").active == "tab-prs"
+        assert app.query_one("#project-tabs").active == "tab-deltas"
         assert app.selected_project.full_name == "org/one", (
             "the row named a repository, so that repository is now selected")
 
@@ -202,9 +202,9 @@ def test_a_row_names_the_repository_it_belongs_to(session):
     from dossier.overview import build
 
     overview = build(session, owner="org")
-    prs = next(s for s in overview.sections if s.title == "Open pull requests")
-    assert prs.headers[0] == "repo"
-    assert prs.rows[0][0] == "org/one"
+    work = next(s for s in overview.sections if s.title == "On deck")
+    assert work.headers[0] == "repo"
+    assert work.rows[0][0] == "org/one"
 
 
 def test_an_org_only_section_links_nowhere(session):

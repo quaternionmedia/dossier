@@ -88,7 +88,9 @@ def extract_file_path(source_file: str | None) -> str | None:
 
 
 from dossier import actions
-from dossier.facets import BY_TAB as FACET_BY_TAB, BY_TITLE as FACET_BY_TITLE
+from dossier.facets import (BY_TAB as FACET_BY_TAB,
+                            BY_TITLE as FACET_BY_TITLE,
+                            only_on)
 from dossier.tui.delta_board import DeltaBoard
 from dossier.tui.intersections_panel import IntersectionsPanel
 
@@ -1034,6 +1036,17 @@ class DossierApp(App):
     #components-table {
         height: 1fr;
     }
+
+    /* The right half of the Dossier tab: the tree, what can be observed
+       beside it, and the flat editable reading of the same links. */
+    #dossier-components {
+        width: 1fr;
+    }
+
+    #hygiene-heading {
+        padding: 1 1 0 1;
+        text-style: bold;
+    }
     """
     
     BINDINGS = [
@@ -1170,8 +1183,27 @@ class DossierApp(App):
                     with TabPane("Dossier", id="tab-dossier"):
                         with Horizontal(id="dossier-layout"):
                             yield VerticalScroll(Markdown("", id="dossier-view"), id="dossier-scroll")
-                            yield DraggableSplitter("dossier-scroll", "component-tree", id="dossier-splitter")
-                            yield Tree("Components", id="component-tree")
+                            yield DraggableSplitter("dossier-scroll", "dossier-components", id="dossier-splitter")
+                            # **THE COMPONENTS TAB, MOVED HERE WHOLE.** It held
+                            # the same parent and child links this tree already
+                            # draws -- five of them across a hundred and fifteen
+                            # repositories -- and a top-level view that thin is
+                            # a cell spent on nothing. The tree keeps the
+                            # hierarchy and the grandchildren; the table is the
+                            # flat, editable reading and the buttons act on it.
+                            # Neither was dropped, because the tree's nodes
+                            # carry navigation and not link identity, and
+                            # selecting one already navigates away.
+                            with Vertical(id="dossier-components"):
+                                yield Tree("Components", id="component-tree")
+                                # What can be observed, above what was declared.
+                                yield IntersectionsPanel(self.session_factory,
+                                                         id="intersections")
+                                yield DataTable(id="components-table")
+                                with Horizontal(id="component-buttons"):
+                                    yield Button("Add Component", id="btn-add-component", variant="primary")
+                                    yield Button("Link as Parent", id="btn-link-parent", variant="default")
+                                    yield Button("Remove", id="btn-remove-component", variant="error")
                     with TabPane("Details", id="tab-details"):
                         yield ProjectDetailPanel(id="project-detail")
                     with TabPane("Documentation", id="tab-docs"):
@@ -1179,17 +1211,21 @@ class DossierApp(App):
                     with TabPane("Languages", id="tab-languages"):
                         yield DataTable(id="languages-table")
                     with TabPane("Branches", id="tab-branches"):
-                        yield DataTable(id="branches-table")
-                    with TabPane("Hygiene", id="tab-hygiene"):
-                        yield DataTable(id="hygiene-table")
+                        with Vertical():
+                            # The sync reading, then the clone reading. Both
+                            # are about branches; only one of them can say
+                            # whether the commits exist anywhere else.
+                            yield DataTable(id="branches-table")
+                            yield Static("Branch hygiene -- read from the "
+                                         "clones on this machine",
+                                         id="hygiene-heading")
+                            yield DataTable(id="hygiene-table")
                     with TabPane("Dependencies", id="tab-dependencies"):
                         yield DataTable(id="dependencies-table")
                     with TabPane("Contributors", id="tab-contributors"):
                         yield DataTable(id="contributors-table")
                     with TabPane("Issues", id="tab-issues"):
                         yield DataTable(id="issues-table")
-                    with TabPane("Pull Requests", id="tab-prs"):
-                        yield DataTable(id="prs-table")
                     with TabPane("Releases", id="tab-releases"):
                         yield DataTable(id="releases-table")
                     # The harness half of the pair: what qmcp reports having
@@ -1258,16 +1294,6 @@ class DossierApp(App):
                             yield DataTable(id="disk-volumes-table")
                             yield Static("", id="disk-delta-age")
                             yield DataTable(id="disk-targets-table")
-                    with TabPane("Components", id="tab-components"):
-                        with Vertical():
-                            # What can be observed, above what was declared.
-                            yield IntersectionsPanel(self.session_factory,
-                                                     id="intersections")
-                            yield DataTable(id="components-table")
-                            with Horizontal(id="component-buttons"):
-                                yield Button("Add Component", id="btn-add-component", variant="primary")
-                                yield Button("Link as Parent", id="btn-link-parent", variant="default")
-                                yield Button("Remove", id="btn-remove-component", variant="error")
                     with TabPane("Deltas", id="tab-deltas"):
                         with Vertical():
                             yield DataTable(id="deltas-table")
@@ -1956,16 +1982,6 @@ class DossierApp(App):
         issues_table.add_columns("#", "Title", "State", "Author", "Labels")
         issues_table.cursor_type = "row"
         
-        # Setup pull requests table columns
-        prs_table = self.query_one("#prs-table", DataTable)
-        prs_table.add_column("#", width=6)
-        prs_table.add_column("Title", width=40)
-        prs_table.add_column("State", width=12)
-        prs_table.add_column("Author", width=15)
-        prs_table.add_column("Base ← Head", width=25)
-        prs_table.add_column("+/-", width=12)
-        prs_table.cursor_type = "row"
-        
         # Setup releases table columns
         releases_table = self.query_one("#releases-table", DataTable)
         releases_table.add_column("Tag", width=15)
@@ -2603,7 +2619,7 @@ class DossierApp(App):
                     return
                 open_count = sum(1 for p in project_prs if p.state == "open")
                 prs_folder = parent_node.add(f"🔀 Pull Requests ({len(project_prs)}, {open_count} open)", expand=False)
-                prs_folder.data = {"type": "section", "section": "tab-prs"}
+                prs_folder.data = {"type": "section", "section": "tab-deltas"}
                 for pr in project_prs[:15]:
                     if pr.is_merged:
                         state_icon = "🟣"
@@ -2626,7 +2642,7 @@ class DossierApp(App):
                     }
                 if len(project_prs) > 15:
                     more = prs_folder.add_leaf(f"... {len(project_prs) - 15} more")
-                    more.data = {"type": "section", "section": "tab-prs"}
+                    more.data = {"type": "section", "section": "tab-deltas"}
             
             def add_releases_to_node(parent_node, project):
                 """Add releases as children of a project node."""
@@ -3555,10 +3571,11 @@ class DossierApp(App):
 
         # A facet reads the same table at either scope, so the tab does not
         # need to know which one it is showing -- only which facet it holds.
-        facet = FACET_BY_TAB.get(tab_id)
+        on_tab = FACET_BY_TAB.get(tab_id, ())
         owner = getattr(self, "_scope_owner", None)
-        if facet is not None and owner:
-            self._render_facet_at_org(facet, owner)
+        if on_tab and owner:
+            for facet in on_tab:
+                self._render_facet_at_org(facet, owner)
             return
 
         # TABS THAT ARE NOT ABOUT A REPOSITORY LOAD BEFORE THE SELECTION GATE.
@@ -3584,13 +3601,10 @@ class DossierApp(App):
             "tab-docs": self._load_docs_tab,
             "tab-languages": self._load_languages_tab,
             "tab-branches": self._load_branches_tab,
-            "tab-hygiene": self._load_hygiene_tab,
             "tab-dependencies": self._load_dependencies_tab,
             "tab-contributors": self._load_contributors_tab,
             "tab-issues": self._load_issues_tab,
-            "tab-prs": self._load_prs_tab,
             "tab-releases": self._load_releases_tab,
-            "tab-components": self._load_components_tab,
             "tab-deltas": self._load_deltas_tab,
             # Reads the harness over HTTP rather than the database, so it takes
             # no project -- the archive is not scoped to one repository.
@@ -3696,7 +3710,7 @@ class DossierApp(App):
         too. Two queries over one table drift into two vocabularies for
         the same column, and nothing fails when they do.
         """
-        self._render_facet_for_project(FACET_BY_TAB["tab-languages"], project)
+        self._render_facet_for_project(only_on("tab-languages"), project)
 
     def _load_branches_tab(self, project: Project) -> None:
         """Render the `branches` facet for one repository.
@@ -3705,17 +3719,64 @@ class DossierApp(App):
         too. Two queries over one table drift into two vocabularies for
         the same column, and nothing fails when they do.
         """
-        self._render_facet_for_project(FACET_BY_TAB["tab-branches"], project)
+        from dossier.facets import BY_KEY
 
-    def _load_hygiene_tab(self, project=None) -> None:
-        """Render the `hygiene` facet: which branches only this machine has.
+        self._render_facet_for_project(BY_KEY["branches"], project)
+        self._begin_hygiene_reading(project)
 
-        Unscoped when no project is given, like Threads and Topology. Branch
-        hygiene is a property of the clones on this disk rather than of one
-        repository, and the question it answers -- what would be lost if this
-        machine died -- is the same question at either scope.
+    def _begin_hygiene_reading(self, project=None) -> None:
+        """Fill the second table on the Branches tab, off the UI thread.
+
+        **THE SYNC READING IS ON SCREEN BEFORE THIS STARTS.** Hygiene spawns
+        git in every clone on the machine -- the cost the overview was taught
+        not to pay on its startup path -- and process spawn is what grows worst
+        on the hardware this has to run on. Rendering both readings inline
+        would make opening Branches as slow as the slowest disk on the box.
+
+        So the tab paints the sync immediately, marks the second table loading,
+        and reads the clones in a worker. Responsiveness and data completeness
+        are not the same requirement.
         """
-        self._render_facet_for_project(FACET_BY_TAB["tab-hygiene"], project)
+        from dossier.facets import BY_KEY
+
+        try:
+            table = self.query_one(f"#{BY_KEY['hygiene'].table}", DataTable)
+        except Exception:
+            return
+        table.loading = True
+        self._read_hygiene(project)
+
+    @work(thread=True, exclusive=True, group="hygiene")
+    def _read_hygiene(self, project=None) -> None:
+        from dossier.facets import BY_KEY
+
+        facet = BY_KEY["hygiene"]
+        try:
+            with self.session_factory() as session:
+                section = facet.at(session, project=project,
+                                   limit=self.TAB_ROWS)
+        except Exception as exc:                  # noqa: BLE001
+            self.call_from_thread(self._hygiene_failed, f"{exc}")
+            return
+        self.call_from_thread(self._hygiene_read, facet, section)
+
+    def _hygiene_read(self, facet, section) -> None:
+        self._render_section(facet.table, section)
+        try:
+            self.query_one(f"#{facet.table}", DataTable).loading = False
+        except Exception:
+            pass
+
+    def _hygiene_failed(self, said: str) -> None:
+        from dossier.facets import BY_KEY
+
+        try:
+            table = self.query_one(f"#{BY_KEY['hygiene'].table}", DataTable)
+        except Exception:
+            return
+        table.loading = False
+        self.notify(f"the clones could not be read: {said}",
+                    severity="error", title="Branch hygiene", timeout=8)
 
     def _load_dependencies_tab(self, project: Project) -> None:
         """Render the `dependencies` facet for one repository.
@@ -3724,7 +3785,7 @@ class DossierApp(App):
         too. Two queries over one table drift into two vocabularies for
         the same column, and nothing fails when they do.
         """
-        self._render_facet_for_project(FACET_BY_TAB["tab-dependencies"], project)
+        self._render_facet_for_project(only_on("tab-dependencies"), project)
 
     def _load_contributors_tab(self, project: Project) -> None:
         """Render the `contributors` facet for one repository.
@@ -3733,7 +3794,7 @@ class DossierApp(App):
         too. Two queries over one table drift into two vocabularies for
         the same column, and nothing fails when they do.
         """
-        self._render_facet_for_project(FACET_BY_TAB["tab-contributors"], project)
+        self._render_facet_for_project(only_on("tab-contributors"), project)
 
     def _load_issues_tab(self, project: Project) -> None:
         """Render the `issues` facet for one repository.
@@ -3742,16 +3803,8 @@ class DossierApp(App):
         too. Two queries over one table drift into two vocabularies for
         the same column, and nothing fails when they do.
         """
-        self._render_facet_for_project(FACET_BY_TAB["tab-issues"], project)
+        self._render_facet_for_project(only_on("tab-issues"), project)
 
-    def _load_prs_tab(self, project: Project) -> None:
-        """Render the `prs` facet for one repository.
-
-        The query lives in `dossier.facets`, which the overview reads
-        too. Two queries over one table drift into two vocabularies for
-        the same column, and nothing fails when they do.
-        """
-        self._render_facet_for_project(FACET_BY_TAB["tab-prs"], project)
 
     def _load_releases_tab(self, project: Project) -> None:
         """Render the `releases` facet for one repository.
@@ -3760,7 +3813,7 @@ class DossierApp(App):
         too. Two queries over one table drift into two vocabularies for
         the same column, and nothing fails when they do.
         """
-        self._render_facet_for_project(FACET_BY_TAB["tab-releases"], project)
+        self._render_facet_for_project(only_on("tab-releases"), project)
 
     @staticmethod
     def _disk_size(count) -> str:
@@ -4748,10 +4801,7 @@ class DossierApp(App):
         # `threads_org` because an archive is not scoped to a repository, so
         # both scopes see the same rows -- which is the honest answer and not a
         # shortcut.
-        facet = BY_TAB.get("tab-threads")
-        if facet is None:
-            return
-        self._render_facet_for_project(facet, project)
+        self._render_facet_for_project(only_on("tab-threads"), project)
 
     def _load_deltas_tab(self, project: Project) -> None:
         """Load deltas tab."""
@@ -4995,8 +5045,10 @@ class DossierApp(App):
             
             dossier_md.update("\n".join(md_lines))
         
-        # Load component tree
+        # Load component tree, and the flat reading beside it. Both live on
+        # this tab now, so this is what fills them.
         self._load_component_tree(project)
+        self._load_components_tab(project)
     
     def _load_component_tree(self, project: Project) -> None:
         """Load the component hierarchy tree.
@@ -5588,7 +5640,7 @@ class DossierApp(App):
                 "releases": "tab-releases",
                 "branches": "tab-branches",
                 "issues": "tab-issues",
-                "prs": "tab-prs",
+                "prs": "tab-deltas",
             }
             tab_id = tab_map.get(section)
             if tab_id:
@@ -5967,40 +6019,6 @@ class DossierApp(App):
                     "url": url,
                 })
     
-    @on(DataTable.RowSelected, "#prs-table")
-    def on_prs_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Handle PRs table row selection - show in viewer."""
-        if not self.selected_project or event.row_key.value == "empty":
-            return
-        
-        # Extract PR number from row key (format: "pr-{number}")
-        row_key = str(event.row_key.value)
-        if not row_key.startswith("pr-"):
-            return
-        
-        try:
-            pr_number = int(row_key.replace("pr-", ""))
-        except ValueError:
-            return
-        
-        # Fetch PR details and link to entity
-        with self.session_factory() as session:
-            pr = session.exec(
-                select(ProjectPullRequest)
-                .where(ProjectPullRequest.project_id == self.selected_project.id)
-                .where(ProjectPullRequest.pr_number == pr_number)
-            ).first()
-            if pr:
-                url = self.selected_project.github_pulls_url(pr_number)
-                self._link_pr_project({
-                    "number": pr_number,
-                    "title": pr.title,
-                    "is_merged": pr.is_merged,
-                    "project_id": self.selected_project.id,
-                    "owner": self.selected_project.github_owner,
-                    "repo": self.selected_project.github_repo,
-                    "url": url,
-                })
     
     @on(DataTable.RowSelected, "#releases-table")
     def on_releases_table_row_selected(self, event: DataTable.RowSelected) -> None:
@@ -7173,12 +7191,16 @@ class DossierApp(App):
         # Focus follows the reader to the destination. Without this the tab
         # switches and switches back: focus is still on the overview's table,
         # which lives in the overview pane, and the pane holding focus wins.
-        facet = FACET_BY_TAB.get(tab)
-        if facet is not None:
+        # The first reading on the tab. Where a tab holds two -- Branches
+        # holds the sync and the clones -- the first is the one that is
+        # already filled, and focusing a table still loading is a cursor on
+        # nothing.
+        for facet in FACET_BY_TAB.get(tab, ()):
             try:
                 self.query_one(f"#{facet.table}", DataTable).focus()
             except Exception:
                 pass
+            break
 
     def _render_section(self, table_id: str, section) -> None:
         """Draw a `Section` into a `DataTable`, whatever scope produced it.

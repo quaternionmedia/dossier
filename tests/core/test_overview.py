@@ -113,7 +113,28 @@ def test_claim_and_evidence_stay_in_separate_columns(session):
 
 def test_on_deck_excludes_closed_phases(session):
     rows = ov.build(session, now=NOW).section("On deck").rows
-    assert [r[1] for r in rows] == ["Open work"]
+    phases = {r[1]: r[2] for r in rows}
+    assert "Open work" in phases
+    assert "Closed work" not in phases, "a closed delta is not on deck"
+
+
+def test_a_pull_request_no_delta_claims_is_still_on_deck(session):
+    """THE HALF THE MERGE COULD HAVE DROPPED.
+
+    `On deck` absorbed the pull requests tab because 138 of 156 rows were the
+    same item. The 18 that were not are work outside the phase model, and a
+    merge that showed only deltas would have deleted them from the reading
+    while looking tidier.
+
+    Mutation: list only deltas in `deltas_org` and this fails.
+    """
+    from dossier.facets import NO_DELTA
+
+    rows = ov.build(session, now=NOW).section("On deck").rows
+    unclaimed = [r for r in rows if r[2] == NO_DELTA]
+    assert unclaimed, "an open pull request with no delta vanished"
+    assert all(r[3].startswith("#") for r in unclaimed), (
+        "an unclaimed pull request must carry its number as its evidence")
 
 
 def test_every_phase_is_listed_even_at_zero(session):
