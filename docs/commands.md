@@ -6,10 +6,7 @@ regenerating rides the ordinary test command.
 
 ## The number is the keystroke
 
-`8.6.6` is not a name somebody gave to the sweep. It is the keys: `8`
-opens **Go**, `6` is **Work**, `6` is **Sweep**. Press `m` to open the
-ring, then the digits -- so the sweep is **`m` `8` `6` `6`**, from
-anywhere in the application.
+`8.8.9` is not a name somebody gave to Languages. It is the keys: `8` is **Go**, `8` is **Repositories**, and the last one is **Languages** itself. Press `m` to open the ring, then the digits -- so Languages is `m` `8` `8` `9`, from anywhere in the application.
 
 `5` is the centre. It backs out one level, or closes the ring, at every
 depth -- so it is never an item and no number contains it. Arrows and

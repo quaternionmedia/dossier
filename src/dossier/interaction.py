@@ -59,6 +59,16 @@ FROM_SWEEP = "sweep"
 FROM_ARCHIVE = "archive"
 
 
+def _no_menu(action: str) -> str:
+    """The route when nobody offered one.
+
+    Empty rather than a guess: a menu is optional here, and an interaction that
+    invented `m 6 4` on a host with no ring would be telling somebody to press
+    keys that do nothing.
+    """
+    return ""
+
+
 @dataclass(frozen=True)
 class Interaction:
     """One thing wanted from a person."""
@@ -171,13 +181,22 @@ def from_harness_asks(rows: Iterable[Any]) -> list[Interaction]:
     return found
 
 
-def from_sweep_review(review: Any) -> list[Interaction]:
+def from_sweep_review(review: Any,
+                      route_for: Callable[[str], str] = _no_menu
+                      ) -> list[Interaction]:
     """A sweep's batches and its queue.
 
     A batch is **one** interaction covering N repositories, which is the whole
     reason the batching exists. Emitting one per repository here would undo it
     two layers above where it was decided.
     """
+    # **ASKED FOR, NOT IMPORTED.** These routes were literals. They happened
+    # to be right -- `Do` was never reordered -- and would have been wrong the
+    # day it was, with nothing anywhere to say so. Reading them from the menu
+    # directly would make an optional mechanism a required one, which is the
+    # seam this layer exists on, so the host hands the answer in.
+    to_the_sweep = route_for("sweep.review")
+
     found = []
     for index, batch in enumerate(getattr(review, "batches", []) or []):
         found.append(Interaction(
@@ -187,7 +206,7 @@ def from_sweep_review(review: Any) -> list[Interaction]:
             source=FROM_SWEEP,
             options=("approve", "hold"),
             covers=batch.size,
-            route="m 6 4",
+            route=to_the_sweep,
             detail=", ".join(item.repo for item in batch.items),
         ))
     for item in getattr(review, "queue", []) or []:
@@ -196,16 +215,19 @@ def from_sweep_review(review: Any) -> list[Interaction]:
             kind=DECIDE,
             prompt=f"{item.repo}: {item.detail}",
             source=FROM_SWEEP,
-            route="m 6 4",
+            route=to_the_sweep,
         ))
     return found
 
 
-def needs_an_export(archive: Any) -> list[Interaction]:
+def needs_an_export(archive: Any,
+                    route_for: Callable[[str], str] = _no_menu
+                    ) -> list[Interaction]:
     """An archive nobody has put anything into yet.
 
     `provide`, because no list of options contains a path on somebody's disk.
     """
+
     if getattr(archive, "reachable", False) and getattr(archive, "indexed", False):
         return []
     return [Interaction(
@@ -213,7 +235,7 @@ def needs_an_export(archive: Any) -> list[Interaction]:
         kind=PROVIDE,
         prompt="the thread archive has nothing indexed; point at an export",
         source=FROM_ARCHIVE,
-        route="m 4 6",
+        route=route_for("reach.ingest"),
     )]
 
 

@@ -339,7 +339,7 @@ There are **10** workflows here, **7** of which stop for a person. **4** are ske
    dossier dashboard
    ```
 
-   Then `m` `8` `6` `6`. The panel groups the shares into batches, each of which is one identical edit.
+   Then `m` `6` `4`. The panel groups the shares into batches, each of which is one identical edit.
 
 4. 🧍 **Approve a batch**
 
