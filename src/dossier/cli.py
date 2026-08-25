@@ -868,6 +868,57 @@ def overview(owner: Optional[str], limit: int, only: Optional[str],
 
 
 @cli.command()
+@click.option("--name", "-n", default=None,
+              help="One workflow by name, case-insensitive substring.")
+@click.option("--write", type=click.Path(), default=None,
+              help="Write the generated page to this path.")
+def cookbook(name, write):
+    """Project and git workflows, with the person marked.
+
+    Short, repeatable, composable, and every one of them stops somewhere for a
+    human -- or says why it does not. `dossier disk cookbook` is the other one,
+    for keeping the workstation off the floor.
+    """
+    from dossier.cookbook import WORKFLOWS, as_markdown
+
+    if write:
+        Path(write).write_text(as_markdown(), encoding="utf-8")
+        click.echo(f"Wrote {write}")
+        return
+
+    found = [w for w in WORKFLOWS
+             if not name or name.lower() in w.name.lower()]
+    if not found:
+        click.echo(f"No workflow matching {name!r}.", err=True)
+        raise SystemExit(1)
+
+    for workflow in found:
+        mark = "" if workflow.state == "worked through" else "   (a sketch)"
+        click.echo("")
+        click.echo(f"{workflow.name}{mark}")
+        click.echo(f"  {workflow.intent}")
+        click.echo("")
+        for index, step in enumerate(workflow.steps, start=1):
+            if step.is_gate:
+                click.echo(f"  {index}. [you decide] {step.does}")
+                click.echo(f"        {step.decides}")
+            else:
+                click.echo(f"  {index}. {step.does}")
+                click.echo(f"        $ {step.command}")
+                if step.in_project:
+                    click.echo(f"        $ {step.in_project}"
+                               f"   (in a project repository)")
+            if step.says:
+                click.echo(f"        {step.says}")
+        if workflow.follows:
+            click.echo(f"  follows: {', '.join(workflow.follows)}")
+        if workflow.feeds:
+            click.echo(f"  feeds:   {', '.join(workflow.feeds)}")
+        if workflow.cannot:
+            click.echo(f"  cannot:  {workflow.cannot}")
+
+
+@cli.command()
 @click.argument("view", required=False)
 @click.option("--project", "-p", default=None,
               help="One repository by name. Default: every repository.")

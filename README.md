@@ -42,6 +42,22 @@ uv run dossier github sync-user YOUR_USERNAME && uv run dossier dashboard
 
 ---
 
+## The workflows
+
+Short, repeatable, composable, and **every one of them stops somewhere for a
+person** — because a workflow whose human step is implicit is how somebody ends
+up approving nine things having read seven.
+
+```sh
+dossier cookbook
+dossier cookbook --name 'Start a slice'
+```
+
+[The whole cookbook](docs/cookbook.md) — starting a slice, checking what a
+branch actually carries, running the gates locally, opening and merging your own
+pull request, cutting a tag, sweeping a dependency, retiring a branch. Sketches
+are marked as sketches.
+
 ## Why Dossier?
 
 **Feeling tired of context-switching between Jira, GitHub, Notion, and spreadsheets?** Dossier unifies project tracking into a single, data-modeled interface that:
