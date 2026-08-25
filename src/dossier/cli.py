@@ -1018,6 +1018,135 @@ def clone_cmd(repo, everything, into, depth, yes):
     click.echo(summarise(outcomes))
 
 
+@cli.command("trim")
+@click.argument("repo")
+@click.option("--delete", is_flag=True, default=False,
+              help="Remove them. Without this nothing is removed.")
+@click.option("--path", type=click.Path(path_type=Path), default=None,
+              help="The clone to read, when it is not beside this one.")
+@click.option("--only", multiple=True,
+              help="Trim only these branches. Repeatable. Nothing outside the "
+                   "plan is ever removed, so naming a kept branch does nothing.")
+def trim_cmd(repo: str, delete: bool, path: Path | None, only: tuple[str, ...]):
+    """Local branches already in REPO's default branch.
+
+    Lists and stops. `--delete` removes them, and a dry run is what this does
+    unless told otherwise -- the same shape as `dossier clone`, mirrored: that
+    one writes to a disk and this one removes from it.
+
+    **A branch is trimmable when its tip is an ancestor of `origin/main`**, so
+    every commit on it is already there. A branch that reached `main` by squash
+    or rebase has no such link and is reported rather than removed. **No remote
+    branch is touched**, with or without `--delete`.
+
+    This command makes no network request and reads no API. It runs `git` in a
+    clone on this machine.
+    """
+    from dossier.branches import find_clone
+    from dossier.trim import execute, plan, render
+
+    where = path or find_clone(repo)
+    if where is None:
+        click.echo(f"No clone of {repo!r} beside this one. Pass --path to "
+                   f"name it, or `dossier clone {repo}` to make one.", err=True)
+        raise SystemExit(1)
+
+    plan_ = plan(repo, where)
+    if not plan_.readable:
+        click.echo(render(plan_), err=True)
+        raise SystemExit(1)
+
+    if not delete:
+        click.echo(render(plan_))
+        return
+
+    if not plan_.trimmable:
+        click.echo(render(plan_))
+        return
+
+    removals = execute(plan_, only=only)
+    click.echo(render(plan_, removals))
+
+    # **THE RESULT OF A SWEEP IS A DELTA.** `dossier.sweep` states the rule and
+    # this follows it: eighteen branches removed in one pass is one unit of
+    # work with eighteen parts, not eighteen chores that happened together.
+    # Recorded only when something was actually removed -- a sweep that removed
+    # nothing produced no work, and a delta for it would be a unit of work
+    # nobody did.
+    address = _record_trim_delta(repo, plan_, removals) if any(
+        r.removed for r in removals) else None
+    if address:
+        click.echo("")
+        click.echo(f"  Recorded as {address}")
+        click.echo("")
+        _show_delta(address)
+
+    # A refusal exits non-zero. git disagreeing with this module's own claim
+    # that a branch is merged is a defect here, and a caller that recorded
+    # success would bury it.
+    if any(not r.removed for r in removals):
+        raise SystemExit(1)
+
+
+def _record_trim_delta(repo: str, plan_, removals) -> str | None:
+    """Store one trim as a delta and return its address, or None with a reason.
+
+    **A TRIM THAT CANNOT BE RECORDED IS STILL A TRIM THAT HAPPENED.** The
+    branches are already gone by the time this runs, so failing to find the
+    project is reported and never raised -- the alternative is a traceback
+    after a successful removal, which reads as though the removal failed.
+    """
+    from sqlmodel import select
+
+    from dossier.models import utcnow
+    from dossier.models.schemas import DeltaPhase, Project, ProjectDelta
+    from dossier.trim import as_delta
+
+    fields = as_delta(plan_, removals)
+    with get_session() as session:
+        project = session.exec(
+            select(Project).where(Project.name == repo)).first()
+        if project is None:
+            project = session.exec(
+                select(Project).where(Project.full_name.contains(repo))).first()
+        if project is None:
+            click.echo("")
+            click.echo(f"  No project named {repo!r} in this database, so the "
+                       f"trim was not recorded as a delta. The restore "
+                       f"commands above are the only copy.", err=True)
+            return None
+
+        existing = session.exec(
+            select(ProjectDelta)
+            .where(ProjectDelta.project_id == project.id)
+            .where(ProjectDelta.name == fields["name"])).first()
+        # The name is content-addressed, so re-running a trim that removed the
+        # same branches finds the delta it already made rather than a second.
+        delta = existing or ProjectDelta(project_id=project.id, **fields)
+        # Complete on arrival: the work was done before this line ran, and a
+        # phase claiming otherwise would be a claim about the future.
+        delta.phase = DeltaPhase.COMPLETE
+        delta.completed_at = utcnow()
+        session.add(delta)
+        session.commit()
+        session.refresh(delta)
+        owner = (project.full_name or f"local/{project.name}").split("/")[0]
+        return f"{owner}/{project.name}/delta/{delta.name}"
+
+
+def _show_delta(address: str) -> None:
+    """Navigate to one delta's overview, which in a terminal means showing it.
+
+    **THE SAME VIEW `dossier deltas compose` PRINTS, CALLED RATHER THAN
+    COPIED.** A second rendering here would be a second place the delta
+    overview is defined, and the two would disagree the first time one was
+    fixed. A sweep that told somebody to go and look somewhere else would also
+    be a sweep that left its last step undone.
+    """
+    click.echo("  " + "-" * 60)
+    deltas_compose.callback(address)
+
+
 @cli.command()
 @click.option("--name", "-n", default=None,
               help="One workflow by name, case-insensitive substring.")
