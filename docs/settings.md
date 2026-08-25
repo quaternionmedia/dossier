@@ -6,6 +6,10 @@
 
 Press `` ` `` (backtick) anywhere in the dashboard to open the settings overlay.
 
+<p align="center">
+  <img src="screenshots/dashboard_settings.svg" alt="The settings overlay: theme, tab visibility and tree density" width="800">
+</p>
+
 ## Quick Access
 
 ```bash
