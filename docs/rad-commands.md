@@ -38,7 +38,7 @@ same cell.
 | `8.6.8` | `m` `8` `6` `8` | &nbsp;&nbsp;&nbsp;&nbsp;On deck | `view.deltas` | yes |
 | `8.6.6` | `m` `8` `6` `6` | &nbsp;&nbsp;&nbsp;&nbsp;Sweep | `view.sweep` | yes |
 | `8.6.2` | `m` `8` `6` `2` | &nbsp;&nbsp;&nbsp;&nbsp;Issues | `view.issues` | yes |
-| `8.6.4` | `m` `8` `6` `4` | &nbsp;&nbsp;&nbsp;&nbsp;Waiting | `view.waiting` | yes |
+| `8.6.4` | `m` `8` `6` `4` | &nbsp;&nbsp;&nbsp;&nbsp;Outstanding | `view.waiting` | yes |
 | `8.2` | `m` `8` `2` | &nbsp;&nbsp;Code | *opens a submenu* | yes |
 | `8.2.8` | `m` `8` `2` `8` | &nbsp;&nbsp;&nbsp;&nbsp;Branches | `view.branches` | yes |
 | `8.2.6` | `m` `8` `2` `6` | &nbsp;&nbsp;&nbsp;&nbsp;Dependencies | `view.dependencies` | yes |
