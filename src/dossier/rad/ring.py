@@ -145,9 +145,42 @@ class Ring(Static):
 
     last_render: str = ""
 
+    # Where the cells landed the last time this was drawn: `(width, columns,
+    # rows)`, in the widget's own coordinates.
+    #
+    # **KEPT RATHER THAN RECOMPUTED.** The box width depends on the longest
+    # label at that level, so a second derivation would have to know the view
+    # as well as the geometry -- and a pointer that lands one cell over from
+    # where a person clicked is worse than a ring with no pointer at all.
+    last_geometry: tuple[int, list[int], list[int]] | None = None
+
+    # How tall one cell's box is. `_box` draws three lines and the layout steps
+    # four, so the fourth is the gap between rows.
+    CELL_ROWS = 3
+
     def __init__(self, theme: str = DEFAULT_THEME, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.roles: Roles = roles(theme)
+
+    def cell_at(self, x: int, y: int) -> int | None:
+        """The numpad cell containing a point, or None for the gaps.
+
+        None is a real answer: the gaps between the boxes belong to no cell,
+        and a click that landed in one has to do nothing rather than pick the
+        nearest. Snapping would make the ring act on a cell the person did not
+        press, which is exactly what a menu must never do.
+        """
+        if self.last_geometry is None:
+            return None
+        width, column_at, row_at = self.last_geometry
+
+        column = next((index for index, left in enumerate(column_at)
+                       if left <= x < left + width), None)
+        row = next((index for index, top in enumerate(row_at)
+                    if top <= y < top + self.CELL_ROWS), None)
+        if column is None or row is None:
+            return None
+        return numpad.CELL_AT.get((column, row))
 
     def render_view(self, view: RingView) -> str:
         """Rich markup for the nine cells. Every colour is a role token.
@@ -184,6 +217,7 @@ class Ring(Static):
         gap = 2
         column_at = [column * (width + gap) for column in range(3)]
         row_at = [row * 4 for row in range(3)]
+        self.last_geometry = (width, column_at, row_at)
 
         cols = column_at[-1] + width
         rows = row_at[-1] + 3 + 2  # room for the depth marks underneath
@@ -344,6 +378,59 @@ class RingScreen(ModalScreen):
             f"enter {act}  ·  esc back  ·  [/]"
             f"[{self._roles.cost}]{cost} in[/]"
         )
+
+    def on_click(self, event) -> None:
+        """A click on a cell is the same input as pressing its digit.
+
+        **ROUTED THROUGH `press_cell`, WHICH IS THE POINT.** This module's rule
+        is that every input goes through the session so it is metered exactly
+        once; a click handled here would be an input rad never charged for, and
+        the IPA figure would be quietly too low for anybody using a mouse.
+
+        Before this the ring had no pointer support at all -- no click handler
+        anywhere in the file -- so a person who reached for the menu with a
+        mouse could open it and then not use it.
+        """
+        event.stop()
+        cell = self._cell_under(event)
+        if cell is None:
+            return
+        if cell == numpad.BACK:
+            # The centre backs out, at every depth, exactly as the key does.
+            view = self._session.back()
+            if view is None:
+                self.dismiss(None)
+                return
+            self._redraw(view)
+            return
+
+        intent = self._session.press_cell(cell)
+        if intent is not None:
+            self.dismiss(intent)
+            return
+        view = self._session.view
+        if view is None:
+            self.dismiss(None)
+            return
+        self._redraw(view)
+
+    def _cell_under(self, event) -> int | None:
+        """The cell a click landed on, in the ring widget's coordinates.
+
+        The event arrives in screen coordinates and the geometry is the
+        widget's, so the offset between them has to come off. Reading the
+        widget's region rather than assuming it sits at the origin: it is
+        centred, so those differ by half the terminal.
+        """
+        try:
+            region = self._ring.region
+        except Exception:                          # noqa: BLE001
+            return None
+        x = event.screen_x - region.x
+        y = event.screen_y - region.y
+        if x < 0 or y < 0:
+            return None
+        return self._ring.cell_at(x, y)
 
     def on_key(self, event) -> None:
         key = event.key
