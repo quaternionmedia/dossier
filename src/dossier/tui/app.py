@@ -1526,7 +1526,8 @@ class DossierApp(App):
             loaded.discard(tab_id)
         self._load_tab_data(tab_id)
 
-    # Which dependency `6.4` reviews when nobody has said. The widest-shared
+    # Which dependency `sweep.review` acts on when nobody has said. The
+    # widest-shared
     # one is not a default so much as the only starting point that is not
     # arbitrary: it is where one decision saves the most repeated ones, and
     # where getting it wrong costs the most, and those are the same number.
@@ -1549,8 +1550,21 @@ class DossierApp(App):
     is also the moment a person means.
     """
 
+    def _sweep_follows_the_selection(self) -> None:
+        """Tell the Sweep tab what was just chosen, without opening it.
+
+        A person choosing a dependency has said what they mean; making them
+        press the review to find out whether it registered is asking them to
+        run the thing to read its input.
+        """
+        try:
+            self._load_sweep_tab(None)
+        except Exception:                          # noqa: BLE001
+            # The tab may not be composed yet on an early selection.
+            pass
+
     def _begin_sweep_review(self) -> None:
-        """`6.4`. Review a shared dependency across the organisation.
+        """`sweep.review`. Review a shared dependency across the organisation.
 
         Opens the tab first and fills it from a worker: the sweep reads every
         declared dependency in the database and runs a worker per share, which
@@ -4822,8 +4836,24 @@ class DossierApp(App):
         review = self._sweep_review
         if review is None:
             table.add_row("--", "no sweep asked for yet", "--", key="empty")
-            self.query_one("#sweep-summary", Static).update(
-                "Press [b]m 6 4[/b] to review a sweep.")
+            from dossier.rad.index import keystroke
+
+            keys = " ".join(f"[b]{k}[/b]" for k in
+                            keystroke("sweep.review").split())
+            # The same order the review resolves in -- typed, then chosen.
+            # Reversed here, the tab named the selection while the review
+            # acted on what was typed.
+            waiting = self._sweep_typed or self.selected_dependency
+            said = f"Press {keys} to review a sweep."
+            if waiting:
+                # **WHAT IT WOULD TAKE, BEFORE IT IS PRESSED.** A person who
+                # chose a dependency and then opened this tab was shown a
+                # keystroke and no indication that the choice had registered.
+                said += f" Chosen: [b]{waiting}[/b]."
+            else:
+                said += (" Nothing chosen, so it would take the widest-shared "
+                         "package.")
+            self.query_one("#sweep-summary", Static).update(said)
             self.query_one("#sweep-note", Static).update("")
             return
 
@@ -5927,6 +5957,41 @@ class DossierApp(App):
             url=url
         ))
     
+    def _cannot_without_a_repository(self, what: str, *,
+                                     ambiguous: bool = False) -> None:
+        """Say why a row cannot be opened at organisation scope.
+
+        **SIX HANDLERS WENT QUIET AT ONCE**, and the change that did it was a
+        fix: selecting an owner now clears `selected_project` as its docstring
+        always claimed. Before that these ran against whichever repository was
+        chosen last -- opening the wrong repository's issue, or filing a
+        dependency under a repository nobody was looking at. Wrong data beat
+        silence only in the sense that something happened.
+
+        **AND ONLY ONE OF THE SIX GENUINELY CANNOT.** Issues key on
+        `issue-{number}`, which is that repository's own numbering; the other
+        five key on database ids that name their repository without help, so
+        the reading is reachable and it is the handler that has not been
+        taught. `ambiguous` is which of those two a person is being told,
+        because "cannot" and "not yet" are different answers and a blanket
+        message asserted the first about tables where the second is true.
+
+        Until then this is the difference between a control that is refusing
+        and a control that is broken.
+        """
+        if ambiguous:
+            self.notify(
+                f"Select a repository to open {what} -- these rows carry that "
+                f"repository's own numbering, so the organisation view cannot "
+                f"say which one this is.",
+                severity="warning", timeout=6)
+            return
+        self.notify(
+            f"Select a repository to open {what} -- this row knows which one "
+            f"it belongs to, and opening it from the organisation view is not "
+            f"wired yet.",
+            severity="warning", timeout=6)
+
     def _select_project_by_id(self, project_id: int, tab: str | None = None):
         """Select a repository the caller knows only by id."""
         with self.session_factory() as session:
@@ -6096,7 +6161,15 @@ class DossierApp(App):
     @on(DataTable.RowSelected, "#issues-table")
     def on_issues_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle issues table row selection - show in viewer."""
-        if not self.selected_project or event.row_key.value == "empty":
+        if event.row_key.value == "empty":
+            return
+        if not self.selected_project:
+            # **THE KEY IS PER-REPOSITORY, SO THIS ONE GENUINELY
+            # CANNOT.** `issue-{number}` is that repository's own numbering, and issue 5 exists in many of them -- across an
+            # organisation the row does not say which repository
+            # it belongs to, and guessing would open somebody
+            # else's.
+            self._cannot_without_a_repository('an issue', ambiguous=True)
             return
         
         # Extract issue number from row key (format: "issue-{number}")
@@ -6132,7 +6205,17 @@ class DossierApp(App):
     @on(DataTable.RowSelected, "#releases-table")
     def on_releases_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle releases table row selection - show in viewer."""
-        if not self.selected_project or event.row_key.value == "empty":
+        if event.row_key.value == "empty":
+            return
+        if not self.selected_project:
+            # **THIS ONE COULD WORK, AND DOES NOT YET.** The row
+            # keys on a database id, which names its repository
+            # without help -- so the reading across an
+            # organisation is reachable, it is the handler that
+            # still asks for a selection. Saying so beats a click
+            # that does nothing, and beats a reason that is not
+            # true of this table.
+            self._cannot_without_a_repository('a release')
             return
         
         # Extract release ID from row key (format: "release-{id}")
@@ -6162,7 +6245,17 @@ class DossierApp(App):
     @on(DataTable.RowSelected, "#languages-table")
     def on_languages_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle languages table row selection - show language info in viewer."""
-        if not self.selected_project or event.row_key.value == "empty":
+        if event.row_key.value == "empty":
+            return
+        if not self.selected_project:
+            # **THIS ONE COULD WORK, AND DOES NOT YET.** The row
+            # keys on a database id, which names its repository
+            # without help -- so the reading across an
+            # organisation is reachable, it is the handler that
+            # still asks for a selection. Saying so beats a click
+            # that does nothing, and beats a reason that is not
+            # true of this table.
+            self._cannot_without_a_repository('a language')
             return
         
         # Extract language ID from row key (format: "lang-{id}")
@@ -6188,7 +6281,17 @@ class DossierApp(App):
     @on(DataTable.RowSelected, "#branches-table")
     def on_branches_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle branches table row selection - show branch info in viewer."""
-        if not self.selected_project or event.row_key.value == "empty":
+        if event.row_key.value == "empty":
+            return
+        if not self.selected_project:
+            # **THIS ONE COULD WORK, AND DOES NOT YET.** The row
+            # keys on a database id, which names its repository
+            # without help -- so the reading across an
+            # organisation is reachable, it is the handler that
+            # still asks for a selection. Saying so beats a click
+            # that does nothing, and beats a reason that is not
+            # true of this table.
+            self._cannot_without_a_repository('a branch')
             return
         
         # Extract branch ID from row key (format: "branch-{id}")
@@ -6216,8 +6319,19 @@ class DossierApp(App):
     
     @on(DataTable.RowSelected, "#dependencies-table")
     def on_dependencies_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Handle dependencies table row selection - show dependency info in viewer."""
-        if not self.selected_project or event.row_key.value == "empty":
+        """Choosing a dependency is how a person says what a sweep acts on.
+
+        **IT WORKS WITH NO REPOSITORY SELECTED, AND THAT IS THE POINT.** This
+        opened with `if not self.selected_project: return`, so at org scope --
+        the scope a sweep is *for*, since a sweep is one change across many
+        repositories -- choosing a package did nothing at all. The row
+        highlighted, `selected_dependency` stayed as it was, and the review
+        took the widest-shared package while a reader was looking at another.
+
+        Linking the dependency to a repository still needs one; that half is
+        gated below rather than the whole handler.
+        """
+        if event.row_key.value == "empty":
             return
         
         # Extract dependency ID from row key (format: "dep-{id}")
@@ -6234,9 +6348,15 @@ class DossierApp(App):
             dep = session.get(ProjectDependency, dep_id)
             if dep:
                 # **WHAT A SWEEP WILL ACT ON.** Selecting a dependency here is
-                # the only place a person says which package they mean; the
-                # sweep used to ignore it and take the widest-shared one.
+                # where a person says which package they mean; the sweep used
+                # to ignore it and take the widest-shared one.
                 self.selected_dependency = dep.name
+                self._sweep_typed = ""
+                self._sweep_follows_the_selection()
+                if not self.selected_project:
+                    # The rest links this dependency to a repository, and
+                    # there is no repository at org scope.
+                    return
                 self._link_dependency_project({
                     "name": dep.name,
                     "version": dep.version_spec,
@@ -6248,7 +6368,17 @@ class DossierApp(App):
     @on(DataTable.RowSelected, "#components-table")
     def on_components_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle components table row selection - navigate to linked project."""
-        if not self.selected_project or event.row_key.value == "empty":
+        if event.row_key.value == "empty":
+            return
+        if not self.selected_project:
+            # **THIS ONE COULD WORK, AND DOES NOT YET.** The row
+            # keys on a database id, which names its repository
+            # without help -- so the reading across an
+            # organisation is reachable, it is the handler that
+            # still asks for a selection. Saying so beats a click
+            # that does nothing, and beats a reason that is not
+            # true of this table.
+            self._cannot_without_a_repository('a component')
             return
         
         # Extract project ID from row key (format: "comp-child-{id}" or "comp-parent-{id}")
@@ -6276,7 +6406,17 @@ class DossierApp(App):
     @on(DataTable.RowSelected, "#deltas-table")
     def on_deltas_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle deltas table row selection."""
-        if not self.selected_project or event.row_key.value == "empty":
+        if event.row_key.value == "empty":
+            return
+        if not self.selected_project:
+            # **THIS ONE COULD WORK, AND DOES NOT YET.** The row
+            # keys on a database id, which names its repository
+            # without help -- so the reading across an
+            # organisation is reachable, it is the handler that
+            # still asks for a selection. Saying so beats a click
+            # that does nothing, and beats a reason that is not
+            # true of this table.
+            self._cannot_without_a_repository('a delta')
             return
 
         row_key = str(event.row_key.value)
@@ -7372,8 +7512,30 @@ class DossierApp(App):
         was chosen before.
         """
         self._scope_owner = owner
+        # **BOTH OF THEM, BECAUSE THERE ARE TWO.** This cleared
+        # `_current_project` -- read in seven places -- and left
+        # `selected_project`, read in ninety-seven, holding whichever
+        # repository was chosen before. The docstring above has always said
+        # the selection is cleared; for the reactive nearly everything reads,
+        # it was not.
+        #
+        # What that cost: choosing a dependency at org scope linked it to the
+        # stale repository, attributing a package to one nobody was looking
+        # at. Where nothing had been selected yet the same handler returned
+        # early instead, so the choice did not register at all. One root, two
+        # wrong answers.
         self._current_project = None
         self._current_project_id = None
+        self.selected_project = None
+        # The intersections panel is told the selection changed the same way it
+        # is told anywhere else. It is drawn on the Dossier tab and answers
+        # "what does changing this touch?", which has no meaning across an
+        # organisation -- and left alone it kept one repository's relationships
+        # on screen under the owner's heading.
+        try:
+            self.query_one(IntersectionsPanel).show_for(None)
+        except Exception:
+            pass
         self._tabs_loaded = set()
         panel = self.query_one(OverviewPanel)
         panel.set_owner(owner)

@@ -146,6 +146,21 @@ def by_action(resolve: Callable[..., Sequence[Any]] = default_resolve,
             for command in index(resolve, context) if command.action}
 
 
+def keystroke(action: str,
+              resolve: Callable[..., Sequence[Any]] = default_resolve,
+              context: Any = None) -> str:
+    """The keys that reach `action`, e.g. `m 8 6 6`. Empty if none do.
+
+    **SO NOBODY TYPES A ROUTE INTO PROSE AGAIN.** Five places held `m 6 4` for
+    the sweep -- two of them shown to a person -- and every one of them was
+    wrong the moment `Go` grew a group level and the sweep moved to `m 8 6 6`.
+    They were all correct when written, which is the whole problem with a route
+    written down anywhere but the menu.
+    """
+    found = by_action(resolve, context).get(action)
+    return " ".join(found.keys) if found else ""
+
+
 def applied_by(handled: Iterable[str],
                resolve: Callable[..., Sequence[Any]] = default_resolve,
                context: Any = None) -> tuple[tuple[Command, bool], ...]:

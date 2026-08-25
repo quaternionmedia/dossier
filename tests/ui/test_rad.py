@@ -757,11 +757,25 @@ class TestTheRingIsRecorded:
     OUTPUT = Path("docs/screenshots")
 
     def _record(self, app, name: str) -> None:
+        """Write the recording, with the run-to-run id normalised out.
+
+        **TEXTUAL NAMES ITS CSS CLASSES AFTER A PER-RUN NUMBER**, and that
+        number appears in every rule and every element, so a recording that had
+        not changed at all still produced a two-hundred-line diff on every
+        commit. Four hundred lines of noise across the two ring recordings, in
+        every pull request that happened to run the suite.
+
+        Replacing it with the recording's own name makes the file a function of
+        what is on screen, which is what it was always supposed to be: a diff
+        now means the picture changed.
+        """
+        import re
+
         self.OUTPUT.mkdir(parents=True, exist_ok=True)
-        (self.OUTPUT / f"{name}.svg").write_text(
-            app.export_screenshot(title=f"dossier — {name.replace('_', ' ')}"),
-            encoding="utf-8",
-        )
+        drawn = app.export_screenshot(
+            title=f"dossier — {name.replace('_', ' ')}")
+        drawn = re.sub(r"terminal-\d+-", f"{name.replace('_', '-')}-", drawn)
+        (self.OUTPUT / f"{name}.svg").write_text(drawn, encoding="utf-8")
 
     async def _app(self):
         from sqlmodel import Session, SQLModel, create_engine

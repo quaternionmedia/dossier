@@ -89,6 +89,19 @@ class Workflow:
         return tuple(step for step in self.steps if step.is_gate)
 
 
+def _keys(action: str) -> str:
+    """The keys that reach `action`, read from the menu.
+
+    **THE RECIPE HAD THE WRONG ONES.** It said `m 8 6 6`, which opens the Sweep
+    tab; `m 6 4` runs the review the step is describing. Two acts, two routes,
+    and a recipe is read by somebody about to type what it says.
+    """
+    from dossier.rad.index import keystroke
+
+    found = keystroke(action)
+    return " ".join(f"`{key}`" for key in found.split()) if found else "(unwired)"
+
+
 WORKFLOWS: tuple[Workflow, ...] = (
     Workflow(
         name="Start a slice",
@@ -269,8 +282,9 @@ WORKFLOWS: tuple[Workflow, ...] = (
                       "from the shares, never typed."),
             Step(does="Open the review",
                  command="dossier dashboard",
-                 says="Then `m` `8` `6` `6`. The panel groups the shares into "
-                      "batches, each of which is one identical edit."),
+                 says=f"Then {_keys('sweep.review')}. The panel groups the "
+                      f"shares into batches, each of which is one identical "
+                      f"edit."),
             Step(does="Approve a batch",
                  decides="One batch at a time, and only while every edit in it "
                          "is identical. A batch that is not uniform is two "

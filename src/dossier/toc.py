@@ -140,10 +140,7 @@ def as_markdown(handled: Iterable[str] = ()) -> str:
         "",
         "## The number is the keystroke",
         "",
-        "`8.6.6` is not a name somebody gave to the sweep. It is the keys: `8`",
-        "opens **Go**, `6` is **Work**, `6` is **Sweep**. Press `m` to open the",
-        "ring, then the digits -- so the sweep is **`m` `8` `6` `6`**, from",
-        "anywhere in the application.",
+        *_worked_example(found),
         "",
         "`5` is the centre. It backs out one level, or closes the ring, at every",
         "depth -- so it is never an item and no number contains it. Arrows and",
@@ -171,6 +168,33 @@ def as_markdown(handled: Iterable[str] = ()) -> str:
             lines.append(f"{indent}  *in the application only*")
     lines += _outside_the_ring()
     return "\n".join(lines) + "\n"
+
+
+def _worked_example(found: tuple[Entry, ...]) -> list[str]:
+    """One route, spelled out, read from the menu rather than typed.
+
+    **THE PAGE EXPLAINING THAT NUMBERS ARE NOT LABELS SHOULD NOT CARRY A
+    LABEL.** This was four lines naming `8.6.6` and walking through it; correct
+    when written, and a paragraph nothing would update if the group it sits
+    under were reordered.
+    """
+    deepest = max((e for e in found if not e.is_menu),
+                  key=lambda e: (e.depth, e.number), default=None)
+    if deepest is None:
+        return ["This ring has no commands in it."]
+    steps = " ".join(f"`{key}`" for key in deepest.keys)
+    trail = ", ".join(
+        f"`{entry.number.split('.')[-1]}` is **{entry.title}**"
+        for entry in found
+        if deepest.number.startswith(entry.number)
+        and entry.number != deepest.number)
+    return [
+        f"`{deepest.number}` is not a name somebody gave to "
+        f"{deepest.title}. It is the keys: {trail}, and the last one is "
+        f"**{deepest.title}** itself. Press `m` to open the ring, then the "
+        f"digits -- so {deepest.title} is {steps}, from anywhere in the "
+        f"application.",
+    ]
 
 
 def _outside_the_ring() -> list[str]:
