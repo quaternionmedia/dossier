@@ -24,14 +24,19 @@ uv run dossier dashboard
 
 ## Interface Overview
 
-```
-+------------------------------+----------------------------------------+
-| Project Tree                 | Main Tabs: Dossier | Projects | Deltas |
-| (controls pinned below)      | Project Subtabs: Details | Documentation | ... |
-|                              |                                        |
-+------------------------------+----------------------------------------+
-| Command Bar (search, sync, add, del, help)                          |
-+------------------------------------------------------------------------
+![The Overview tab, as the dashboard opens](screenshots/tab_overview_desktop.svg)
+
+The project tree is on the left with its controls pinned below it, the tabs are
+on the right, and the command bar runs along the bottom.
+
+**This picture is recorded by the test suite, not drawn here.** It replaced an
+ASCII diagram that had drifted: the diagram showed a row of "Main Tabs" —
+Dossier, Projects, Deltas — above a second row of project subtabs, and the
+application has one tab bar. `Projects` had been removed from it entirely.
+Regenerate with:
+
+```bash
+uv run pytest -k screenshot --screenshots
 ```
 
 

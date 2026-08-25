@@ -95,6 +95,10 @@ docs/screenshots/*
 !docs/screenshots/tab_dossier_wide.svg
 !docs/screenshots/tab_deltas_desktop.svg
 !docs/screenshots/content_viewer_readme.svg
+# The Overview tab, which is where the dashboard opens. Carried by the
+# quickstart, the index and the dashboard guide -- the last of which had an
+# ASCII diagram of a tab layout that no longer existed until this replaced it.
+!docs/screenshots/tab_overview_desktop.svg
 
 # Jupyter Notebook
 .ipynb_checkpoints/

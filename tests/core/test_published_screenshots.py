@@ -127,3 +127,87 @@ def test_the_declared_recordings_are_actually_recorded():
         name = f"{stem}.svg"
         if name in committed:
             assert (SHOTS / name).is_file(), f"{name} is committed and not here"
+
+
+# --- the generator that draws them ----------------------------------------------
+
+
+def _generator() -> str:
+    """The screenshot generator's source, with comments and docstrings removed.
+
+    **STRIPPED, BECAUSE THE FIRST VERSION MATCHED ITS OWN EXPLANATION.** The
+    generator carries a comment describing the `tab-projects` and `#main-tabs`
+    defects, and a check reading the raw text found those words there and
+    reported as broken the thing it was written to confirm was fixed. The same
+    trap `governance/qm` item 10 records: a text scan matching the docstring
+    that forbade the thing.
+
+    Layout is preserved rather than tokenised. A token stream joined back
+    together cannot be searched for a line of code, which the tokenising
+    version could not do and passed nothing.
+    """
+    source = Path("tests/ui/test_tui.py").read_text(encoding="utf-8")
+    source = re.sub(r'"""[\s\S]*?"""', "", source)
+    return "\n".join(line for line in source.splitlines()
+                     if not line.lstrip().startswith("#"))
+
+
+def test_the_generator_draws_every_view_the_registry_holds():
+    """**THE ONE THAT MADE THIRTY-THREE PICTURES OF ONE SCREEN.**
+
+    The tab list was written by hand. It held `tab-projects`, a tab the
+    application had removed, and was missing eight views added since --
+    Overview, Sweep, Outstanding, Governance, Disk, Topology, Harness and
+    Threads. Deriving it from `views.VIEWS` is what stops a view being added
+    and never drawn.
+
+    Mutation: replacing the derivation with a literal list fails here.
+    """
+    source = _generator()
+
+    assert "TABS = [(view.tab, view.title) for view in views.VIEWS]" in source, (
+        "the screenshot generator no longer derives its tabs from the registry")
+    assert '"tab-projects"' not in source, (
+        "the generator names a tab the application does not have")
+
+
+def test_the_generator_asserts_the_tab_it_asked_for():
+    """A swallowed switch publishes a confident wrong picture.
+
+    `query_one("#main-tabs")` raised `NoMatches` on the first line of the
+    switch -- there is one `TabbedContent` here and it is `#project-tabs` --
+    and `except Exception: pass` absorbed it, for every tab at every
+    resolution. `tab_issues_desktop.svg`, `tab_contributors_desktop.svg` and
+    `tab_deltas_desktop.svg` came out byte-identical, and the third is
+    committed and shipped.
+
+    P17: a bound that fires is reported, never absorbed.
+    """
+    source = _generator()
+
+    assert '"#main-tabs"' not in source, (
+        "the generator queries a container this application does not have")
+    assert "wrong tab" in Path("tests/ui/test_tui.py").read_text(
+        encoding="utf-8"), (
+        "the generator no longer asserts that the switch took effect")
+
+
+def test_the_committed_pictures_are_not_all_the_same_picture():
+    """Two views drawn identically is the failure with no other symptom.
+
+    Cheap, and it would have caught the whole class: the broken generator
+    produced one image under eleven names.
+    """
+    import hashlib
+
+    seen: dict[str, str] = {}
+    for name in sorted(_committed()):
+        if not re.fullmatch(r"tab_[a-z]+_(compact|desktop|wide)\.svg", name):
+            continue
+        digest = hashlib.sha256(
+            (SHOTS / name).read_bytes()).hexdigest()
+        if digest in seen:
+            raise AssertionError(
+                f"{name} and {seen[digest]} are the same image byte for byte; "
+                f"at least one of them is a picture of the wrong view")
+        seen[digest] = name

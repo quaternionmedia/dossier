@@ -3,6 +3,7 @@
 import pytest
 from click.testing import CliRunner
 
+from dossier import views
 from dossier.cli import cli
 
 
@@ -97,26 +98,29 @@ class TestTUIWidgets:
         assert callable(getattr(ContentViewerScreen, "action_open_frogmouth"))
 
 
-# Define tabs and resolutions for parameterized screenshot tests
-MAIN_TABS = [
-    ("tab-dossier", "Dossier"),
-    ("tab-projects", "Projects"),
-    ("tab-deltas", "Deltas"),
-]
+# **THE TABS ARE READ FROM THE REGISTRY, NOT LISTED HERE.**
+#
+# This was two hand-written lists of eleven tabs, and every screenshot they
+# produced was a picture of the same screen. Three causes, each hidden by the
+# next:
+#
+#   * they named a `#main-tabs` container that does not exist. There is one
+#     `TabbedContent` in this application and it is `#project-tabs`;
+#   * so `query_one("#main-tabs")` raised `NoMatches` on the first line of the
+#     switch, for every tab, at every resolution;
+#   * and the switch was wrapped in `except Exception: pass`, so the failure
+#     never reached anybody. `tab_issues_desktop.svg`,
+#     `tab_contributors_desktop.svg` and `tab_deltas_desktop.svg` came out
+#     byte-identical, and one of those three is committed and shipped.
+#
+# Deriving from `views.VIEWS` also closes the other half: the hand-written list
+# held `tab-projects`, a tab the application removed, and was missing eight
+# views added since -- Overview, Sweep, Outstanding, Governance, Disk,
+# Topology, Harness and Threads. A view added to the registry is now
+# screenshotted without anybody remembering this file.
+TABS = [(view.tab, view.title) for view in views.VIEWS]
 
-PROJECT_TABS = [
-    ("tab-details", "Details"),
-    ("tab-docs", "Documentation"),
-    ("tab-languages", "Languages"),
-    ("tab-branches", "Branches"),
-    ("tab-dependencies", "Dependencies"),
-    ("tab-contributors", "Contributors"),
-    ("tab-issues", "Issues"),
-    ("tab-releases", "Releases"),
-]
-
-MAIN_TAB_IDS = {tab_id for tab_id, _ in MAIN_TABS}
-TABS = MAIN_TABS + PROJECT_TABS
+TAB_CONTAINER = "#project-tabs"
 
 RESOLUTIONS = [
     ((120, 40), "desktop"),      # Standard terminal
@@ -626,21 +630,19 @@ class TestTUIScreenshotsParameterized:
             await pilot.pause()
             await pilot.pause()
             
-            # Switch to the target tab
-            try:
-                main_tabs = app.query_one("#main-tabs", TabbedContent)
-                if tab_id in MAIN_TAB_IDS:
-                    main_tabs.active = tab_id
-                else:
-                    main_tabs.active = "tab-projects"
-                    project_tabs = app.query_one("#project-tabs", TabbedContent)
-                    project_tabs.active = tab_id
-                # Wait for tab content to render
-                await pilot.pause()
-                await pilot.pause()
-            except Exception:
-                # Tab may not exist or app may not have that widget yet
-                pass
+            # **NOT WRAPPED IN `except Exception: pass`.** A swallowed switch
+            # is how thirty-three screenshots of one screen were published
+            # under eleven different names: the failure was absorbed and the
+            # capture went ahead regardless, which is a confident wrong
+            # artifact rather than a missing one. A tab that cannot be reached
+            # fails this test.
+            tabs = app.query_one(TAB_CONTAINER, TabbedContent)
+            tabs.active = tab_id
+            await pilot.pause()
+            await pilot.pause()
+            assert tabs.active == tab_id, (
+                f"asked for {tab_id} and the container is showing "
+                f"{tabs.active}; the capture below would be of the wrong tab")
             
             # Generate descriptive filename
             filename = f"tab_{tab_id.replace('tab-', '')}_{resolution_name}"

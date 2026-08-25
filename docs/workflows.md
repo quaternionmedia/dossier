@@ -554,14 +554,26 @@ uv run dossier dev vacuum                          # Optimize
 uv run dossier db upgrade                          # Run migrations
 ```
 
-### Deltas (coming in Phase 2)
+### Deltas
+
 ```bash
-uv run dossier deltas list owner/repo              # List deltas
-uv run dossier deltas create owner/repo name       # Create delta
-uv run dossier deltas advance owner/repo name      # Advance phase
-uv run dossier deltas link owner/repo name --issue 42  # Link entity
-uv run dossier deltas show owner/repo name         # Show details
+uv run dossier deltas search <text>                # Find deltas anywhere
+uv run dossier deltas compose <address>            # What one is made of
+uv run dossier deltas compound <address>           # What moves with it
+uv run dossier deltas relate <a> <b>               # State that two compose
+uv run dossier deltas from-prs                     # Derive one per open PR
+uv run dossier deltas ingest <payload>             # Take another system's
+uv run dossier deltas tangles                      # Every cycle the relations form
+uv run dossier deltas prune                        # Drop ones carrying no work
 ```
+
+An address is `<owner>/<repo>/delta/<id>`. `uv run dossier deltas --help` is
+the current list; this page is a summary and the CLI is the authority.
+
+Five commands were listed here for a long time under "coming in Phase 2" --
+`list`, `create`, `advance`, `link` and `show`. None of them was ever built,
+and the phase shipped with the verbs above instead. `docs/roadmap.md` still
+holds that plan, which is where an unbuilt design belongs.
 
 ---
 

@@ -102,6 +102,11 @@ uv run dossier github sync-user your-username
 uv run dossier dashboard
 ```
 
+![Every repository in one reading, with what needs attention first](screenshots/tab_overview_desktop.svg)
+
+That is the Overview tab, which is where the dashboard opens. `m` then a digit
+reaches any other view; [the dashboard guide](dashboard.md) has the rest.
+
 ## Interfaces
 
 | Interface | Command | Description |
