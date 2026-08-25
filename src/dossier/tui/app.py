@@ -1374,6 +1374,7 @@ class DossierApp(App):
         "reach.read": "_open_selected_thread",
         "sweep.review": "_begin_sweep_review",
         "reach.reconcile": "_begin_reconcile",
+        "reach.clone": "_begin_clone",
         "delta.advance": "action_advance_delta_phase",
         "delta.note": "action_add_delta_note",
         "filter.all": "_show_all_projects",
@@ -1561,6 +1562,77 @@ class DossierApp(App):
             self._load_sweep_tab(None)
         except Exception:                          # noqa: BLE001
             # The tab may not be composed yet on an early selection.
+            pass
+
+    # How many repositories are cloned off one keystroke without asking
+    # again. Lower than the sync threshold on purpose: a sync writes rows into
+    # a database this application owns, and a clone writes directories onto
+    # somebody's disk and pulls them over the network.
+    CLONE_WITHOUT_CONFIRMING = 1
+    _clone_pending = False
+
+    def _begin_clone(self) -> None:
+        """`reach.clone`. Clone every indexed repository absent from this disk.
+
+        **STATES WHAT IT WOULD DO, THEN DOES IT ON THE SAME KEYS AGAIN.** The
+        pattern `project.sync` already uses, at a lower threshold: eighty-two
+        clones is minutes of network and gigabytes of disk, and a ring is two
+        keystrokes from anywhere.
+        """
+        from dossier.clone import absent
+
+        with self.session_factory() as session:
+            gone = absent(session.exec(select(Project)).all())
+
+        if not gone:
+            self.notify("Every indexed repository has a clone on this machine.",
+                        timeout=6)
+            return
+
+        able = [one for one in gone if one.can_be_cloned]
+        if not able:
+            self.notify(
+                f"{len(gone)} repository(ies) are absent and none records a "
+                f"URL, so there is nothing to clone from.",
+                severity="warning", timeout=8)
+            return
+
+        if len(able) > self.CLONE_WITHOUT_CONFIRMING and not self._clone_pending:
+            self._clone_pending = True
+            from dossier.rad.index import by_action
+
+            found = by_action().get("reach.clone")
+            again = found.number if found else "the same keys"
+            self.notify(
+                f"{len(able)} absent, into {able[0].into.parent}. Press "
+                f"{again} again to clone them.",
+                title="Confirm", severity="warning", timeout=10)
+            return
+
+        self._clone_pending = False
+        self._progress_start(f"cloning {len(able)} repository(ies)",
+                             total=len(able))
+        self._run_clone(able)
+
+    @work(thread=True, exclusive=True, group="clone")
+    def _run_clone(self, wanted) -> None:
+        """Clone off the loop. Each one is a process and a network fetch."""
+        from dossier.clone import clone, summarise
+
+        outcomes = []
+        for one in wanted:
+            outcomes.append(clone(one))
+            self.call_from_thread(
+                self._progress_advance, len(outcomes), len(wanted), one.repo)
+        self.call_from_thread(self._clone_finished, summarise(outcomes))
+
+    def _clone_finished(self, said: str) -> None:
+        self._progress_finish(said)
+        self.notify(said, title="Clone", timeout=10)
+        # The hygiene reading is about clones, and there are new ones.
+        try:
+            self._begin_hygiene_reading(getattr(self, "_current_project", None))
+        except Exception:                          # noqa: BLE001
             pass
 
     def _begin_sweep_review(self) -> None:
@@ -1883,8 +1955,13 @@ class DossierApp(App):
         confirming = self._sync_pending == plan.scope
         if len(wanted) > self.SYNC_WITHOUT_CONFIRMING and not confirming:
             self._sync_pending = plan.scope
+            from dossier.rad.index import by_action
+
+            found = by_action().get("project.sync")
+            again = found.number if found else "the same keys"
             self.notify(
-                f"{plan.summary()}. Press 6.2 again to fetch {len(wanted)}.",
+                f"{plan.summary()}. Press {again} again to fetch "
+                f"{len(wanted)}.",
                 title="Confirm", severity="warning", timeout=10,
             )
             return

@@ -73,5 +73,12 @@ def resolve(context: Any = None) -> tuple[Wedge, ...]:
             # The number is not chosen here; it is what the ring assigns, and
             # `actions.py` declares the same one so the two can be compared.
             Wedge("reach.read", "Read conversation", action="reach.read"),
+            # Fifth, and it costs a keystroke: rad's budget is
+            # 1 + ceil(N/2) + 1, which is 4 for four children and 5 for five.
+            # Paid because the alternative is a machine-wide act with no
+            # keyboard route at all -- eighty-two indexed repositories had no
+            # clone here and closing that gap meant typing `git clone`
+            # eighty-two times.
+            Wedge("reach.clone", "Clone what is absent", action="reach.clone"),
         )),
     )

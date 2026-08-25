@@ -45,7 +45,7 @@ gh pr merge <n> --merge --delete-branch         # you merge it
 - **Follows** and **feeds** are how they compose.
 - **Cannot** is what the workflow does not do, where somebody would assume it does.
 
-There are **10** workflows here, **7** of which stop for a person. **4** are sketches — written down, not yet worked through end to end. They are marked, because a cookbook showing only the finished recipes would read as the whole of what a person needs.
+There are **11** workflows here, **8** of which stop for a person. **4** are sketches — written down, not yet worked through end to end. They are marked, because a cookbook showing only the finished recipes would read as the whole of what a person needs.
 
 ## Worked through
 
@@ -246,6 +246,42 @@ There are **10** workflows here, **7** of which stop for a person. **4** are ske
 **No gate, and why:** `main` is not a claim, so merging into it is not a release -- governance/qm/records/DRAFT-version-tags-are-claims.md section 4. Keeping `main` clean is what makes cutting a tag cheap. Waiting for a second person here is waiting at a gate that is not one.
 
 **Cannot:** Be undone tidily. Closing a pull request is a git operation: pushing a branch onto a pull request's base merges it, and a later close is a silent no-op.
+
+### Get a repository onto this machine
+
+**Close the gap between what the database knows about and what this disk actually has.**
+
+1. See what is indexed and not here
+
+   ```sh
+   dossier clone
+   ```
+
+   Lists and stops. A clone is a network fetch and a write to your disk, so acting is asked for rather than assumed.
+
+2. 🧍 **Decide how many you want**
+
+   > **You decide:** Whether you need all of them. A repository with no clone here is a repository nobody needed on this machine, which is an ordinary state and usually the right one -- so this is a question about disk and minutes, not about tidiness.
+
+3. Clone one, or all of them
+
+   ```sh
+   dossier clone <owner>/<name>       # or --all
+   ```
+
+   `--all` asks before it starts and names where they land. Each result carries git's own words, because only git can say whether a failure was a missing repository, a missing credential or a full disk.
+
+4. Read what the clones now answer
+
+   ```sh
+   dossier show branches
+   ```
+
+   Branch hygiene reports `unknown` for a repository with no clone. Those become real answers.
+
+**Feeds:** Retire a branch safely  
+
+**Cannot:** Know whether you have the right to clone something. Authentication is git's, and a private repository this database learned about through an authenticated sync still refuses at the network if this machine has no credentials.
 
 ### Retire a branch safely
 

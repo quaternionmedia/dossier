@@ -211,6 +211,11 @@ REGISTRY: tuple[Action, ...] = (
 
     # --- Reach: across the seam ------------------------------------------
     Action("reach.qmcp", "Open in qmcp", only="not applied yet; the ring says so rather than hiding it"),
+    Action("reach.clone", "Clone what is absent",
+           only="a clone writes directories onto somebody's disk and pulls "
+                "them over the network, so it is asked for deliberately; a "
+                "button sitting on a panel is one misclick from eighty-two "
+                "of them"),
     Action("reach.ingest", "Ingest deltas", button="btn-ingest-threads",),
     # No key. The direct route is selecting the row -- `DataTable.RowSelected`
     # fires on a click and on Enter alike -- and a tab-local act does not earn a
