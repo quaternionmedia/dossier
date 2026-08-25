@@ -41,8 +41,8 @@ depth -- so it is never an item and no number contains it. Arrows and
     - `8.6.2`  Issues -- `m` `8` `6` `2`
       Open issues, most recently updated first.
       `dossier show issues`
-    - `8.6.4`  Waiting -- `m` `8` `6` `4`
-      Questions a harness could not answer for itself. Zero is a real answer here, not an empty table.
+    - `8.6.4`  Outstanding -- `m` `8` `6` `4`
+      Everything three readings noticed -- harness questions, repositories nothing has read lately, invocations that failed -- and what would settle each. Zero is a real answer, not an empty table.
       `dossier show waiting`
   - **`8.2`  Code**
     - `8.2.8`  Branches -- `m` `8` `2` `8`

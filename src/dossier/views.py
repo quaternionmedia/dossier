@@ -93,9 +93,10 @@ VIEWS: tuple[View, ...] = (
          "dossier sweep"),
     View("tab-issues", "Issues", "Work",
          "Open issues, most recently updated first."),
-    View("tab-waiting", "Waiting", "Work",
-         "Questions a harness could not answer for itself. Zero is a real "
-         "answer here, not an empty table."),
+    View("tab-waiting", "Outstanding", "Work",
+         "Everything three readings noticed -- harness questions, repositories "
+         "nothing has read lately, invocations that failed -- and what would "
+         "settle each. Zero is a real answer, not an empty table."),
 
     # Code -- what is in the repositories rather than what is being done to them.
     View("tab-branches", "Branches", "Code",

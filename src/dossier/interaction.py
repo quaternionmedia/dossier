@@ -57,6 +57,9 @@ KINDS = (APPROVE, ANSWER, PROVIDE, DECIDE)
 FROM_HARNESS = "harness"
 FROM_SWEEP = "sweep"
 FROM_ARCHIVE = "archive"
+# The overview's own attention list. Named as a source because a person
+# reading the queue should be able to tell what put a row in it.
+FROM_OVERVIEW = "overview"
 
 
 def _no_menu(action: str) -> str:
@@ -92,12 +95,36 @@ class Interaction:
     """Where to go to act on it, in the words a person would use. Never a
     function: this layer is read by a terminal, and will be read by a page."""
 
+    remedy: str = ""
+    """The act that would settle this, as an action id, or empty.
+
+    **A ROUTE SAYS WHERE TO GO; A REMEDY SAYS WHAT TO RUN**, and the dashboard
+    had only the first. A repository listed as never synced told a person it
+    wanted attention and left them to work out that syncing was the answer and
+    where syncing lives -- for every row, every time.
+
+    Empty is a real value and the common one. A question a harness put to a
+    person has no remedy by construction: the answer *is* the act, and it goes
+    back across the seam the way it came. Filling this in with something
+    plausible would be the panel deciding what somebody meant.
+    """
+
     address: str = ""
     detail: str = ""
 
     @property
     def is_batched(self) -> bool:
         return self.covers > 1
+
+    @property
+    def can_be_run(self) -> bool:
+        """Whether something can act on this without asking anything further.
+
+        Not the same as "should be run unattended". Nothing here runs itself;
+        this says only that a host holding the dispatch has somewhere to send
+        it.
+        """
+        return bool(self.remedy)
 
     @property
     def weight(self) -> int:
@@ -237,6 +264,78 @@ def needs_an_export(archive: Any,
         source=FROM_ARCHIVE,
         route=route_for("reach.ingest"),
     )]
+
+
+# The reasons the overview's attention list gives, and what settles each.
+#
+# **EVERY ONE OF THEM IS A SYNC**, and that is worth saying rather than leaving
+# a reader to notice: a repository with no description and no language is not
+# three problems, it is one repository nobody has read from GitHub lately. A
+# table mapping each reason to its own remedy would imply otherwise.
+WANTS_A_SYNC = ("never synced", "synced", "no description", "no language")
+
+
+def from_attention(rows: Iterable[Any],
+                   route_for: Callable[[str], str] = _no_menu
+                   ) -> list[Interaction]:
+    """The overview's attention list, with what would settle each row.
+
+    Takes the rendered rows -- `(repo, synced, why)` -- rather than projects,
+    because the ranking and the wording belong to `overview._attention` and a
+    second reading of the same question would drift from it.
+
+    `decide` rather than `approve`: syncing a repository is not somebody
+    signing off on a change, and the panel does not know whether a repository
+    listed here is one anybody wants read.
+    """
+    found = []
+    for row in rows:
+        if len(row) < 3:
+            continue
+        repo, aged, why = row[0], row[1], row[2]
+        found.append(Interaction(
+            id=f"attention-{repo}",
+            kind=DECIDE,
+            prompt=f"{repo}: {why}",
+            source=FROM_OVERVIEW,
+            route=route_for("project.sync"),
+            remedy="project.sync" if any(
+                reason in why for reason in WANTS_A_SYNC) else "",
+            address=repo,
+            detail=f"last read {aged}",
+        ))
+    return found
+
+
+def from_harness_errors(rows: Iterable[Any],
+                        route_for: Callable[[str], str] = _no_menu
+                        ) -> list[Interaction]:
+    """Invocations the harness recorded an error on.
+
+    **THE ERROR IS CARRIED, NOT CLASSIFIED.** The harness wrote what went
+    wrong; reading that into a category here would be this panel guessing at
+    another system's failure, and the guess is what a person would then debug.
+
+    No remedy. Re-running somebody else's tool invocation is not this
+    application's to decide, and an error is a fact about a run that already
+    happened -- the act it suggests depends entirely on what it says.
+    """
+    found = []
+    for row in rows:
+        error = _get(row, "error")
+        if not error:
+            continue
+        tool = _get(row, "tool") or "?"
+        harness = _get(row, "harness") or "?"
+        found.append(Interaction(
+            id=f"harness-error-{_get(row, 'id')}",
+            kind=DECIDE,
+            prompt=f"{harness}: {tool} failed",
+            source=FROM_HARNESS,
+            route=route_for("view.harness"),
+            detail=str(error).strip().splitlines()[0][:120],
+        ))
+    return found
 
 
 def gather(sources: dict[str, Callable[[], list[Interaction]]]) -> Queue:

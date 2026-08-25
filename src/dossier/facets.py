@@ -551,7 +551,12 @@ def harness_project(session: Any, project: Any, limit: int) -> Section:
 
 # --- what is waiting on a person ---------------------------------------------
 
-WAITING_COLUMNS = ("harness", "question", "asked", "options", "answer")
+# **THE REMEDY IS A COLUMN, BECAUSE IT IS THE POINT.** This listed what a
+# harness had asked and stopped there. Everything else the dashboard noticed --
+# a repository nobody has read in weeks, a tool invocation that failed -- was
+# somewhere else, phrased as an observation, with the reader left to work out
+# what would settle it and where that lives.
+WAITING_COLUMNS = ("from", "what", "detail", "what would settle it")
 
 
 def _waiting_row(row: Any) -> tuple[str, ...]:
@@ -585,6 +590,72 @@ def _waiting_rows(session: Any, limit: int, project: str | None = None):
     return tuple(_waiting_row(row) for row in rows[:limit])
 
 
+def _waiting_queue(session: Any, limit: int, project: str | None = None):
+    """Everything wanting a person, from every source that knows of one.
+
+    **THREE SOURCES, ONE READING.** Harness questions were here; the overview's
+    attention list and the harness's own errors were on other screens, phrased
+    as things to look at. A person who wants to know what is outstanding should
+    not have to visit three places and translate each.
+
+    Sources are gathered rather than queried inline, so a source that raises
+    takes its own rows out and not the reading -- an unreachable harness used
+    to be an empty queue, which reads as nothing outstanding.
+    """
+    from dossier import interaction
+    from dossier.models.harness import HarnessAsk, HarnessInvocation
+
+    def asks():
+        query = select(HarnessAsk)
+        if project is not None:
+            query = query.where(HarnessAsk.project == project)
+        return interaction.from_harness_asks(session.exec(query).all())
+
+    def errors():
+        query = select(HarnessInvocation).where(
+            HarnessInvocation.error.is_not(None))
+        return interaction.from_harness_errors(session.exec(query).all())
+
+    def attention():
+        from dossier import overview
+
+        rows = overview.build(session, limit=limit).section("Wants attention")
+        return interaction.from_attention(rows.rows if rows else ())
+
+    queue = interaction.gather({
+        "harness": asks, "errors": errors, "overview": attention,
+    })
+    return queue
+
+
+_REMEDIES: tuple[str, ...] = ()
+
+
+def remedies_shown(remedies: tuple[str, ...] | None = None) -> tuple[str, ...]:
+    """The remedies behind the rows the waiting reading last drew.
+
+    **A MODULE-LEVEL HANDOFF, AND IT IS THE SMALLEST HONEST ONE.** A facet
+    returns a `Section` of strings, because a section is drawn by a renderer
+    that knows nothing about actions -- and widening that shape so one facet
+    can carry action ids would put them on every facet that has none.
+
+    Read immediately after the section that set them. Nothing else writes it.
+    """
+    global _REMEDIES
+    if remedies is not None:
+        _REMEDIES = remedies
+    return _REMEDIES
+
+
+def _queue_row(one: Any) -> tuple[str, ...]:
+    return (
+        _trim(one.source, 12),
+        _trim(one.prompt, 46),
+        _trim(one.detail or one.address, 30),
+        one.remedy or "a person",
+    )
+
+
 def waiting_org(session: Any, ids, limit: int) -> Section:
     """Every question a harness has put to a person.
 
@@ -592,20 +663,29 @@ def waiting_org(session: Any, ids, limit: int) -> Section:
     harness is named by `owner/repo` in its own payload and is not a row in
     `project`.
     """
+    queue = _waiting_queue(session, limit)
+    shown = queue.items[:limit]
+    rows = tuple(_queue_row(one) for one in shown)
+    # **THE REMEDIES, IN THE ORDER THE ROWS ARE DRAWN.** A table cell is text;
+    # the host needs the action id to dispatch, and reading it back out of the
+    # rendered cell would be parsing a fact this already has.
+    remedies_shown(tuple(one.remedy for one in shown))
     return Section(
-        "Waiting on a person", WAITING_COLUMNS,
-        _waiting_rows(session, limit),
-        note=("Questions a harness could not answer for itself. This panel "
-              "shows them; it does not answer them -- the answer goes back "
-              "across the seam as a payload, the same way the question came, "
-              "because two systems believing they own one row is how a queue "
-              "starts disagreeing with itself."),
+        "Outstanding", WAITING_COLUMNS, rows,
+        note=("Everything three readings noticed: questions a harness could "
+              "not answer for itself, repositories nothing has read lately, "
+              "and invocations that failed. The last column says what would "
+              "settle each -- an act this can run, or a person. A harness "
+              "question is always a person: the answer goes back across the "
+              "seam as a payload, the same way the question came, because two "
+              "systems believing they own one row is how a queue starts "
+              "disagreeing with itself."),
     )
 
 
 def waiting_project(session: Any, project: Any, limit: int) -> Section:
     return Section(
-        "Waiting on a person", WAITING_COLUMNS,
+        "Outstanding", WAITING_COLUMNS,
         _waiting_rows(session, limit, project.full_name or project.name),
         note=("Questions this repository's harness has put to a person, "
               "outstanding first."),
@@ -817,7 +897,7 @@ FACETS: tuple[Facet, ...] = (
           "tab-releases", "releases-table", releases_org, releases_project),
     Facet("harness", "Harness invocations", "Harness invocations",
           "tab-harness", "harness-table", harness_org, harness_project),
-    Facet("waiting", "Waiting on a person", "Waiting",
+    Facet("waiting", "Outstanding", "Outstanding",
           "tab-waiting", "waiting-table", waiting_org, waiting_project),
     Facet("threads", "Thread archive", "Threads",
           "tab-threads", "threads-table", threads_org, threads_project,
