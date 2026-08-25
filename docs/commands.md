@@ -107,7 +107,7 @@ depth -- so it is never an item and no number contains it. Arrows and
 
 ## Outside the ring
 
-`dossier --help` reaches **73** leaf commands; **23**
+`dossier --help` reaches **75** leaf commands; **23**
 of them are named above beside the view they belong to. The rest are
 not menu items and are not meant to be: the ring is for what somebody
 does repeatedly, and a cell spent on a once-a-quarter migration is a
@@ -128,10 +128,12 @@ cell taken from something else.
   dossier db stamp
   dossier db upgrade
   dossier deltas compose
+  dossier deltas compound
   dossier deltas from-prs
   dossier deltas prune
   dossier deltas prune-forks
   dossier deltas relate
+  dossier deltas search
   dossier deltas tangles
   dossier dev clear
   dossier dev dump
