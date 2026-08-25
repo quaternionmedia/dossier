@@ -349,3 +349,58 @@ def test_the_view_registry_says_the_same_thing_the_facet_does():
     assert view.title == facets.BY_KEY["waiting"].title
     assert "harness questions" in view.summary
     assert "read lately" in view.summary
+
+
+def test_reading_the_queue_does_not_rebuild_the_page_it_sits_on():
+    """THE ONE THAT COST FOUR MINUTES OF EVERY CI RUN.
+
+    The attention source called `overview.build`, which builds every facet —
+    including this one. Measured: **109 levels** of nested `build` before
+    Python's recursion limit stopped it, the `RecursionError` caught by
+    `gather`'s per-source guard, every level above returning a plausible
+    answer.
+
+    So the reading was correct and computed a hundred times. `unreachable` was
+    empty, because nothing above the innermost frame failed. `overview.build`
+    went from 0.07s to 1.478s, undoing the work of #33. And CI's test job
+    stepped from about five minutes to over nine, which is how it was noticed
+    at all — not by anything failing.
+
+    Nothing errored. The result looked right. The setup was the problem.
+
+    Asserted on the call count rather than a duration: a timing assertion on a
+    fast machine passes with the recursion restored.
+
+    Mutation: call `overview.build` from the attention source again and this
+    fails.
+    """
+    from sqlalchemy.pool import StaticPool
+    from sqlmodel import Session, SQLModel, create_engine
+
+    import dossier.overview as overview
+    from dossier import facets
+    from dossier.models.schemas import Project
+
+    engine = create_engine("sqlite://", poolclass=StaticPool,
+                           connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+
+    entered = []
+    real = overview.build
+
+    def counted(*args, **kwargs):
+        entered.append(1)
+        return real(*args, **kwargs)
+
+    with Session(engine) as session:
+        session.add(Project(name="org/one", full_name="org/one",
+                            github_owner="org", github_repo="one"))
+        session.commit()
+        overview.build = counted
+        try:
+            facets.BY_KEY["waiting"].at(session, limit=12)
+        finally:
+            overview.build = real
+
+    assert entered == [], (
+        f"reading the queue built the overview {len(entered)} time(s)")

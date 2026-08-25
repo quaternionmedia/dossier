@@ -617,9 +617,28 @@ def _waiting_queue(session: Any, limit: int, project: str | None = None):
         return interaction.from_harness_errors(session.exec(query).all())
 
     def attention():
-        from dossier import overview
+        """The attention rows, from the function that builds them.
 
-        rows = overview.build(session, limit=limit).section("Wants attention")
+        **THIS CALLED `overview.build`, WHICH BUILDS EVERY FACET INCLUDING
+        THIS ONE.** Measured: 109 levels of nested `build` before Python's
+        recursion limit stopped it, the `RecursionError` caught by `gather`'s
+        per-source guard, every level above returning a plausible answer. So
+        the reading was correct and computed a hundred times, `unreachable`
+        was empty because nothing above the innermost frame failed, and
+        `overview.build` went from 0.07s to 1.478s -- undoing the work that
+        got it there.
+
+        Nothing errored. The result looked right. The setup was the problem,
+        which is the shape this corpus keeps recording.
+
+        `_attention` is the function that answers the question; `build` is the
+        page that happens to contain it.
+        """
+        from datetime import datetime, timezone
+
+        from dossier.overview import _attention
+
+        rows = _attention(session, datetime.now(timezone.utc), limit, None)
         return interaction.from_attention(rows.rows if rows else ())
 
     queue = interaction.gather({
