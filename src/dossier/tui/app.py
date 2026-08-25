@@ -5957,7 +5957,8 @@ class DossierApp(App):
             url=url
         ))
     
-    def _cannot_without_a_repository(self, what: str) -> None:
+    def _cannot_without_a_repository(self, what: str, *,
+                                     ambiguous: bool = False) -> None:
         """Say why a row cannot be opened at organisation scope.
 
         **SIX HANDLERS WENT QUIET AT ONCE**, and the change that did it was a
@@ -5967,14 +5968,28 @@ class DossierApp(App):
         dependency under a repository nobody was looking at. Wrong data beat
         silence only in the sense that something happened.
 
-        The real repair is a row key that names its own repository, so an
-        org-wide table can be acted on. Until then this is the difference
-        between a control that is refusing and a control that is broken.
+        **AND ONLY ONE OF THE SIX GENUINELY CANNOT.** Issues key on
+        `issue-{number}`, which is that repository's own numbering; the other
+        five key on database ids that name their repository without help, so
+        the reading is reachable and it is the handler that has not been
+        taught. `ambiguous` is which of those two a person is being told,
+        because "cannot" and "not yet" are different answers and a blanket
+        message asserted the first about tables where the second is true.
+
+        Until then this is the difference between a control that is refusing
+        and a control that is broken.
         """
+        if ambiguous:
+            self.notify(
+                f"Select a repository to open {what} -- these rows carry that "
+                f"repository's own numbering, so the organisation view cannot "
+                f"say which one this is.",
+                severity="warning", timeout=6)
+            return
         self.notify(
-            f"Select a repository to open {what} -- these rows are numbered "
-            f"per repository, so the organisation view cannot say which one "
-            f"this is.",
+            f"Select a repository to open {what} -- this row knows which one "
+            f"it belongs to, and opening it from the organisation view is not "
+            f"wired yet.",
             severity="warning", timeout=6)
 
     def _select_project_by_id(self, project_id: int, tab: str | None = None):
@@ -6149,14 +6164,12 @@ class DossierApp(App):
         if event.row_key.value == "empty":
             return
         if not self.selected_project:
-            # **A SENTENCE RATHER THAN SILENCE.** This row opens
-            # an issue belonging to one repository, and the row key
-            # here is that repository's numbering -- issue 5
-            # exists in many of them. Across an organisation the
-            # key does not say which, so the honest answer is that
-            # it cannot be opened from here rather than nothing
-            # happening when a person clicks.
-            self._cannot_without_a_repository('an issue')
+            # **THE KEY IS PER-REPOSITORY, SO THIS ONE GENUINELY
+            # CANNOT.** `issue-{number}` is that repository's own numbering, and issue 5 exists in many of them -- across an
+            # organisation the row does not say which repository
+            # it belongs to, and guessing would open somebody
+            # else's.
+            self._cannot_without_a_repository('an issue', ambiguous=True)
             return
         
         # Extract issue number from row key (format: "issue-{number}")
@@ -6195,13 +6208,13 @@ class DossierApp(App):
         if event.row_key.value == "empty":
             return
         if not self.selected_project:
-            # **A SENTENCE RATHER THAN SILENCE.** This row opens
-            # a release belonging to one repository, and the row key
-            # here is that repository's numbering -- issue 5
-            # exists in many of them. Across an organisation the
-            # key does not say which, so the honest answer is that
-            # it cannot be opened from here rather than nothing
-            # happening when a person clicks.
+            # **THIS ONE COULD WORK, AND DOES NOT YET.** The row
+            # keys on a database id, which names its repository
+            # without help -- so the reading across an
+            # organisation is reachable, it is the handler that
+            # still asks for a selection. Saying so beats a click
+            # that does nothing, and beats a reason that is not
+            # true of this table.
             self._cannot_without_a_repository('a release')
             return
         
@@ -6235,13 +6248,13 @@ class DossierApp(App):
         if event.row_key.value == "empty":
             return
         if not self.selected_project:
-            # **A SENTENCE RATHER THAN SILENCE.** This row opens
-            # a language belonging to one repository, and the row key
-            # here is that repository's numbering -- issue 5
-            # exists in many of them. Across an organisation the
-            # key does not say which, so the honest answer is that
-            # it cannot be opened from here rather than nothing
-            # happening when a person clicks.
+            # **THIS ONE COULD WORK, AND DOES NOT YET.** The row
+            # keys on a database id, which names its repository
+            # without help -- so the reading across an
+            # organisation is reachable, it is the handler that
+            # still asks for a selection. Saying so beats a click
+            # that does nothing, and beats a reason that is not
+            # true of this table.
             self._cannot_without_a_repository('a language')
             return
         
@@ -6271,13 +6284,13 @@ class DossierApp(App):
         if event.row_key.value == "empty":
             return
         if not self.selected_project:
-            # **A SENTENCE RATHER THAN SILENCE.** This row opens
-            # a branch belonging to one repository, and the row key
-            # here is that repository's numbering -- issue 5
-            # exists in many of them. Across an organisation the
-            # key does not say which, so the honest answer is that
-            # it cannot be opened from here rather than nothing
-            # happening when a person clicks.
+            # **THIS ONE COULD WORK, AND DOES NOT YET.** The row
+            # keys on a database id, which names its repository
+            # without help -- so the reading across an
+            # organisation is reachable, it is the handler that
+            # still asks for a selection. Saying so beats a click
+            # that does nothing, and beats a reason that is not
+            # true of this table.
             self._cannot_without_a_repository('a branch')
             return
         
@@ -6358,13 +6371,13 @@ class DossierApp(App):
         if event.row_key.value == "empty":
             return
         if not self.selected_project:
-            # **A SENTENCE RATHER THAN SILENCE.** This row opens
-            # a component belonging to one repository, and the row key
-            # here is that repository's numbering -- issue 5
-            # exists in many of them. Across an organisation the
-            # key does not say which, so the honest answer is that
-            # it cannot be opened from here rather than nothing
-            # happening when a person clicks.
+            # **THIS ONE COULD WORK, AND DOES NOT YET.** The row
+            # keys on a database id, which names its repository
+            # without help -- so the reading across an
+            # organisation is reachable, it is the handler that
+            # still asks for a selection. Saying so beats a click
+            # that does nothing, and beats a reason that is not
+            # true of this table.
             self._cannot_without_a_repository('a component')
             return
         
@@ -6396,13 +6409,13 @@ class DossierApp(App):
         if event.row_key.value == "empty":
             return
         if not self.selected_project:
-            # **A SENTENCE RATHER THAN SILENCE.** This row opens
-            # a delta belonging to one repository, and the row key
-            # here is that repository's numbering -- issue 5
-            # exists in many of them. Across an organisation the
-            # key does not say which, so the honest answer is that
-            # it cannot be opened from here rather than nothing
-            # happening when a person clicks.
+            # **THIS ONE COULD WORK, AND DOES NOT YET.** The row
+            # keys on a database id, which names its repository
+            # without help -- so the reading across an
+            # organisation is reachable, it is the handler that
+            # still asks for a selection. Saying so beats a click
+            # that does nothing, and beats a reason that is not
+            # true of this table.
             self._cannot_without_a_repository('a delta')
             return
 
