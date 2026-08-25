@@ -1018,6 +1018,31 @@ def clone_cmd(repo, everything, into, depth, yes):
     click.echo(summarise(outcomes))
 
 
+@cli.command("capabilities")
+@click.option("--gap", is_flag=True, default=False,
+              help="Only the ones whose claim outruns the evidence named for it.")
+@click.option("--corpus", type=click.Path(path_type=Path), default=None,
+              help="A corpus checkout other than the vendored one.")
+def capabilities_cmd(gap: bool, corpus: Path | None) -> None:
+    """What each named thing this estate can do has reached.
+
+    The four rungs -- design, deployment, execution, monitoring -- and what each
+    declines to claim are the corpus's, in
+    `records/DRAFT-a-capability-has-four-phases.md`. This is a window onto
+    `ci/capability-registry.yaml` and adds no vocabulary of its own.
+
+    **It runs no command and resolves no address.** A pointer here is where to
+    look, never what was found, so a capability naming a command that does not
+    exist reads clean. Establishing that is each project's own gate.
+    """
+    from dossier.capabilities import read, render
+
+    reading = read(corpus)
+    click.echo(render(reading, only_gaps=gap))
+    if not reading.readable:
+        raise SystemExit(1)
+
+
 @cli.command("trim")
 @click.argument("repo")
 @click.option("--delete", is_flag=True, default=False,
