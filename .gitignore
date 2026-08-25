@@ -85,20 +85,23 @@ temp/
 *.temp
 
 docs/screenshots/*
-# The ring's recordings are written by the ordinary test run and committed, so
-# a change to the ring shows up in `git status` rather than silently diverging
-# from the README that embeds them. The other screenshots here are force-added
-# by hand, which means a regenerated one is invisible until somebody remembers.
+# **THE PICTURES ARE GENERATED WHERE THEY ARE SERVED.** `mkdocs build` records
+# every narrative through `hooks/pictures.py`, so nothing here needs to be
+# committed and nothing here can go stale. The comment this replaced said the
+# cost of the old arrangement out loud: the other screenshots "are force-added
+# by hand, which means a regenerated one is invisible until somebody
+# remembers". A picture nobody regenerates is how a shot of a deleted tab
+# survived eight months.
+#
+# Two exceptions, and both are read where nothing builds them:
+#
+#   the README's narrative, marked `committed=True` in `dossier.narratives`
+#   and recorded by the test suite so a change to it shows up in `git status`;
+#
+#   the ring's recordings, for the same reason -- the README embeds them.
+!docs/screenshots/first-run.gif
 !docs/screenshots/rad_ring_*.svg
-!docs/screenshots/dashboard_help.svg
-!docs/screenshots/dashboard_settings.svg
-!docs/screenshots/tab_dossier_wide.svg
-!docs/screenshots/tab_deltas_desktop.svg
 !docs/screenshots/content_viewer_readme.svg
-# The Overview tab, which is where the dashboard opens. Carried by the
-# quickstart, the index and the dashboard guide -- the last of which had an
-# ASCII diagram of a tab layout that no longer existed until this replaced it.
-!docs/screenshots/tab_overview_desktop.svg
 
 # Jupyter Notebook
 .ipynb_checkpoints/

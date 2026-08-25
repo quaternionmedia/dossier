@@ -12,10 +12,12 @@
 [![Tests](https://github.com/quaternionmedia/dossier/actions/workflows/test.yml/badge.svg)](https://github.com/quaternionmedia/dossier/actions)
 
 <p align="center">
-  <img src="docs/screenshots/tab_dossier_wide.svg" alt="Dossier Tab" width="800">
+  <img src="docs/screenshots/first-run.gif" alt="The dashboard opening: every repository in one reading, then the work in flight, then the branches carrying work nowhere else" width="800">
 </p>
+
 <p align="center">
-  <img src="docs/screenshots/tab_deltas_desktop.svg" alt="Dossier On deck: open deltas, and the open pull requests no delta claims" width="800">
+  <em>Three views, four seconds each. Recorded by the test suite from the
+  application itself.</em>
 </p>
 <p align="center">
   <img src="docs/screenshots/dashboard_help.svg" alt="Dossier Help" width="800">

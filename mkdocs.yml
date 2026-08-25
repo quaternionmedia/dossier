@@ -1,0 +1,83 @@
+# The docs site, and the reason it exists at all.
+#
+# **THE PICTURES ARE GENERATED WHERE THEY ARE SERVED.** Before this, every
+# screenshot was force-added past a `.gitignore` wildcard, and the ignore rule's
+# own comment said what that cost: "a regenerated one is invisible until
+# somebody remembers". A picture nobody regenerates goes stale silently, which
+# is how `tab_prs_desktop.svg` outlived the tab it showed by eight months.
+#
+# `hooks/pictures.py` records every narrative when the site builds, so the
+# pictures a reader sees were made from the application as it is at that
+# commit. They are gitignored: there is nothing to remember and nothing to go
+# stale.
+#
+# **THE README IS THE EXCEPTION AND HAS TO BE.** GitHub renders it and builds
+# nothing, so its picture must be in the repository or it is a broken image.
+# That one narrative is marked `committed=True` in `dossier.narratives` and is
+# the only one `.gitignore` lets through.
+
+site_name: Dossier
+site_description: >-
+  Keep track of what every project is doing, without asking anybody.
+repo_url: https://github.com/quaternionmedia/dossier
+edit_uri: blob/main/docs/
+
+docs_dir: docs
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.sections
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue grey
+      accent: blue
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue grey
+      accent: blue
+
+# The walkthrough lives outside `docs/` because the test suite runs it in
+# place -- `testpaths = ["tests", "walkthrough"]`. `mkdocs-same-dir` is not
+# used; the pages are listed here and mkdocs reads them through the include
+# below rather than the tree being reshaped around the site.
+nav:
+  - Home: index.md
+  - Getting started:
+      - Quickstart: quickstart.md
+      - Overview: overview.md
+      - Dashboard guide: dashboard.md
+  - Doing things:
+      - Workflows: workflows.md
+      - Workflow cookbook: cookbook.md
+      - Disk cookbook: disk.md
+      - Commands: commands.md
+      - Rad commands: rad-commands.md
+  - Governance:
+      - Governance dashboard: governance.md
+  - Reference:
+      - Architecture: architecture.md
+      - Settings: settings.md
+      - Extending: extending.md
+      - Contributing: contributing.md
+      - Roadmap: roadmap.md
+
+# Planning documents. Present on purpose and deliberately not in the reading
+# path: a roadmap for one subsystem is not a page somebody navigates to.
+not_in_nav: |
+  DELTA_ENTITY_PLAN.md
+  plan-rad-tui.md
+
+hooks:
+  - hooks/pictures.py
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.highlight

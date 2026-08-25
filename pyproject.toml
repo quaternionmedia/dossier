@@ -52,6 +52,15 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [dependency-groups]
+# Drawing the narrative GIFs. **In a group rather than in `dependencies`**: the
+# application never renders a picture, and a person running `dossier dashboard`
+# on a small machine should not install an imaging library to do it. The docs
+# build and the test that records the pictures are the only callers.
+docs = [
+    "pillow>=11.0.0",
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.5.0",
+]
 dev = [
     "httpx>=0.28.1",
     "pytest>=9.0.2",

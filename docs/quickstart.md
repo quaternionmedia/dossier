@@ -26,7 +26,7 @@ uv run dossier dashboard
 
 **That's it!** You now have a local project tracker:
 
-![The dashboard, on the Overview tab](screenshots/tab_overview_desktop.svg)
+![What the dashboard shows when it opens](screenshots/first-run.gif)
 
 Read on for details.
 
