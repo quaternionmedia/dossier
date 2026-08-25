@@ -3565,8 +3565,19 @@ class DossierApp(App):
 
         # A facet reads the same table at either scope, so the tab does not
         # need to know which one it is showing -- only which facet it holds.
-        on_tab = FACET_BY_TAB.get(tab_id, ())
         owner = getattr(self, "_scope_owner", None)
+
+        # **THE DOCS TAB HAS NO FACET, SO NOTHING ROUTED IT AT ORG SCOPE.** A
+        # facet is a table with two readings; documentation is a tree, so it
+        # was never registered as one -- and selecting an owner therefore fell
+        # through to the per-project gate below and returned. The tab kept
+        # whichever repository happened to be chosen last, which reads as that
+        # repository being the organisation's documentation.
+        if tab_id == "tab-docs" and owner:
+            self._load_docs_at_org(owner)
+            return
+
+        on_tab = FACET_BY_TAB.get(tab_id, ())
         if on_tab and owner:
             for facet in on_tab:
                 self._render_facet_at_org(facet, owner)
@@ -3613,6 +3624,77 @@ class DossierApp(App):
         if loader:
             loader(project)
     
+    # How many repositories the org documentation tree draws before it says
+    # it stopped. The whole corpus is five thousand sections across a hundred
+    # repositories, and a tree that renders every one of them costs the frame
+    # -- so this is a drawing limit, stated on screen, and never a claim about
+    # how much documentation there is.
+    DOC_REPOS_DRAWN = 40
+
+    def _load_docs_at_org(self, owner: str) -> None:
+        """Every repository's documentation, the owner's own first.
+
+        **A REPOSITORY LEVEL ABOVE THE FILE LEVEL.** At one repository the tree
+        is source file then section, which is the right shape for one. Across
+        an organisation the same shape puts a hundred repositories' files in
+        one flat list with nothing saying which repository a file belongs to.
+
+        Collapsed, because opening a hundred repositories' worth of nodes is
+        the cost the startup path was taught not to pay. The count sits in each
+        label so a reader can see where the documentation is without expanding
+        anything.
+
+        **THE OWNER'S OWN REPOSITORY IS FIRST WHERE THERE IS ONE.** An
+        organisation that documents itself keeps that in a repository named
+        after it, and it is the page somebody scoped to the owner came for.
+        """
+        from sqlalchemy import func
+
+        tree = self.query_one("#docs-tree", Tree)
+        tree.clear()
+        tree.root.expand()
+
+        with self.session_factory() as session:
+            rows = session.exec(
+                select(Project.id, Project.name, Project.full_name,
+                       func.count(DocumentSection.id))
+                .join(DocumentSection,
+                      DocumentSection.project_id == Project.id)
+                .where(Project.github_owner == owner)
+                .group_by(Project.id, Project.name, Project.full_name)
+            ).all()
+
+        if not rows:
+            empty = tree.root.add_leaf(
+                f"(nothing parsed for {owner} yet -- `dossier parse` reads a "
+                f"repository's documentation in)")
+            empty.data = {"type": "empty"}
+            return
+
+        def order(row):
+            _, name, full_name, count = row
+            bare = (full_name or name).split("/")[-1]
+            # The owner's own repository first, then most documented.
+            return (0 if bare.lower() == owner.lower() else 1, -count, bare)
+
+        ranked = sorted(rows, key=order)
+        for project_id, name, full_name, count in ranked[:self.DOC_REPOS_DRAWN]:
+            label = (full_name or name).split("/")[-1]
+            node = tree.root.add(f"📚 {label} ({count})", expand=False)
+            # Selecting a repository here selects it everywhere, which is what
+            # a person means by clicking one.
+            node.data = {"type": "project_id", "project_id": project_id,
+                         "target_tab": "tab-docs"}
+
+        if len(ranked) > self.DOC_REPOS_DRAWN:
+            rest = len(ranked) - self.DOC_REPOS_DRAWN
+            # **SAID, NOT SILENTLY DROPPED.** A tree showing forty of sixty
+            # with no line reads as sixty.
+            more = tree.root.add_leaf(
+                f"... and {rest} more repository(ies) with documentation, not "
+                f"drawn here")
+            more.data = {"type": "empty"}
+
     def _load_docs_tab(self, project: Project) -> None:
         """Load documentation sections as a tree grouped by source file."""
         docs_tree = self.query_one("#docs-tree", Tree)
@@ -5845,11 +5927,25 @@ class DossierApp(App):
             url=url
         ))
     
+    def _select_project_by_id(self, project_id: int, tab: str | None = None):
+        """Select a repository the caller knows only by id."""
+        with self.session_factory() as session:
+            project = session.get(Project, project_id)
+            if project is None:
+                self.notify(f"repository {project_id} is not in the database",
+                            severity="error", timeout=6)
+                return
+            session.expunge(project)
+        self._scope_owner = None
+        self.selected_project = project
+        self.show_project_details(project)
+        if tab:
+            self._activate_tab(tab)
+            self._load_tab_data(tab)
+
     @on(Tree.NodeSelected, "#docs-tree")
     def on_docs_tree_selected(self, event: Tree.NodeSelected) -> None:
         """Handle documentation tree node selection - show in viewer with navigation."""
-        if not self.selected_project:
-            return
         
         node = event.node
         if not node.data:
@@ -5857,6 +5953,25 @@ class DossierApp(App):
         
         nav_type = node.data.get("type")
         if nav_type == "empty":
+            return
+
+        # **BEFORE THE SELECTION GATE, BECAUSE THIS IS WHAT MAKES A
+        # SELECTION.** The org reading of this tree is drawn with no
+        # project selected, so a gate demanding one turned every row in it
+        # into a node that expands and does nothing. The branch was on the
+        # project tree's handler at first, which never receives these.
+        if nav_type == "project_id":
+            # The row knows an id rather than carrying the object: the org
+            # tree is built from a grouped query and never loads one.
+            project_id = node.data.get("project_id")
+            if project_id:
+                self._select_project_by_id(project_id,
+                                           node.data.get("target_tab"))
+            return
+
+        # Every other row is a section of the selected repository's
+        # documentation, and there is nothing to show without one.
+        if not self.selected_project:
             return
         
         if nav_type == "source_file":
