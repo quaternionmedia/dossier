@@ -373,3 +373,75 @@ def test_the_queue_is_only_planned_when_the_caller_can_look_it_up(session):
     assert len(with_queue) > len(without)
     assert any("/ask/" in v.subject for v in with_queue)
     assert not any("/ask/" in v.subject for v in without)
+
+
+# --- a queue that arrived incomplete, and whether a reader can tell -----------
+
+
+def test_a_payload_that_states_both_numbers_says_what_was_held_back():
+    """THE ONE THAT MATTERS.
+
+    The harness capped its queue at ten and said nothing, so a control panel
+    showed ten rows of fifteen and read as the whole of the work waiting on a
+    person. Found by queueing two governed runs against a live harness and
+    finding neither in the payload this reads.
+
+    Mutation, quoted as it printed: `max(0, total - shown)` replaced with `0`.
+
+        AssertionError: a payload that held rows back reported nothing held back
+        assert 0 == 5
+    """
+    document = {"queue_shown": 10, "queue_total": 15}
+
+    assert harness.dropped_from_queue(document) == 5, (
+        "a payload that held rows back reported nothing held back")
+
+
+def test_a_complete_queue_says_zero_rather_than_saying_nothing():
+    """Equal is a claim, not the absence of one."""
+    assert harness.dropped_from_queue({"queue_shown": 7, "queue_total": 7}) == 0
+
+
+def test_a_payload_that_does_not_say_is_not_a_payload_that_says_zero():
+    """**THE DISTINCTION THIS EXISTS FOR.**
+
+    An older emitter carries neither key. Reporting `0` for it would claim
+    completeness nobody stated, which is the same substitution
+    `unknown_totals` refuses in the totals -- a fact nobody established is not
+    a fact of zero.
+    """
+    assert harness.dropped_from_queue({}) is None
+    assert harness.dropped_from_queue({"queue_shown": 10}) is None
+    assert harness.dropped_from_queue({"queue_total": 10}) is None
+    assert harness.dropped_from_queue({"queue_shown": "10", "queue_total": 15}) is None
+
+
+def test_a_negative_difference_is_not_reported_as_rows_held_back():
+    """A malformed payload must not produce a negative count of work."""
+    assert harness.dropped_from_queue({"queue_shown": 20, "queue_total": 5}) == 0
+
+
+def test_the_ingest_report_names_the_questions_it_did_not_receive():
+    """A person reading the ingest learns that rows are missing, or that
+    nobody can say -- and the two read differently."""
+    held_back = harness.render([], written=False, dropped=4)
+    complete = harness.render([], written=False, dropped=0)
+    unstated = harness.render([], written=False)
+
+    assert "4 question(s)" in held_back
+    assert "did not fit" in held_back
+    assert "question(s)" not in complete
+    assert "cannot be established" in unstated
+    assert "cannot be established" not in complete
+
+
+def test_the_real_vectors_are_read_without_either_key():
+    """The committed vectors predate these keys, and must still be readable.
+
+    This is the compatibility claim the additive change rests on: an emitter
+    that has never heard of `queue_shown` produces a payload this accepts.
+    """
+    document = payload()
+
+    assert harness.check_schema(document) is None
+    assert harness.dropped_from_queue(document) is None

@@ -5151,6 +5151,7 @@ def harness_ingest(payload: Path, write: bool) -> None:
 
     from dossier.harness import (
         asks_of,
+        dropped_from_queue,
         invocations_of,
         load,
         plan,
@@ -5173,7 +5174,8 @@ def harness_ingest(payload: Path, write: bool) -> None:
             ).first()
 
         verdicts = plan(document, lookup, lookup_ask)
-        click.echo(render(verdicts, written=write))
+        click.echo(render(verdicts, written=write,
+                          dropped=dropped_from_queue(document)))
 
         # A refusal exits non-zero whether or not --write was passed. It used
         # to exit 0, so a scheduled ingest of an unreadable harness printed the

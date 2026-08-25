@@ -128,8 +128,31 @@ def outstanding_of(payload: dict) -> list[dict]:
     Read from whether an answer is present, not from the harness's `status`
     string. The status is the harness's own word for it and can lag a response
     that has already arrived; the answer either is there or is not.
+
+    **THIS IS THE ROWS THAT ARRIVED, WHICH IS NOT ALWAYS THE QUEUE.** Ask
+    `dropped_from_queue` before presenting it as a work list.
     """
     return [row for row in asks_of(payload) if not row.get("answered_with")]
+
+
+def dropped_from_queue(payload: dict) -> int | None:
+    """How many queue rows the harness held back, or `None` if it did not say.
+
+    **`None` AND `0` ARE DIFFERENT ANSWERS AND A WINDOW MUST NOT MERGE THEM.**
+    Zero is a harness that sent its whole queue. `None` is a harness that did
+    not report the size of the queue it capped -- older emitters carry neither
+    `queue_shown` nor `queue_total` -- and a reader showing "0 held back" for
+    that is claiming completeness nobody stated.
+
+    This exists because the harness sent ten rows of a queue of fifteen and
+    said nothing, so the Outstanding list read as the whole of the work waiting
+    on a person when it was the oldest two thirds of it. The emitter now states
+    both numbers; this is the half that reads them.
+    """
+    shown, total = payload.get("queue_shown"), payload.get("queue_total")
+    if not isinstance(shown, int) or not isinstance(total, int):
+        return None
+    return max(0, total - shown)
 
 
 def totals_of(payload: dict) -> dict[str, int]:
@@ -209,7 +232,15 @@ def plan(payload: dict, lookup_invocation, lookup_ask=None) -> list[Verdict]:
     return verdicts
 
 
-def render(verdicts: list[Verdict], written: bool) -> str:
+def render(verdicts: list[Verdict], written: bool,
+           dropped: int | None = None) -> str:
+    """What the ingest did, and what the payload could not tell it.
+
+    `dropped` is `dropped_from_queue`'s answer. Optional because a caller with
+    an older payload has nothing to pass, and that case prints differently from
+    a queue that arrived whole -- the two are different claims and merging them
+    is what let a truncated queue read as a complete one.
+    """
     marks = {"new": "[+]", "same": "[=]", "differs": "[!]", "refused": "[x]"}
     lines = []
     for verdict in verdicts:
@@ -231,4 +262,13 @@ def render(verdicts: list[Verdict], written: bool) -> str:
     lines.append(
         "Nothing here deletes. The payload carries an excerpt of the rows, so "
         "an invocation it does not mention is not one that was removed.")
+    if dropped is None:
+        lines.append(
+            "This payload does not say how large the harness's queue is, so "
+            "whether any questions were held back cannot be established here.")
+    elif dropped:
+        lines.append(
+            f"{dropped} question(s) waiting on a person did not fit in this "
+            f"payload and are not below. Raise the harness's queue cap "
+            f"(`qmcp.dashboard.QUEUE`) or answer some.")
     return "\n".join(lines)
