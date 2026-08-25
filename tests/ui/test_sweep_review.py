@@ -104,8 +104,14 @@ def test_adding_it_did_not_cost_the_menu_anything():
     from dossier.rad.session import budget_for
 
     do = next(w for w in resolve() if w.label == "Do")
-    assert len(do.children) == 4
-    assert budget_for(len(do.children)) == budget_for(3)
+    # **`Do` HAS SINCE GROWN, AND THAT COST WAS PAID SEPARATELY.** The sweep
+    # was the fourth child and free: rad's budget is 1 + ceil(N/2) + 1, which
+    # is 4 for three children and 4 for four. `Add` and `Remove` arrived later,
+    # when eleven buttons were consolidated onto the keypad's middle rank, and
+    # those two took it to 5. What this test still says is what it always said:
+    # adding the sweep was not what cost anything.
+    assert budget_for(4) == budget_for(3)
+    assert len(do.children) >= 4
 
 
 # --- what it draws ------------------------------------------------------------

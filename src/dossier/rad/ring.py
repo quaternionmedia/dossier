@@ -331,7 +331,8 @@ class RingScreen(ModalScreen):
     """
 
     def __init__(self, session: RadSession, context: Any = None,
-                 theme: str = DEFAULT_THEME) -> None:
+                 theme: str = DEFAULT_THEME, opening_on: int | None = None
+                 ) -> None:
         # NOT `self._context`. `MessagePump`, which every Textual screen
         # inherits, already has a `_context`; assigning over it replaces a
         # method with a value and the app then dies inside the message pump
@@ -342,6 +343,14 @@ class RingScreen(ModalScreen):
         self._roles = roles(theme)
         self._ring = Ring(theme=theme, id="rad-ring")
         self._status = Static("", id="rad-status")
+        # A cell to press as though the person had, right after opening.
+        #
+        # **PRESSED, NOT JUMPED TO.** The caller is the row of buttons on the
+        # keypad's middle rank, and clicking one is two inputs -- open, then
+        # choose -- exactly as `m` then `6` is. Seeding the session's state
+        # directly would put the same menu on screen for one charged input and
+        # make the cost ledger disagree with the keyboard.
+        self._opening_on = opening_on
 
     def compose(self) -> ComposeResult:
         with Middle():
@@ -364,6 +373,20 @@ class RingScreen(ModalScreen):
             # somebody to escape from.
             self.dismiss(None)
             return
+
+        if self._opening_on is not None:
+            intent = self._session.press_cell(self._opening_on)
+            if intent is not None:
+                # A cell that commits on the way in. Nothing on the middle rank
+                # does today, and refusing to handle it would be a menu that
+                # opened and did nothing.
+                self.dismiss(intent)
+                return
+            view = self._session.view
+            if view is None:
+                self.dismiss(None)
+                return
+
         self._redraw(view)
 
     def _redraw(self, view: RingView) -> None:

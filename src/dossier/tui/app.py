@@ -1201,6 +1201,19 @@ class DossierApp(App):
                                 yield IntersectionsPanel(self.session_factory,
                                                          id="intersections")
                                 yield DataTable(id="components-table")
+                                # **THIS ROW STAYS, AND THE GUARD FROM #36 IS
+                                # WHY.** Consolidating the button rows removed
+                                # it, and `test_the_components_pane_moved_
+                                # rather_than_went` went red: these three are
+                                # the only way to create or remove a component
+                                # link, and none of them has a wedge. `Do`
+                                # already holds six children after `Add` and
+                                # `Remove`; three more would be nine, past the
+                                # eight cells a level has.
+                                #
+                                # So the consolidation stops where the ring
+                                # runs out of room, and says so, rather than
+                                # deleting the only route to an act.
                                 with Horizontal(id="component-buttons"):
                                     yield Button("Add Component", id="btn-add-component", variant="primary")
                                     yield Button("Link as Parent", id="btn-link-parent", variant="default")
@@ -1298,22 +1311,63 @@ class DossierApp(App):
                     with TabPane("Deltas", id="tab-deltas"):
                         with Vertical():
                             yield DataTable(id="deltas-table")
-                            with Horizontal(id="delta-buttons"):
-                                yield Button("New Delta", id="btn-new-delta", variant="primary")
-                                yield Button("Advance", id="btn-advance-phase", variant="default")
-                                yield Button("Note", id="btn-add-note", variant="default")
-                                yield Button("Link", id="btn-add-delta-link", variant="default")
 
-        # Bottom command bar
+        # **ONE ROW, AND IT IS THE RING'S MIDDLE RANK.** Four buttons here
+        # and nine more scattered across three tabs were thirteen affordances
+        # a person had to find, none of which said what its keyboard route
+        # was. The ring already holds every act, numbered, and it takes the
+        # pointer now -- so the row is `4`, `5`, `6`, the cells on the middle
+        # row of the keypad, and pressing one opens the ring there.
+        #
+        # Two inputs, exactly as `m` then `6` is two: the click opens and the
+        # cell chooses, and rad charges for both. A row that jumped straight
+        # to an act would be cheaper on screen and wrong in the ledger.
         with Horizontal(id="command-bar"):
             yield Input(placeholder="🔍 Search... or :cmd (try :help)", id="search-input")
-            yield Button("Sync", id="btn-sync", variant="primary")
-            yield Button("Add", id="btn-add", variant="default")
-            yield Button("Del", id="btn-delete", variant="error")
-            yield Button("?", id="btn-help", variant="default")
+            yield Button("4 Reach", id="btn-rank-4", variant="default")
+            yield Button("5 Close", id="btn-rank-5", variant="default")
+            yield Button("6 Do", id="btn-rank-6", variant="primary")
         
         yield Footer()
     
+    # Which verb each button in the row opens the ring at. The numbers are
+    # the numpad's, so the label a person clicks and the digit they would have
+    # pressed are the same character.
+    RANK = {"btn-rank-4": 4, "btn-rank-6": 6}
+
+    # Set by the row, read once by the next open. See `action_rad_menu`.
+    _rad_open_at_cell = None
+
+    @on(Button.Pressed, "#btn-rank-4")
+    @on(Button.Pressed, "#btn-rank-6")
+    def on_rank_pressed(self, event: Button.Pressed) -> None:
+        """Open the ring, then press the cell the button names.
+
+        **TWO INPUTS, BECAUSE IT IS TWO INPUTS.** The click opens the menu and
+        the cell chooses a verb, exactly as `m` then `6` does, and rad charges
+        for both. Jumping straight to the verb would be one press on screen and
+        a cost ledger that quietly disagreed with the keyboard.
+        """
+        event.stop()
+        cell = self.RANK.get(event.button.id)
+        if cell is None:
+            return
+        self._rad_open_at_cell = cell
+        self.action_rad_menu()
+
+    @on(Button.Pressed, "#btn-rank-5")
+    def on_rank_five_pressed(self, event: Button.Pressed) -> None:
+        """`5` closes, at every depth and from outside as well.
+
+        The centre of the ring is the one cell whose meaning never changes, so
+        the button carrying its number does not get a second meaning here. With
+        the ring shut there is nothing to back out of, and it says so rather
+        than opening the menu a person just declined to open.
+        """
+        event.stop()
+        self.notify("Nothing to close. 5 backs out of the ring when it is "
+                    "open, at any depth.", timeout=4)
+
     def on_mouse_down(self, event) -> None:
         """Right-click opens the ring, on whatever is under the pointer.
 
@@ -1353,7 +1407,11 @@ class DossierApp(App):
                 return
             self._apply_rad_intent(intent)
 
-        self.push_screen(RingScreen(self._rad), applied)
+        # Consumed here rather than left set: the next `m` is a plain open,
+        # and a cell that survived one use would silently steer it.
+        opening_on = self._rad_open_at_cell
+        self._rad_open_at_cell = None
+        self.push_screen(RingScreen(self._rad, opening_on=opening_on), applied)
 
     # One rad session for the app's lifetime, so the cost ledger accumulates
     # across actions rather than resetting each time the ring opens. A class
@@ -1388,6 +1446,8 @@ class DossierApp(App):
     # and the methods do not exist yet. `_dispatch_action` resolves it.
     RAD_ACTIONS: dict[str, str] = {
         "project.sync": "_sync_current_view",
+        "project.add": "action_add",
+        "project.remove": "action_delete",
         "reach.ingest": "_begin_thread_ingest",
         "reach.read": "_open_selected_thread",
         "sweep.review": "_begin_sweep_review",
@@ -7304,60 +7364,28 @@ class DossierApp(App):
         else:
             self.sub_title = "Documentation Standardization Tool"
     
-    @on(Button.Pressed, "#btn-sync")
-    def on_sync_pressed(self) -> None:
-        """Handle sync button press."""
-        self.action_sync()
-    
-    @on(Button.Pressed, "#btn-add")
-    def on_add_pressed(self) -> None:
-        """Handle add button press."""
-        self.action_add()
-    
-    @on(Button.Pressed, "#btn-delete")
-    def on_delete_pressed(self) -> None:
-        """Handle delete button press."""
-        self.action_delete()
-    
-    @on(Button.Pressed, "#btn-help")
-    def on_help_pressed(self) -> None:
-        """Handle help button press."""
-        self.action_help()
-    
     @on(Button.Pressed, "#btn-add-component")
     def on_add_component_pressed(self) -> None:
         """Handle add component button press."""
         self.action_add_component()
-    
+
     @on(Button.Pressed, "#btn-link-parent")
     def on_link_parent_pressed(self) -> None:
         """Handle link as parent button press."""
         self.action_link_parent()
-    
+
     @on(Button.Pressed, "#btn-remove-component")
     def on_remove_component_pressed(self) -> None:
         """Handle remove component button press."""
         self.action_remove_component()
 
-    @on(Button.Pressed, "#btn-new-delta")
-    def on_new_delta_pressed(self) -> None:
-        """Handle new delta button press."""
-        self.action_new_delta()
-
-    @on(Button.Pressed, "#btn-advance-phase")
-    def on_advance_phase_pressed(self) -> None:
-        """Handle advance phase button press."""
-        self.action_advance_delta_phase()
-
-    @on(Button.Pressed, "#btn-add-note")
-    def on_add_note_pressed(self) -> None:
-        """Handle add note button press."""
-        self.action_add_delta_note()
-
-    @on(Button.Pressed, "#btn-add-delta-link")
-    def on_add_delta_link_pressed(self) -> None:
-        """Handle add delta link button press."""
-        self.action_add_delta_link()
+    # **EIGHT HANDLERS WENT WITH EIGHT BUTTONS.** Each was a button that
+    # called an action, and every one of those actions is a wedge in the
+    # ring. The three above are the exception: they edit component links,
+    # no wedge reaches them, and `Do` has no room for three more.
+    # A handler for a button nothing composes is a route to nowhere, which
+    # `test_no_handler_names_a_button_that_is_not_composed` refuses -- and the
+    # actions themselves are untouched, because the ring calls them.
 
     # **THE BUTTON AND THE RING CALL ONE METHOD.** Each of these held its own
     # copy of "set the filter, restyle the buttons, reload" -- three copies of

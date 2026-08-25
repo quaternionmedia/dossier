@@ -55,6 +55,8 @@ same cell.
 | `6.6` | `m` `6` `6` | &nbsp;&nbsp;Add note | `delta.note` | yes |
 | `6.2` | `m` `6` `2` | &nbsp;&nbsp;Sync project | `project.sync` | yes |
 | `6.4` | `m` `6` `4` | &nbsp;&nbsp;Sweep a dependency | `sweep.review` | yes |
+| `6.9` | `m` `6` `9` | &nbsp;&nbsp;Add a project | `project.add` | yes |
+| `6.3` | `m` `6` `3` | &nbsp;&nbsp;Remove a project | `project.remove` | yes |
 | `2` | `m` `2` | Show | *opens a submenu* | yes |
 | `2.8` | `m` `2` `8` | &nbsp;&nbsp;All | `filter.all` | yes |
 | `2.6` | `m` `2` `6` | &nbsp;&nbsp;Synced only | `filter.synced` | yes |

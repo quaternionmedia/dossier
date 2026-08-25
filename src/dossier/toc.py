@@ -70,6 +70,8 @@ ACT_ROUTES: dict[str, str] = {
     "sweep.review": "dossier sweep",
     "reach.ingest": "dossier deltas ingest",
     "reach.clone": "dossier clone",
+    "project.add": "dossier projects add",
+    "project.remove": "dossier projects remove",
     "delta.advance": "",
     "delta.note": "",
     "filter.all": "",
