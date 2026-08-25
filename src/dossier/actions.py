@@ -198,9 +198,11 @@ REGISTRY: tuple[Action, ...] = (
       for view in VIEWS),
 
     # --- Do: what to change ----------------------------------------------
-    Action("delta.advance", "Advance phase", button="btn-advance-phase",),
-    Action("delta.note", "Add note", button="btn-add-note"),
-    Action("project.sync", "Sync project", key="s", button="btn-sync",),
+    Action("delta.advance", "Advance phase",
+           only="its button was one of eleven consolidated onto the row on the keypad's middle rank; the ring is where it is asked for now, and the ring takes the pointer"),
+    Action("delta.note", "Add note",
+           only="its button was one of eleven consolidated onto the row on the keypad's middle rank; the ring is where it is asked for now, and the ring takes the pointer"),
+    Action("project.sync", "Sync project", key="s"),
     Action("sweep.review", "Sweep a dependency", only="a sweep is proposed from the Dependencies selection and has "
                 "no button of its own; the ring is where it is asked for"),
 
@@ -211,6 +213,9 @@ REGISTRY: tuple[Action, ...] = (
 
     # --- Reach: across the seam ------------------------------------------
     Action("reach.qmcp", "Open in qmcp", only="not applied yet; the ring says so rather than hiding it"),
+    Action("project.add", "Add a project", key="a"),
+    Action("project.remove", "Remove a project",
+           only="its button was one of eleven consolidated onto the row on the keypad's middle rank; the ring is where it is asked for now, and the ring takes the pointer"),
     Action("reach.clone", "Clone what is absent",
            only="a clone writes directories onto somebody's disk and pulls "
                 "them over the network, so it is asked for deliberately; a "

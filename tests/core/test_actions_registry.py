@@ -179,7 +179,11 @@ def test_every_convention_says_what_it_means():
 
 
 def test_a_button_resolves_to_its_action():
-    assert actions.by_button("btn-sync").id == "project.sync"
+    """`btn-sync` was the example here and no longer exists: eleven buttons
+    were consolidated onto the row on the keypad's middle rank, and the ones
+    that remain are the ones sitting beside a text field the ring cannot
+    hold."""
+    assert actions.by_button("btn-ingest-threads").id == "reach.ingest"
     assert actions.by_button("btn-nothing") is None
 
 

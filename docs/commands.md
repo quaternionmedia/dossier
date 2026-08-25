@@ -82,6 +82,10 @@ depth -- so it is never an item and no number contains it. Arrows and
     `dossier github sync`
   - `6.4`  Sweep a dependency -- `m` `6` `4`
     `dossier sweep`
+  - `6.9`  Add a project -- `m` `6` `9`
+    `dossier projects add`
+  - `6.3`  Remove a project -- `m` `6` `3`
+    `dossier projects remove`
 - **`2`  Show**
   - `2.8`  All -- `m` `2` `8`
     *in the application only*
@@ -103,7 +107,7 @@ depth -- so it is never an item and no number contains it. Arrows and
 
 ## Outside the ring
 
-`dossier --help` reaches **73** leaf commands; **21**
+`dossier --help` reaches **73** leaf commands; **23**
 of them are named above beside the view they belong to. The rest are
 not menu items and are not meant to be: the ring is for what somebody
 does repeatedly, and a cell spent on a once-a-quarter migration is a
@@ -160,10 +164,8 @@ cell taken from something else.
   dossier index
   dossier init
   dossier parse
-  dossier projects add
   dossier projects list
   dossier projects purge
-  dossier projects remove
   dossier projects rename
   dossier serve
   dossier show

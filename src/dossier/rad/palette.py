@@ -59,6 +59,13 @@ def resolve(context: Any = None) -> tuple[Wedge, ...]:
             # is 1 + ceil(N/2) + 1, and that is 4 for both three children and
             # four. A fifth would be the one that costs.
             Wedge("do.sweep", "Sweep a dependency", action="sweep.review"),
+            # **FIFTH AND SIXTH, AND THEY COST A STEP.** rad's budget is
+            # 1 + ceil(N/2) + 1: four children cost 4 and six cost 5. Paid
+            # because the alternative was worse -- `Add` and `Delete` sat in a
+            # command bar being consolidated away, and an act with no wedge and
+            # no button is an act only the keyboard can reach.
+            Wedge("do.add", "Add a project", action="project.add"),
+            Wedge("do.remove", "Remove a project", action="project.remove"),
         )),
         Wedge(SHOW, "Show", children=(
             Wedge("show.all", "All", action="filter.all"),
