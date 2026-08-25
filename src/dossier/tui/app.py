@@ -88,6 +88,7 @@ def extract_file_path(source_file: str | None) -> str | None:
 
 
 from dossier import actions
+from dossier.views import VIEWS
 from dossier.facets import (BY_TAB as FACET_BY_TAB,
                             BY_TITLE as FACET_BY_TITLE,
                             only_on)
@@ -1352,19 +1353,12 @@ class DossierApp(App):
     # only construction path this app has.
     _current_project = None
 
-    # Actions the ring can commit that map onto a view this app already has.
-    # `view.harness` was here and no wedge in the palette names it, so nothing
-    # could ever commit it -- a dead entry that made the dispatch look wider
-    # than the menu. `tab-harness` is still reachable by its tab; only the
-    # unreachable mapping is gone. `test_rad_sync.py` checks the direction.
-    RAD_VIEWS = {
-        "view.overview": "tab-overview",
-        "view.deltas": "tab-deltas",
-        "view.governance": "tab-governance",
-        "view.disk": "tab-disk",
-        "view.details": "tab-details",
-        "view.topology": "tab-topology",
-    }
+    # **DERIVED FROM `dossier.views`, WHICH IS ALSO WHERE THE RING GETS ITS
+    # WEDGES.** Hand-kept, this held six of the eighteen views and once held a
+    # seventh that no wedge named -- a dead entry making the dispatch look
+    # wider than the menu, while twelve real views had no keystroke at all.
+    # Both failures are the same failure: two lists of the same thing.
+    RAD_VIEWS = {view.action: view.tab for view in VIEWS}
 
     # **ONE TABLE, AND THE BUTTONS USE IT TOO.** Dispatch was a chain of
     # `if intent.action == ...`, which is a fourth place describing the same

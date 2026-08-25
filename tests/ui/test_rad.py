@@ -51,11 +51,63 @@ def test_every_top_level_verb_is_a_submenu():
     assert all(w.is_submenu for w in resolve(None))
 
 
+def _walk_wedges(wedges, path=()):
+    for wedge in wedges:
+        here = (*path, wedge.label)
+        yield wedge, here
+        yield from _walk_wedges(wedge.children, here)
+
+
 def test_every_leaf_names_an_action():
-    """A wedge with no action and no children is a dead end somebody committed."""
-    for verb in resolve(None):
-        for child in verb.children:
-            assert child.action, f"{child.id} names no action"
+    """A wedge with no action and no children is a dead end somebody committed.
+
+    **AT EVERY DEPTH, NOT JUST THE SECOND.** This looked one level down when
+    the ring was two levels deep; `Go` now holds a group level, so a dead
+    wedge three levels in would have passed a check that never reached it.
+    """
+    for wedge, path in _walk_wedges(resolve(None)):
+        assert wedge.action or wedge.children, (
+            f"{' > '.join(path)} names no action and opens nothing")
+        assert not (wedge.action and wedge.children), (
+            f"{' > '.join(path)} both commits and opens")
+
+
+def first_leaf():
+    """The wedge the highlight lands on if you only ever press enter.
+
+    Returns `(wedge, depth)`, where depth is how many enters reach it.
+    """
+    wedge, depth = resolve()[0], 1
+    while wedge.children:
+        wedge, depth = wedge.children[0], depth + 1
+    return wedge, depth
+
+
+def first_leaf_path():
+    """The ids walked through to reach it, for asserting on the whole path."""
+    ids, wedge = [], resolve()[0]
+    while True:
+        ids.append(wedge.id)
+        if not wedge.children:
+            return tuple(ids)
+        wedge = wedge.children[0]
+
+
+def commit_first(s):
+    """Enter until something commits, however deep the ring is.
+
+    **DEPTH-AGNOSTIC ON PURPOSE.** These tests pressed enter exactly twice
+    because the ring was exactly two levels; when `Go` grew a group level,
+    eleven of them failed on the shape of the menu rather than on the state
+    machine they exist to test. What is under test is that entering a wedge
+    with children opens it and entering one without commits -- which is a
+    property of the machine at any depth.
+    """
+    for _ in range(8):
+        found = s.enter()
+        if found is not None:
+            return found
+    raise AssertionError("nothing committed within eight levels")
 
 
 def test_no_verb_exceeds_the_keyboard_budget():
@@ -115,13 +167,12 @@ def test_entering_a_submenu_descends_rather_than_committing():
 def test_entering_a_leaf_commits_an_intent_and_closes():
     s = session()
     s.open_at(None)
-    s.enter()
-    intent = s.enter()
+    intent = commit_first(s)
     assert isinstance(intent, Intent)
-    # Derived, not hardcoded: the first child of `Go` is dossier's to choose,
-    # and pinning its name here would make a menu edit look like a broken
-    # state machine.
-    assert intent.action == resolve()[0].children[0].action
+    # Derived, not hardcoded: what sits first under `Go` is dossier's to
+    # choose, and pinning its name here would make a menu edit look like a
+    # broken state machine.
+    assert intent.action == first_leaf()[0].action
     assert s.is_open is False
 
 
@@ -147,18 +198,16 @@ def test_the_intent_carries_the_verb_it_was_reached_through():
 def test_the_intent_carries_the_whole_path():
     s = session()
     s.open_at(None)
-    s.enter()
-    assert s.enter().path == (GO, resolve()[0].children[0].id)
+    assert commit_first(s).path == first_leaf_path()
 
 
 def test_a_handler_is_called_with_the_intent():
     seen: list[Intent] = []
     s = session(on_intent=seen.append)
     s.open_at(None)
-    s.enter()
-    s.enter()
+    commit_first(s)
     assert len(seen) == 1
-    assert seen[0].action == resolve()[0].children[0].action
+    assert seen[0].action == first_leaf()[0].action
 
 
 def test_keys_before_the_ring_is_open_do_nothing():
@@ -172,27 +221,35 @@ def test_keys_before_the_ring_is_open_do_nothing():
 
 
 def test_ipa_counts_every_input_from_idle_to_commit():
-    """open + enter + enter = 3. rad counts a keystroke as one input."""
+    """open, then one enter per level. rad counts a keystroke as one input.
+
+    Derived from the menu's depth rather than typed: the figure was 3 when the
+    ring was two levels and is 4 now that `Go` holds a group, and neither is a
+    fact about the meter.
+    """
     s = session()
     s.open_at(None)
-    s.enter()
-    assert s.enter().ipa == 3
+    assert commit_first(s).ipa == 1 + first_leaf()[1]
 
 
 def test_rotation_costs_an_input():
     s = session()
     s.open_at(None)
     s.rotate(+1)
-    s.enter()
-    assert s.enter().ipa == 4
+    intent = commit_first(s)
+    # **THE COMMITTED PATH, NOT `Go`'S DEPTH.** Rotating moves to another verb,
+    # and the verbs are not all the same depth -- `Go` holds a group level and
+    # `Do` does not. Reading the depth off the intent asks the question the
+    # test means: open, rotate, and one enter per level it actually walked.
+    assert intent.ipa == 2 + len(intent.path)
 
 
 def test_the_tally_resets_between_actions():
     """Otherwise the second action inherits the first one's cost and every
     figure after the first is wrong."""
     s = session()
-    s.open_at(None); s.enter(); first = s.enter()
-    s.open_at(None); s.enter(); second = s.enter()
+    s.open_at(None); first = commit_first(s)
+    s.open_at(None); second = commit_first(s)
     assert first.ipa == second.ipa
 
 
@@ -216,11 +273,12 @@ def test_the_ledger_reconciles():
 
 def test_the_report_gives_ipa_and_its_inverse():
     s = session()
-    s.open_at(None); s.enter(); s.enter()
+    s.open_at(None); commit_first(s)
+    cost = 1 + first_leaf()[1]
     report = s.cost_report()
     assert report["actions"] == 1
-    assert report["ipa"] == 3
-    assert report["apc"] == pytest.approx(1 / 3)
+    assert report["ipa"] == cost
+    assert report["apc"] == pytest.approx(1 / cost)
 
 
 def test_the_report_names_over_budget_actions_without_failing():
@@ -275,10 +333,10 @@ def test_the_session_imports_nothing_from_textual():
 
 def test_the_intent_serialises_to_a_message():
     s = session()
-    s.open_at(None); s.enter()
-    payload = s.enter().as_dict()
+    s.open_at(None)
+    payload = commit_first(s).as_dict()
     assert payload["schema"] == 1
-    assert payload["cost"]["ipa"] == 3
+    assert payload["cost"]["ipa"] == 1 + first_leaf()[1]
     assert payload["clock"] is None, "the clock is stubbed, not implemented"
 
 
@@ -411,11 +469,11 @@ class TestRingInTheApp:
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             await self._open(pilot)
-            await pilot.press("enter")      # Go
-            await pilot.pause()
-            await pilot.press("enter")      # the first child of Go
-            await pilot.pause()
-            expected = DossierApp.RAD_VIEWS[resolve()[0].children[0].action]
+            leaf, depth = first_leaf()
+            for _ in range(depth):
+                await pilot.press("enter")
+                await pilot.pause()
+            expected = DossierApp.RAD_VIEWS[leaf.action]
             assert app.query_one("#project-tabs").active == expected
 
     @pytest.mark.asyncio
@@ -430,15 +488,15 @@ class TestRingInTheApp:
         app = DossierApp(session_factory=lambda: Session(engine))
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
+            depth = first_leaf()[1]
             for _ in range(2):
                 await self._open(pilot)
-                await pilot.press("enter")
-                await pilot.pause()
-                await pilot.press("enter")
-                await pilot.pause()
+                for _ in range(depth):
+                    await pilot.press("enter")
+                    await pilot.pause()
             report = app._rad.cost_report()
             assert report["actions"] == 2
-            assert report["ipa"] == 3
+            assert report["ipa"] == 1 + depth
             assert report["reconciles"] is True
 
 

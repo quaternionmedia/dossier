@@ -10,6 +10,10 @@ a verb over budget is a resolver design error rather than a number to relax. Fou
 children cost at most 4 inputs to reach; ten would cost 7. Adding a child here
 is a cost somebody pays on every use.
 
+WHERE `Go` GETS ITS CHILDREN. `dossier.views.grouped`, so a view added to that
+registry gets a keystroke without an edit here. Nothing else in this file is
+derived, because nothing else is a list somebody else also keeps.
+
 WHAT THIS CANNOT DO. Know whether a view exists. It names actions; applying them
 is the host's, and an action named here that nothing handles is a dead wedge --
 which `tests/test_rad_palette.py` checks for rather than trusting.
@@ -20,6 +24,7 @@ from __future__ import annotations
 from typing import Any
 
 from dossier.rad.session import DO, GO, REACH, SHOW, Wedge
+from dossier.views import grouped
 
 
 def resolve(context: Any = None) -> tuple[Wedge, ...]:
@@ -30,22 +35,21 @@ def resolve(context: Any = None) -> tuple[Wedge, ...]:
     Taking it now means the signature does not change when they do.
     """
     return (
-        Wedge(GO, "Go", children=(
-            # First, so it is the cheapest wedge in the ring to reach: the
-            # highlight lands here on entering Go, making the org overview
-            # open, enter, enter. Ordering inside a verb is the host's only
-            # lever on cost once the child count is fixed.
-            Wedge("go.overview", "Overview", action="view.overview"),
-            Wedge("go.deltas", "Deltas", action="view.deltas"),
-            Wedge("go.governance", "Governance", action="view.governance"),
-            Wedge("go.disk", "Disk", action="view.disk"),
-            Wedge("go.details", "Details", action="view.details"),
-            # Sixth. `Go` was five children and is now six, which costs a step:
-            # rad's budget is 1 + ceil(N/2) + 1, so five cost 4 and six cost 5.
-            # Paid deliberately -- a view reachable only by a button is
-            # invisible to somebody driving from the keyboard.
-            Wedge("go.topology", "Topology", action="view.topology"),
-        )),
+        # **THE VIEWS COME FROM `dossier.views`, GROUPED, AND THAT IS A
+        # LEVEL.** `Go` held six of the eighteen views this application has;
+        # the other twelve were reachable by mouse only. Eighteen children do
+        # not fit -- rad places at most eight cells per level -- so the group
+        # is a real level a person presses through rather than a heading
+        # invented for a document.
+        #
+        # The cost is one keystroke: a view was `m` and two digits and is now
+        # `m` and three. Paid deliberately, because two thirds of the views
+        # cost infinity before.
+        Wedge(GO, "Go", children=tuple(
+            Wedge(f"go.{group.lower()}", group, children=tuple(
+                Wedge(f"go.{view.name}", view.title, action=view.action)
+                for view in found))
+            for group, found in grouped())),
         Wedge(DO, "Do", children=(
             Wedge("do.advance", "Advance phase", action="delta.advance"),
             Wedge("do.note", "Add note", action="delta.note"),

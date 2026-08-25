@@ -8,6 +8,7 @@
 
 | Document | Description |
 |----------|-------------|
+| [Commands](commands.md) | Every command, numbered by the keys that reach it. Generated |
 | [Quickstart](quickstart.md) | Get running in 5 minutes |
 | [Dashboard Guide](dashboard.md) | Complete TUI dashboard reference |
 | [Governance Dashboard](governance.md) | Where every QM project stands, and what is in flight — which repo to run it in, and the prep it needs |

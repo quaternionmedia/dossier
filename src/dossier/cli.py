@@ -868,6 +868,107 @@ def overview(owner: Optional[str], limit: int, only: Optional[str],
 
 
 @cli.command()
+@click.argument("view", required=False)
+@click.option("--project", "-p", default=None,
+              help="One repository by name. Default: every repository.")
+@click.option("--limit", "-n", default=20, show_default=True,
+              help="Rows to print.")
+def show(view, project, limit):
+    """Print one view outside the application.
+
+    VIEW is a name from the index -- `branches`, `dependencies`, `waiting`.
+    Without one this lists what there is.
+
+    **EVERY VIEW BACKED BY A FACET GETS A ROUTE FROM THIS ONE COMMAND.** Eight
+    views have a command of their own and ten did not, and writing ten more
+    would have been ten more places for the set of views to drift apart. The
+    reading is the same one the tab draws, from `dossier.facets`.
+    """
+    from dossier import facets, views
+
+    if not view:
+        click.echo("Views, by the keys that reach them:")
+        from dossier.toc import entries
+
+        for entry in entries():
+            if not entry.action.startswith("view."):
+                continue
+            name = entry.action.split(".", 1)[1]
+            click.echo(f"  {entry.number:<8} {name:<16} {entry.summary}")
+        click.echo("")
+        click.echo("`dossier index` prints the whole menu.")
+        return
+
+    found = views.BY_NAME.get(view)
+    if found is None:
+        near = ", ".join(sorted(views.BY_NAME)[:6])
+        click.echo(f"No view called {view!r}. Try one of: {near}, ...", err=True)
+        raise SystemExit(1)
+
+    on_tab = facets.BY_TAB.get(found.tab, ())
+    if not on_tab:
+        where = found.cli or "the application"
+        click.echo(f"{found.title} is not read from the database. "
+                   f"Use `{where}`.", err=True)
+        raise SystemExit(1)
+
+    with get_session() as session:
+        scoped = None
+        if project:
+            scoped = session.exec(
+                select(Project).where(Project.name == project)
+            ).first()
+            if scoped is None:
+                click.echo(f"No project called {project!r}.", err=True)
+                raise SystemExit(1)
+
+        for facet in on_tab:
+            section = facet.at(session, project=scoped, limit=limit)
+            click.echo("")
+            click.echo(section.title)
+            click.echo("  " + "  ".join(section.headers))
+            for row in section.rows:
+                click.echo("  " + "  ".join(str(cell) for cell in row))
+            if not section.rows:
+                click.echo("  (nothing)")
+            if section.note:
+                click.echo("")
+                click.echo("  " + section.note)
+
+
+@cli.command()
+@click.option("--markdown/--plain", default=False,
+              help="Print the generated page instead of the terminal form.")
+def index(markdown):
+    """Every command in the ring, numbered by the keys that reach it.
+
+    `8.6.6` is the route rather than a label: `m` opens the ring, `8` is Go,
+    `6` is Work, `6` is Sweep. The same numbering is in `docs/commands.md`, which
+    the test suite regenerates.
+    """
+    from dossier.toc import as_markdown, entries
+
+    if markdown:
+        from dossier.tui.app import DossierApp
+
+        click.echo(as_markdown(DossierApp.RAD_HANDLED), nl=False)
+        return
+
+    from dossier.tui.app import DossierApp
+
+    for entry in entries(DossierApp.RAD_HANDLED):
+        pad = "  " * (entry.depth - 1)
+        if entry.is_menu:
+            click.echo(f"{entry.number:<10} {pad}{entry.title}")
+            continue
+        keys = " ".join(entry.keys)
+        mark = "" if entry.wired else "   (not applied yet)"
+        click.echo(f"{entry.number:<10} {pad}{entry.title:<24} {keys}{mark}")
+        if entry.cli:
+            click.echo(f"{'':<10} {pad}  {entry.cli}")
+
+
+@cli.command()
 @click.argument("package", required=False)
 @click.option("--at-least", default=2, show_default=True,
               help="How many repositories must declare a package for it to "

@@ -28,12 +28,28 @@ same cell.
 | # | keys | what | action | wired |
 |---|---|---|---|---|
 | `8` | `m` `8` | Go | *opens a submenu* | yes |
-| `8.8` | `m` `8` `8` | &nbsp;&nbsp;Overview | `view.overview` | yes |
-| `8.6` | `m` `8` `6` | &nbsp;&nbsp;Deltas | `view.deltas` | yes |
-| `8.2` | `m` `8` `2` | &nbsp;&nbsp;Governance | `view.governance` | yes |
-| `8.4` | `m` `8` `4` | &nbsp;&nbsp;Disk | `view.disk` | yes |
-| `8.9` | `m` `8` `9` | &nbsp;&nbsp;Details | `view.details` | yes |
-| `8.3` | `m` `8` `3` | &nbsp;&nbsp;Topology | `view.topology` | yes |
+| `8.8` | `m` `8` `8` | &nbsp;&nbsp;Repositories | *opens a submenu* | yes |
+| `8.8.8` | `m` `8` `8` `8` | &nbsp;&nbsp;&nbsp;&nbsp;Overview | `view.overview` | yes |
+| `8.8.6` | `m` `8` `8` `6` | &nbsp;&nbsp;&nbsp;&nbsp;Details | `view.details` | yes |
+| `8.8.2` | `m` `8` `8` `2` | &nbsp;&nbsp;&nbsp;&nbsp;Dossier | `view.dossier` | yes |
+| `8.8.4` | `m` `8` `8` `4` | &nbsp;&nbsp;&nbsp;&nbsp;Documentation | `view.docs` | yes |
+| `8.8.9` | `m` `8` `8` `9` | &nbsp;&nbsp;&nbsp;&nbsp;Languages | `view.languages` | yes |
+| `8.6` | `m` `8` `6` | &nbsp;&nbsp;Work | *opens a submenu* | yes |
+| `8.6.8` | `m` `8` `6` `8` | &nbsp;&nbsp;&nbsp;&nbsp;On deck | `view.deltas` | yes |
+| `8.6.6` | `m` `8` `6` `6` | &nbsp;&nbsp;&nbsp;&nbsp;Sweep | `view.sweep` | yes |
+| `8.6.2` | `m` `8` `6` `2` | &nbsp;&nbsp;&nbsp;&nbsp;Issues | `view.issues` | yes |
+| `8.6.4` | `m` `8` `6` `4` | &nbsp;&nbsp;&nbsp;&nbsp;Waiting | `view.waiting` | yes |
+| `8.2` | `m` `8` `2` | &nbsp;&nbsp;Code | *opens a submenu* | yes |
+| `8.2.8` | `m` `8` `2` `8` | &nbsp;&nbsp;&nbsp;&nbsp;Branches | `view.branches` | yes |
+| `8.2.6` | `m` `8` `2` `6` | &nbsp;&nbsp;&nbsp;&nbsp;Dependencies | `view.dependencies` | yes |
+| `8.2.2` | `m` `8` `2` `2` | &nbsp;&nbsp;&nbsp;&nbsp;Contributors | `view.contributors` | yes |
+| `8.2.4` | `m` `8` `2` `4` | &nbsp;&nbsp;&nbsp;&nbsp;Releases | `view.releases` | yes |
+| `8.4` | `m` `8` `4` | &nbsp;&nbsp;Machine | *opens a submenu* | yes |
+| `8.4.8` | `m` `8` `4` `8` | &nbsp;&nbsp;&nbsp;&nbsp;Governance | `view.governance` | yes |
+| `8.4.6` | `m` `8` `4` `6` | &nbsp;&nbsp;&nbsp;&nbsp;Disk | `view.disk` | yes |
+| `8.4.2` | `m` `8` `4` `2` | &nbsp;&nbsp;&nbsp;&nbsp;Topology | `view.topology` | yes |
+| `8.4.4` | `m` `8` `4` `4` | &nbsp;&nbsp;&nbsp;&nbsp;Harness | `view.harness` | yes |
+| `8.4.9` | `m` `8` `4` `9` | &nbsp;&nbsp;&nbsp;&nbsp;Threads | `view.threads` | yes |
 | `6` | `m` `6` | Do | *opens a submenu* | yes |
 | `6.8` | `m` `6` `8` | &nbsp;&nbsp;Advance phase | `delta.advance` | yes |
 | `6.6` | `m` `6` `6` | &nbsp;&nbsp;Add note | `delta.note` | yes |

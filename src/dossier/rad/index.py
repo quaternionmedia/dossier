@@ -130,6 +130,22 @@ def by_number(resolve: Callable[..., Sequence[Any]] = default_resolve,
     return {command.number: command for command in index(resolve, context)}
 
 
+def by_action(resolve: Callable[..., Sequence[Any]] = default_resolve,
+              context: Any = None) -> dict[str, Command]:
+    """The index keyed by action, for looking up where an act sits.
+
+    The other direction of `by_number`, and the one a caller holding an action
+    needs. It exists so nothing has to write a route down a second time to
+    answer "can the ring reach this" -- a copy that stayed correct until the
+    ring grew a level and eighteen numbers moved at once.
+
+    Submenus are not in it: they have no action, and two of them would collide
+    on `None`.
+    """
+    return {command.action: command
+            for command in index(resolve, context) if command.action}
+
+
 def applied_by(handled: Iterable[str],
                resolve: Callable[..., Sequence[Any]] = default_resolve,
                context: Any = None) -> tuple[tuple[Command, bool], ...]:
