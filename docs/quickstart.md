@@ -24,7 +24,11 @@ uv run dossier github sync-user YOUR_GITHUB_USERNAME
 uv run dossier dashboard
 ```
 
-**That's it!** You now have a local project tracker. Read on for details.
+**That's it!** You now have a local project tracker:
+
+![The dashboard, on the Overview tab](screenshots/tab_overview_desktop.svg)
+
+Read on for details.
 
 ---
 
@@ -49,7 +53,7 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/dossier.git
+git clone https://github.com/quaternionmedia/dossier.git
 cd dossier
 
 # Install dependencies
