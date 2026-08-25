@@ -271,36 +271,7 @@ async def test_a_row_that_cannot_be_opened_at_org_scope_says_so(engine):
     assert "numbering" in said[0], "it does not say why"
 
 
-@pytest.mark.asyncio
-async def test_a_row_that_could_work_says_that_instead(engine):
-    """ONLY ONE OF THE SIX GENUINELY CANNOT.
-
-    Issues key on `issue-{number}` -- that repository's own numbering. The
-    other five key on database ids, which name their repository without help,
-    so the reading is reachable and it is the handler that has not been taught.
-
-    A blanket message asserted the first about tables where the second is true,
-    which is a reason that sounds like a design and is a to-do.
-
-    Mutation: drop the `ambiguous` split and this fails.
-    """
-    from textual.widgets._data_table import RowKey
-
-    said: list[str] = []
-    app = DossierApp(session_factory=Factory(engine))
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-        app.notify = lambda message, **kwargs: said.append(str(message))
-        app.show_org_overview("org")
-        await pilot.pause()
-
-        select_row(app, "#releases-table", RowKey("release-1"))
-        await pilot.pause()
-
-    assert said, "clicking the row did nothing and said nothing"
-    assert "not wired yet" in said[0], said
-    assert "numbering" not in said[0], (
-        "it blames the key, and this key is not the problem")
+# The five that could work do work -- `tests/ui/test_rows_know_their_repository.py`.
 
 
 @pytest.mark.asyncio

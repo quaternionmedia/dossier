@@ -5957,8 +5957,7 @@ class DossierApp(App):
             url=url
         ))
     
-    def _cannot_without_a_repository(self, what: str, *,
-                                     ambiguous: bool = False) -> None:
+    def _cannot_without_a_repository(self, what: str) -> None:
         """Say why a row cannot be opened at organisation scope.
 
         **SIX HANDLERS WENT QUIET AT ONCE**, and the change that did it was a
@@ -5968,28 +5967,21 @@ class DossierApp(App):
         dependency under a repository nobody was looking at. Wrong data beat
         silence only in the sense that something happened.
 
-        **AND ONLY ONE OF THE SIX GENUINELY CANNOT.** Issues key on
-        `issue-{number}`, which is that repository's own numbering; the other
-        five key on database ids that name their repository without help, so
-        the reading is reachable and it is the handler that has not been
-        taught. `ambiguous` is which of those two a person is being told,
-        because "cannot" and "not yet" are different answers and a blanket
-        message asserted the first about tables where the second is true.
+        **AND ONLY ONE OF THE SIX GENUINELY CANNOT, WHICH IS WHY ONLY ONE
+        CALLS THIS.** Issues key on `issue-{number}`, that repository's own
+        numbering, and issue 5 exists in many of them -- so across an
+        organisation the row does not say which repository it belongs to and
+        guessing would open somebody else's.
 
-        Until then this is the difference between a control that is refusing
-        and a control that is broken.
+        The other five key on database ids, which name their repository
+        without help. They asked for a selection out of habit rather than
+        need, and they read it from the row now. A blanket refusal covering
+        all six was a to-do dressed as a design; this one is the design.
         """
-        if ambiguous:
-            self.notify(
-                f"Select a repository to open {what} -- these rows carry that "
-                f"repository's own numbering, so the organisation view cannot "
-                f"say which one this is.",
-                severity="warning", timeout=6)
-            return
         self.notify(
-            f"Select a repository to open {what} -- this row knows which one "
-            f"it belongs to, and opening it from the organisation view is not "
-            f"wired yet.",
+            f"Select a repository to open {what} -- these rows carry that "
+            f"repository's own numbering, so the organisation view cannot say "
+            f"which one this is.",
             severity="warning", timeout=6)
 
     def _select_project_by_id(self, project_id: int, tab: str | None = None):
@@ -6169,7 +6161,7 @@ class DossierApp(App):
             # organisation the row does not say which repository
             # it belongs to, and guessing would open somebody
             # else's.
-            self._cannot_without_a_repository('an issue', ambiguous=True)
+            self._cannot_without_a_repository('an issue')
             return
         
         # Extract issue number from row key (format: "issue-{number}")
@@ -6207,16 +6199,6 @@ class DossierApp(App):
         """Handle releases table row selection - show in viewer."""
         if event.row_key.value == "empty":
             return
-        if not self.selected_project:
-            # **THIS ONE COULD WORK, AND DOES NOT YET.** The row
-            # keys on a database id, which names its repository
-            # without help -- so the reading across an
-            # organisation is reachable, it is the handler that
-            # still asks for a selection. Saying so beats a click
-            # that does nothing, and beats a reason that is not
-            # true of this table.
-            self._cannot_without_a_repository('a release')
-            return
         
         # Extract release ID from row key (format: "release-{id}")
         row_key = str(event.row_key.value)
@@ -6232,13 +6214,23 @@ class DossierApp(App):
         with self.session_factory() as session:
             release = session.get(ProjectRelease, release_id)
             if release:
-                url = self.selected_project.github_releases_url(release.tag_name)
+                # **THE ROW SAYS WHICH REPOSITORY, SO ASK IT.** This
+                # read `self.selected_project`, which answers a different
+                # question: what is selected, not what this row
+                # belongs to. At one repository the two agree, so the
+                # difference never showed; across an organisation the
+                # table draws every repository's rows and the answer
+                # was whichever one happened to be chosen.
+                project = session.get(Project, release.project_id)
+                if project is None:
+                    return
+                url = project.github_releases_url(release.tag_name)
                 self._link_version_project({
                     "version": release.tag_name,
                     "prerelease": release.is_prerelease,
-                    "project_id": self.selected_project.id,
-                    "owner": self.selected_project.github_owner,
-                    "repo": self.selected_project.github_repo,
+                    "project_id": project.id,
+                    "owner": project.github_owner,
+                    "repo": project.github_repo,
                     "url": url,
                 })
     
@@ -6246,16 +6238,6 @@ class DossierApp(App):
     def on_languages_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle languages table row selection - show language info in viewer."""
         if event.row_key.value == "empty":
-            return
-        if not self.selected_project:
-            # **THIS ONE COULD WORK, AND DOES NOT YET.** The row
-            # keys on a database id, which names its repository
-            # without help -- so the reading across an
-            # organisation is reachable, it is the handler that
-            # still asks for a selection. Saying so beats a click
-            # that does nothing, and beats a reason that is not
-            # true of this table.
-            self._cannot_without_a_repository('a language')
             return
         
         # Extract language ID from row key (format: "lang-{id}")
@@ -6271,27 +6253,27 @@ class DossierApp(App):
         with self.session_factory() as session:
             lang = session.get(ProjectLanguage, lang_id)
             if lang:
+                # **THE ROW SAYS WHICH REPOSITORY, SO ASK IT.** This
+                # read `self.selected_project`, which answers a different
+                # question: what is selected, not what this row
+                # belongs to. At one repository the two agree, so the
+                # difference never showed; across an organisation the
+                # table draws every repository's rows and the answer
+                # was whichever one happened to be chosen.
+                project = session.get(Project, lang.project_id)
+                if project is None:
+                    return
                 self._link_language_project({
                     "name": lang.language,
-                    "project_id": self.selected_project.id,
-                    "owner": self.selected_project.github_owner,
-                    "repo": self.selected_project.github_repo,
+                    "project_id": project.id,
+                    "owner": project.github_owner,
+                    "repo": project.github_repo,
                 })
     
     @on(DataTable.RowSelected, "#branches-table")
     def on_branches_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle branches table row selection - show branch info in viewer."""
         if event.row_key.value == "empty":
-            return
-        if not self.selected_project:
-            # **THIS ONE COULD WORK, AND DOES NOT YET.** The row
-            # keys on a database id, which names its repository
-            # without help -- so the reading across an
-            # organisation is reachable, it is the handler that
-            # still asks for a selection. Saying so beats a click
-            # that does nothing, and beats a reason that is not
-            # true of this table.
-            self._cannot_without_a_repository('a branch')
             return
         
         # Extract branch ID from row key (format: "branch-{id}")
@@ -6307,13 +6289,23 @@ class DossierApp(App):
         with self.session_factory() as session:
             branch = session.get(ProjectBranch, branch_id)
             if branch:
-                url = self.selected_project.github_branch_url(branch.name)
+                # **THE ROW SAYS WHICH REPOSITORY, SO ASK IT.** This
+                # read `self.selected_project`, which answers a different
+                # question: what is selected, not what this row
+                # belongs to. At one repository the two agree, so the
+                # difference never showed; across an organisation the
+                # table draws every repository's rows and the answer
+                # was whichever one happened to be chosen.
+                project = session.get(Project, branch.project_id)
+                if project is None:
+                    return
+                url = project.github_branch_url(branch.name)
                 self._link_branch_project({
                     "name": branch.name,
                     "is_default": branch.is_default,
-                    "project_id": self.selected_project.id,
-                    "owner": self.selected_project.github_owner,
-                    "repo": self.selected_project.github_repo,
+                    "project_id": project.id,
+                    "owner": project.github_owner,
+                    "repo": project.github_repo,
                     "url": url,
                 })
     
@@ -6370,16 +6362,10 @@ class DossierApp(App):
         """Handle components table row selection - navigate to linked project."""
         if event.row_key.value == "empty":
             return
-        if not self.selected_project:
-            # **THIS ONE COULD WORK, AND DOES NOT YET.** The row
-            # keys on a database id, which names its repository
-            # without help -- so the reading across an
-            # organisation is reachable, it is the handler that
-            # still asks for a selection. Saying so beats a click
-            # that does nothing, and beats a reason that is not
-            # true of this table.
-            self._cannot_without_a_repository('a component')
-            return
+        # **NEEDS NO SELECTION AT ALL.** Every row here already names
+        # the project it links to, and the body reads it from the row;
+        # the guard was the only thing that wanted one.
+
         
         # Extract project ID from row key (format: "comp-child-{id}" or "comp-parent-{id}")
         row_key = str(event.row_key.value)
@@ -6408,16 +6394,6 @@ class DossierApp(App):
         """Handle deltas table row selection."""
         if event.row_key.value == "empty":
             return
-        if not self.selected_project:
-            # **THIS ONE COULD WORK, AND DOES NOT YET.** The row
-            # keys on a database id, which names its repository
-            # without help -- so the reading across an
-            # organisation is reachable, it is the handler that
-            # still asks for a selection. Saying so beats a click
-            # that does nothing, and beats a reason that is not
-            # true of this table.
-            self._cannot_without_a_repository('a delta')
-            return
 
         row_key = str(event.row_key.value)
         if row_key.startswith("delta-link-"):
@@ -6439,6 +6415,16 @@ class DossierApp(App):
         with self.session_factory() as session:
             delta = session.get(ProjectDelta, delta_id)
             if delta:
+                # **THE ROW SAYS WHICH REPOSITORY, SO ASK IT.** This
+                # read `self.selected_project`, which answers a different
+                # question: what is selected, not what this row
+                # belongs to. At one repository the two agree, so the
+                # difference never showed; across an organisation the
+                # table draws every repository's rows and the answer
+                # was whichever one happened to be chosen.
+                project = session.get(Project, delta.project_id)
+                if project is None:
+                    return
                 self._link_delta_project({
                     "delta_id": delta.id,
                     "name": delta.name,
