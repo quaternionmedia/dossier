@@ -58,11 +58,7 @@ class Action:
     button: str | None = None
     """The id of the button that commits it, if any."""
 
-    rad: str | None = None
-    """The dotted numpad route, e.g. `6.2`. **Derived from the ring, not
-    declared twice** -- the ring is where the layout lives, and a number typed
-    here as well would be a second copy that goes stale silently. This field
-    records what the ring says, and a test compares them."""
+
 
     only: str = ""
     """Why this action has one route rather than two. Empty means it has both.
@@ -70,6 +66,27 @@ class Action:
     **AN ACTION WITH ONE ROUTE IS A DECISION, NOT AN OVERSIGHT** -- and the
     difference has to be written down, because the two look identical from
     every other angle."""
+
+    @property
+    def rad(self) -> str | None:
+        """The dotted numpad route, e.g. `6.2`, or None if the ring cannot
+        reach this.
+
+        **READ FROM THE RING RATHER THAN RECORDED BESIDE IT.** This was a
+        declared field with a test comparing it against the ring, which is a
+        safe way to keep a copy right up to the moment the copy has to change:
+        the ring grew a group level and every view's number moved at once.
+
+        The number was never read by anything either -- only its presence, to
+        answer whether an action has a second route -- so recording it bought
+        a maintenance cost and no reader. What the test now asserts is the
+        invariant that is not vacuous: the ring and this registry name the
+        same acts, in both directions.
+        """
+        from dossier.rad.index import by_action
+
+        found = by_action().get(self.id)
+        return found.number if found else None
 
     @property
     def direct(self) -> bool:
@@ -160,6 +177,8 @@ FIELDS_WITH_THEIR_OWN_MEANING: dict[str, str] = {
 # a reader landing on `view.disk` in a failure message gets the reason, not a
 # pointer to a line they cannot see. The variable is what keeps the wording
 # single; the repetition in the output is the point of the field.
+from dossier.views import VIEWS
+
 VIEWS_USE_THE_RING = (
     "the ring is how a view is chosen; a key for each would be six bindings "
     "competing with the search field, and the ring already costs two "
@@ -169,43 +188,36 @@ VIEWS_USE_THE_RING = (
 
 REGISTRY: tuple[Action, ...] = (
     # --- Go: what to look at ---------------------------------------------
-    Action("view.overview", "Overview", rad="8.8", only=VIEWS_USE_THE_RING),
-    Action("view.deltas", "Deltas", rad="8.6", only=VIEWS_USE_THE_RING),
-    Action("view.governance", "Governance", rad="8.2", only=VIEWS_USE_THE_RING),
-    Action("view.disk", "Disk", rad="8.4", only=VIEWS_USE_THE_RING),
-    Action("view.details", "Details", rad="8.9", only=VIEWS_USE_THE_RING),
-    Action("view.topology", "Topology", rad="8.3", only=VIEWS_USE_THE_RING),
+    #
+    # **ONE ROW PER VIEW, FROM `dossier.views`.** Six of the eighteen views
+    # were declared here by hand and the other twelve were not declared at
+    # all, which is the same drift the settings list and the ring dispatch
+    # both had. A view added to that registry gets its row here, its wedge in
+    # the palette and its line in the index together.
+    *(Action(view.action, view.title, only=VIEWS_USE_THE_RING)
+      for view in VIEWS),
 
     # --- Do: what to change ----------------------------------------------
-    Action("delta.advance", "Advance phase", button="btn-advance-phase",
-           rad="6.8"),
-    Action("delta.note", "Add note", button="btn-add-note", rad="6.6"),
-    Action("project.sync", "Sync project", key="s", button="btn-sync",
-           rad="6.2"),
-    Action("sweep.review", "Sweep a dependency", rad="6.4",
-           only="a sweep is proposed from the Dependencies selection and has "
+    Action("delta.advance", "Advance phase", button="btn-advance-phase",),
+    Action("delta.note", "Add note", button="btn-add-note"),
+    Action("project.sync", "Sync project", key="s", button="btn-sync",),
+    Action("sweep.review", "Sweep a dependency", only="a sweep is proposed from the Dependencies selection and has "
                 "no button of its own; the ring is where it is asked for"),
 
     # --- Show: what to include -------------------------------------------
-    Action("filter.all", "All", key="f", button="btn-filter-all", rad="2.8"),
-    Action("filter.synced", "Synced only", button="btn-filter-synced",
-           rad="2.6"),
-    Action("filter.drifting", "Drifting", button="btn-filter-unsynced",
-           rad="2.2"),
+    Action("filter.all", "All", key="f", button="btn-filter-all"),
+    Action("filter.synced", "Synced only", button="btn-filter-synced",),
+    Action("filter.drifting", "Drifting", button="btn-filter-unsynced",),
 
     # --- Reach: across the seam ------------------------------------------
-    Action("reach.qmcp", "Open in qmcp", rad="4.8",
-           only="not applied yet; the ring says so rather than hiding it"),
-    Action("reach.ingest", "Ingest deltas", button="btn-ingest-threads",
-           rad="4.6"),
+    Action("reach.qmcp", "Open in qmcp", only="not applied yet; the ring says so rather than hiding it"),
+    Action("reach.ingest", "Ingest deltas", button="btn-ingest-threads",),
     # No key. The direct route is selecting the row -- `DataTable.RowSelected`
     # fires on a click and on Enter alike -- and a tab-local act does not earn a
     # global letter. `r` is Refresh, and taking it would be the fourth-universe
     # problem this file exists to end.
-    Action("reach.read", "Read conversation", button="btn-read-thread",
-           rad="4.4"),
-    Action("reach.reconcile", "Reconcile", rad="4.2",
-           only="not applied yet outside the ring"),
+    Action("reach.read", "Read conversation", button="btn-read-thread",),
+    Action("reach.reconcile", "Reconcile", only="not applied yet outside the ring"),
 
     # --- the ring itself --------------------------------------------------
     Action("rad.menu", "Open the menu", key="m",

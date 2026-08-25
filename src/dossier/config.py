@@ -162,6 +162,8 @@ class DossierConfig:
         self.save()
 
 
+from dossier.views import VIEWS
+
 # Available options for settings
 AVAILABLE_THEMES = [
     ("textual-dark", "Textual Dark"),
@@ -175,19 +177,11 @@ AVAILABLE_THEMES = [
     ("solarized-light", "Solarized Light"),
 ]
 
-AVAILABLE_TABS = [
-    ("tab-dossier", "Dossier"),
-    ("tab-details", "Details"),
-    ("tab-docs", "Documentation"),
-    ("tab-languages", "Languages"),
-    ("tab-branches", "Branches"),
-    ("tab-dependencies", "Dependencies"),
-    ("tab-contributors", "Contributors"),
-    ("tab-issues", "Issues"),
-    ("tab-releases", "Releases"),
-    ("tab-governance", "Governance"),
-    ("tab-deltas", "Deltas"),
-]
+# **DERIVED, BECAUSE THE HAND-KEPT VERSION WAS WRONG.** This listed thirteen of
+# the twenty-one views the application had, missing Sweep, Threads, Hygiene,
+# Harness, Waiting, Disk, Topology and Overview -- a settings screen offering a
+# reader a menu that was not the menu. `dossier.views` is the one registry.
+AVAILABLE_TABS = [(view.tab, view.title) for view in VIEWS]
 
 TREE_DENSITY_OPTIONS = [
     ("comfortable", "Comfortable"),

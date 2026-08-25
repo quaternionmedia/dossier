@@ -134,9 +134,9 @@ def test_the_fifth_child_lands_on_a_diagonal_not_on_five():
     This is the bug the cell lookup in `_walk` exists to prevent, and it is
     only reachable with a menu of more than four.
     """
-    fifth = by_number()["8.9"]
-    assert fifth.path == ("Go", "Details")
-    assert fifth.cells == (8, 9)
+    fifth = by_number()["8.8.9"]
+    assert fifth.path == ("Go", "Repositories", "Languages")
+    assert fifth.cells == (8, 8, 9)
 
 
 def test_a_menu_too_big_to_lay_out_raises_rather_than_losing_an_item():

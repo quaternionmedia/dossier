@@ -268,29 +268,49 @@ async def test_the_overview_tab_draws_the_org_figures(session):
     assert "Wants attention" in titles
 
 
-@pytest.mark.asyncio
-async def test_the_ring_reaches_the_overview_in_three_inputs(session):
-    """Ordering Overview first inside `Go` is what buys this, and it is the
-    host's only lever on cost once the child count is fixed."""
+def test_the_overview_is_the_cheapest_view_in_the_ring():
+    """It is what opens first, so it is what the highlight lands on.
+
+    **THE COST, NOT A NUMBER.** This asserted three inputs -- open, enter,
+    enter -- which was true of a two-level ring and stopped being true the
+    moment `Go` grew a group level. Four is not worse in the way three was
+    better: twelve views cost nothing at all before, because no keystroke
+    reached them.
+
+    What is durable is the ordering. Overview sits first in the first group,
+    so it is the cheapest view there is, and pressing only enter arrives at
+    it.
+    """
     from dossier.rad.palette import resolve
     from dossier.rad.session import RadSession
 
     committed = []
     rad = RadSession(resolve=resolve, on_intent=committed.append)
-    rad.open_at(None)   # 1
-    rad.enter()         # 2 -- into Go, highlight lands on Overview
-    rad.enter()         # 3 -- commits it
+    rad.open_at(None)
+    while not committed:
+        assert rad.enter() is not None or rad.is_open, "the ring closed early"
     assert [i.action for i in committed] == ["view.overview"]
-    assert committed[0].ipa == 3
+
+    from dossier.rad.index import index
+
+    views = [c for c in index() if not c.is_menu and c.action.startswith("view.")]
+    cheapest = min(c.presses for c in views)
+    overview = next(c for c in views if c.action == "view.overview")
+    assert overview.presses == cheapest
+    assert committed[0].ipa == overview.presses
 
 
 def test_the_overview_action_is_routed_to_a_real_tab():
-    """An action no host handles is a dead wedge."""
-    from dossier.rad.palette import resolve
+    """An action no host handles is a dead wedge.
+
+    Looked up through the index rather than by reading one level of children:
+    the ring is three levels deep under `Go`, and a one-level scan reported
+    every view as missing.
+    """
+    from dossier.rad.index import by_action
     from dossier.tui.app import DossierApp
 
-    actions = {w.action for verb in resolve() for w in verb.children}
-    assert "view.overview" in actions
+    assert "view.overview" in by_action()
     assert DossierApp.RAD_VIEWS["view.overview"] == "tab-overview"
 
 
