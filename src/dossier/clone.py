@@ -31,6 +31,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
+# **ONE ANSWER TO 'WHICH REPOSITORY IS THIS ROW ABOUT'.** This
+# module had its own, and the overview's attention list had a
+# different one -- so a delta address was skipped here and
+# recommended for syncing there, from the same four rows.
+from dossier.naming import repository_of
+
 # What a clone that has not been attempted reports. Never `False`: not yet
 # tried and tried-and-failed are different states, and one of them is nobody's
 # fault.
@@ -78,30 +84,6 @@ class Outcome:
     @property
     def ok(self) -> bool:
         return self.state == CLONED
-
-
-def repository_of(project: Any) -> tuple[str, str]:
-    """The `owner/name` and bare directory name a project belongs to.
-
-    **THE LAST SEGMENT OF THE NAME IS NOT THE REPOSITORY.** Four rows in this
-    database are delta addresses -- `quaternionmedia/qm/delta/pr-57` -- and
-    taking the last segment offered to clone `pr-57` into a directory beside
-    this one. They are not repositories and there is nothing wrong with them
-    being here; they carry `github_owner` and `github_repo` pointing at the
-    real repository, which is the field that answers this question.
-
-    Falls back to the name only when those are absent, and only for a plain
-    `owner/name`: guessing at an address with more parts than that is how the
-    first version came to name a pull request as somewhere to clone.
-    """
-    owner = getattr(project, "github_owner", None)
-    repo = getattr(project, "github_repo", None)
-    if owner and repo:
-        return f"{owner}/{repo}", repo
-    stated = project.full_name or project.name or ""
-    if stated.count("/") == 1:
-        return stated, stated.split("/")[-1]
-    return stated, ""
 
 
 def absent(projects: Iterable[Any], roots: Sequence[Path] | None = None,

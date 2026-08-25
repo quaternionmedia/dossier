@@ -728,6 +728,21 @@ class ChatScreen(ModalScreen):
         self.dismiss()
 
 
+class _Remedy:
+    """An intent the panel raised itself, shaped like one the ring commits.
+
+    `_apply_rad_intent` reads an action and a path. A remedy has no path
+    through a menu -- nobody walked one -- so it carries the action alone and
+    says where it came from.
+    """
+
+    def __init__(self, action: str) -> None:
+        self.action = action
+        self.path = ("waiting", action)
+        self.verb = "do"
+        self.ipa = 1
+
+
 class DossierApp(App):
     """Main Dossier TUI application for project tracking."""
     
@@ -6305,6 +6320,41 @@ class DossierApp(App):
                 file_path=file_path,
             ))
     
+    @on(DataTable.RowSelected, "#waiting-table")
+    def on_waiting_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Run what would settle the row, if anything can.
+
+        **THIS IS THE WHOLE POINT OF THE COLUMN.** The dashboard has always
+        been able to say a repository had not been read in seven months. Acting
+        on it meant knowing that syncing was the answer, finding where syncing
+        lives, and doing it -- per row.
+
+        A row with no remedy says so rather than doing nothing. A harness
+        question has none because the answer is the act; a harness error has
+        none because what it suggests depends on what it says, and guessing
+        would send somebody to debug the guess.
+        """
+        from dossier.facets import remedies_shown
+
+        table = event.data_table
+        try:
+            index = table.get_row_index(event.row_key)
+        except Exception:                          # noqa: BLE001
+            return
+        remedies = remedies_shown()
+        if index >= len(remedies):
+            return
+        remedy = remedies[index]
+        if not remedy:
+            self.notify("Nothing here can run this one -- it is waiting on a "
+                        "person, and the answer is the act.", timeout=6)
+            return
+        if remedy not in self.RAD_HANDLED:
+            self.notify(f"{remedy} is not wired here yet.",
+                        severity="warning", timeout=6)
+            return
+        self._apply_rad_intent(_Remedy(remedy))
+
     @on(DataTable.RowSelected, "#issues-table")
     def on_issues_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle issues table row selection - show in viewer."""

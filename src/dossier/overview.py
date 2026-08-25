@@ -335,8 +335,18 @@ def _harness_totals(session: Any, now: datetime) -> Section:
 
 
 def _attention(session: Any, now: datetime, limit: int, ids: list[int] | None) -> Section:
+    from dossier.naming import is_a_repository
+
     ranked = []
     for project in session.exec(_in_scope(select(Project), Project.id, ids)):
+        if not is_a_repository(project):
+            # **A DELTA ADDRESS CANNOT BE SYNCED, SO LISTING IT IS NOISE THAT
+            # NEVER CLEARS.** Four rows in this table are addresses inside a
+            # repository rather than repositories, and every one of them read
+            # as never synced, with no description and no language -- three
+            # reasons apiece, permanently, for something that has no sync to
+            # be missing.
+            continue
         age = _age_days(project.last_synced_at, now)
         reasons = []
         if age is None:
