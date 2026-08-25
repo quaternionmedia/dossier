@@ -298,6 +298,39 @@ WORKFLOWS: tuple[Workflow, ...] = (
                "a person rather than a failure list.",
     ),
     Workflow(
+        name="Get a repository onto this machine",
+        intent="Close the gap between what the database knows about and what "
+               "this disk actually has.",
+        steps=(
+            Step(does="See what is indexed and not here",
+                 command="dossier clone",
+                 says="Lists and stops. A clone is a network fetch and a write "
+                      "to your disk, so acting is asked for rather than "
+                      "assumed."),
+            Step(does="Decide how many you want",
+                 decides="Whether you need all of them. A repository with no "
+                         "clone here is a repository nobody needed on this "
+                         "machine, which is an ordinary state and usually the "
+                         "right one -- so this is a question about disk and "
+                         "minutes, not about tidiness."),
+            Step(does="Clone one, or all of them",
+                 command="dossier clone <owner>/<name>       # or --all",
+                 says="`--all` asks before it starts and names where they "
+                      "land. Each result carries git's own words, because only "
+                      "git can say whether a failure was a missing repository, "
+                      "a missing credential or a full disk."),
+            Step(does="Read what the clones now answer",
+                 command="dossier show branches",
+                 says="Branch hygiene reports `unknown` for a repository with "
+                      "no clone. Those become real answers."),
+        ),
+        feeds=("Retire a branch safely",),
+        cannot="Know whether you have the right to clone something. "
+               "Authentication is git's, and a private repository this "
+               "database learned about through an authenticated sync still "
+               "refuses at the network if this machine has no credentials.",
+    ),
+    Workflow(
         name="Retire a branch safely",
         intent="Delete what is spent without deleting the only copy of "
                "something.",

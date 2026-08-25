@@ -940,6 +940,60 @@ def _snapshot_out(row) -> DiskSnapshotOut:
     )
 
 
+@app.get("/clones/absent")
+def clones_absent():
+    """Every indexed repository with no clone on the machine running this API.
+
+    **A READING OF THIS HOST, NOT OF THE ORGANISATION.** The same caveat branch
+    hygiene carries: what is absent depends on which disk the question is asked
+    on, so an answer from a server says nothing about anybody's workstation.
+    """
+    from dossier.clone import absent
+
+    with get_session() as session:
+        gone = absent(session.exec(select(Project)).all())
+    return {
+        "absent": [
+            {"repo": one.repo, "name": one.name, "url": one.url,
+             "into": str(one.into), "can_be_cloned": one.can_be_cloned}
+            for one in gone
+        ],
+        "count": len(gone),
+        "note": ("Read on the host running this API. A repository absent here "
+                 "is not absent anywhere else."),
+    }
+
+
+@app.post("/clones/{owner}/{name}")
+def clone_one(owner: str, name: str):
+    """Clone one indexed repository onto the host running this API.
+
+    **ONE, AND NAMED.** There is no route that clones everything: an HTTP call
+    that pulls eighty-two repositories onto a machine is a denial of service
+    with a polite name, and the caller cannot see the disk it is filling. The
+    command line has `--all` because a person is standing in front of that
+    disk.
+    """
+    from dossier.clone import absent, clone
+
+    wanted = f"{owner}/{name}"
+    with get_session() as session:
+        gone = {one.repo: one
+                for one in absent(session.exec(select(Project)).all())}
+    one = gone.get(wanted)
+    if one is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"{wanted} is not absent here -- it may already be cloned, "
+                   f"or not indexed.")
+
+    outcome = clone(one)
+    if not outcome.ok:
+        raise HTTPException(status_code=409,
+                            detail=f"{outcome.state}: {outcome.detail}")
+    return {"repo": one.repo, "state": outcome.state, "into": outcome.detail}
+
+
 @app.get("/disk/snapshots", response_model=list[DiskSnapshotOut])
 def list_disk_snapshots(
     machine: Optional[str] = Query(None, description="Limit to one machine"),

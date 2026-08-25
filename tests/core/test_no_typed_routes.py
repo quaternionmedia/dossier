@@ -37,6 +37,14 @@ SRC = Path("src/dossier")
 KEYSTROKE = re.compile(r"\bm(?:\W{0,4}\d\b){2,}")
 # A dotted route in backticks. Two digits or more, which is what a cell path is.
 DOTTED = re.compile(r"`\d(?:\.\d)+`")
+# **AND THE SAME ROUTE WITH NO BACKTICKS ROUND IT.** The first version of this
+# required them, and `"Press 6.2 again to fetch {n}."` sat in the sync
+# confirmation the whole time -- a route shown to a person, in the exact form a
+# person reads, invisible to a guard written for the form a *document* uses.
+#
+# Anchored on the verb rather than on the digits, because a bare `0.116.0` is a
+# version and this has already mistaken one for a route once.
+SPOKEN = re.compile(r"[Pp]ress\s+\d(?:[\s.]+\d)+")
 
 # **THE RAD PACKAGE IS THE MENU.** It is where the numbers come from, and its
 # own strings draw the sheet that explains them.
@@ -83,11 +91,12 @@ def test_no_route_is_typed_into_text_a_person_reads(path):
     """THE ONE THIS EXISTS FOR.
 
     Mutation: put `route="m 6 4"` back in `interaction.py`, or
-    `"Press m 6 4 to review a sweep."` back in the Sweep tab, and this fails.
+    `"Press m 6 4 to review a sweep."` back in the Sweep tab, or
+    `"Press 6.2 again"` back in the sync confirmation, and this fails.
     """
     offenders = []
     for line, value in _runtime_strings(path):
-        for pattern in (KEYSTROKE, DOTTED):
+        for pattern in (KEYSTROKE, DOTTED, SPOKEN):
             for hit in pattern.findall(value):
                 offenders.append(f"{line}: {hit.strip()}")
     assert not offenders, (

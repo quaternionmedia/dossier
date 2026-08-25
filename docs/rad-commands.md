@@ -64,6 +64,7 @@ same cell.
 | `4.6` | `m` `4` `6` | &nbsp;&nbsp;Ingest deltas | `reach.ingest` | yes |
 | `4.2` | `m` `4` `2` | &nbsp;&nbsp;Reconcile | `reach.reconcile` | yes |
 | `4.4` | `m` `4` `4` | &nbsp;&nbsp;Read conversation | `reach.read` | yes |
+| `4.9` | `m` `4` `9` | &nbsp;&nbsp;Clone what is absent | `reach.clone` | yes |
 
 ## `6.2` -- making the view current
 

@@ -867,6 +867,77 @@ def overview(owner: Optional[str], limit: int, only: Optional[str],
         click.echo("  quoting a number out of the table above it.")
 
 
+@cli.command("clone")
+@click.argument("repo", required=False)
+@click.option("--all", "everything", is_flag=True, default=False,
+              help="Clone every absent repository. Asks first.")
+@click.option("--into", type=click.Path(), default=None,
+              help="Where clones land. Default: beside this checkout.")
+@click.option("--depth", type=int, default=None,
+              help="Shallow clone. Branch hygiene cannot read one, so it is "
+                   "asked for and never assumed.")
+@click.option("--yes", is_flag=True, default=False,
+              help="Do not ask. For a script that has already decided.")
+def clone_cmd(repo, everything, into, depth, yes):
+    """Clone what this database knows about and this disk does not have.
+
+    Without REPO or --all it lists and stops. A clone is a network fetch and a
+    write to somebody's disk, so listing is the default and acting is asked
+    for.
+
+    REPO matches `owner/name` or the bare name.
+    """
+    from sqlmodel import select
+
+    from dossier.clone import absent, clone, summarise
+    from dossier.models.schemas import Project
+
+    with get_session() as session:
+        projects = session.exec(select(Project)).all()
+        gone = absent(projects, into=Path(into) if into else None)
+
+    if repo:
+        wanted = [one for one in gone
+                  if repo in (one.repo, one.name)]
+        if not wanted:
+            here = [one for one in gone if repo.lower() in one.repo.lower()]
+            if not here:
+                click.echo(f"Nothing absent matches {repo!r}. It may already "
+                           f"be here, or not be indexed.", err=True)
+                raise SystemExit(1)
+            wanted = here
+    elif everything:
+        wanted = list(gone)
+    else:
+        if not gone:
+            click.echo("Every indexed repository has a clone on this machine.")
+            return
+        click.echo(f"{len(gone)} indexed repository(ies) have no clone here. "
+                   f"Name one, or pass --all:")
+        for one in gone:
+            mark = "" if one.can_be_cloned else "   (no URL recorded)"
+            click.echo(f"  {one.repo:<40} -> {one.into}{mark}")
+        return
+
+    if not yes:
+        click.echo(f"About to clone {len(wanted)} repository(ies) into "
+                   f"{wanted[0].into.parent}:")
+        for one in wanted[:10]:
+            click.echo(f"  {one.repo}")
+        if len(wanted) > 10:
+            click.echo(f"  ... and {len(wanted) - 10} more")
+        click.confirm("Go ahead?", abort=True)
+
+    outcomes = []
+    for one in wanted:
+        outcome = clone(one, depth=depth)
+        outcomes.append(outcome)
+        mark = "ok " if outcome.ok else "-- "
+        click.echo(f"{mark}{one.repo}: {outcome.state} {outcome.detail}")
+    click.echo("")
+    click.echo(summarise(outcomes))
+
+
 @cli.command()
 @click.option("--name", "-n", default=None,
               help="One workflow by name, case-insensitive substring.")

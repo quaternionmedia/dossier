@@ -98,10 +98,12 @@ depth -- so it is never an item and no number contains it. Arrows and
     *in the application only*
   - `4.4`  Read conversation -- `m` `4` `4`
     *in the application only*
+  - `4.9`  Clone what is absent -- `m` `4` `9`
+    `dossier clone`
 
 ## Outside the ring
 
-`dossier --help` reaches **73** leaf commands; **20**
+`dossier --help` reaches **73** leaf commands; **21**
 of them are named above beside the view they belong to. The rest are
 not menu items and are not meant to be: the ring is for what somebody
 does repeatedly, and a cell spent on a once-a-quarter migration is a
@@ -127,7 +129,6 @@ cell taken from something else.
   dossier deltas prune-forks
   dossier deltas relate
   dossier deltas tangles
-  dossier demo-limit
   dossier dev clear
   dossier dev dump
   dossier dev purge
