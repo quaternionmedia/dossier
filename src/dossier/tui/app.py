@@ -9368,6 +9368,34 @@ class DossierApp(App):
         if self.selected_project:
             self._load_deltas_tab(self.selected_project)
 
+    # Set when advancing a delta that is part of a compound, cleared by the
+    # advance that follows. The same state the sync confirmation uses, for the
+    # same reason: the second press is what says "yes, this one alone".
+    _compound_pending = False
+
+    def _compound_beside(self, session, delta):
+        """The compound this delta belongs to, or None when it is the whole.
+
+        Reads only. Returns None on any failure to read the relations, because
+        a compound reading that could not be made is not a reason to block an
+        advance somebody asked for -- and an exception here would stop a plain
+        delta moving because two other deltas were related to each other.
+        """
+        try:
+            from sqlmodel import select
+
+            from dossier.compound import compound_of, edges_from
+            from dossier.models.harness import DeltaRelation
+
+            names = {p.id: (p.full_name or p.name)
+                     for p in session.exec(select(Project)).all()}
+            address = f"{names.get(delta.project_id, '?')}/delta/{delta.id}"
+            edges = edges_from(session.exec(select(DeltaRelation)).all())
+            found = compound_of(address, edges)
+        except Exception:                          # noqa: BLE001
+            return None
+        return None if found.is_alone else found
+
     def action_advance_delta_phase(self) -> None:
         """Advance the selected delta to the next phase."""
         if not self.selected_project:
@@ -9411,6 +9439,26 @@ class DossierApp(App):
                 else:
                     self.notify("Cannot advance delta", severity="warning")
                 return
+
+            # **A DELTA MAY NOT BE THE WHOLE OF THE WORK.** `part-of` says
+            # closing the whole requires closing this, and `same-as` says two
+            # addresses denote one strand -- so advancing this one alone can
+            # leave a compound half-moved, or the same work in two phases.
+            #
+            # Asked, never assumed. Whether a whole should move is a judgement
+            # about the work, and the relations are somebody's statement about
+            # it rather than a licence to act on their behalf.
+            rest = self._compound_beside(session, delta)
+            if rest is not None and not self._compound_pending:
+                self._compound_pending = True
+                self.notify(
+                    f"{delta.name or delta.id} is part of {rest.size} deltas "
+                    f"stated to move together. Advance it alone by pressing "
+                    f"again, or open `dossier deltas compound` to see them.",
+                    title="Part of something larger", severity="warning",
+                    timeout=10)
+                return
+            self._compound_pending = False
 
             old_phase = delta.phase.value
             delta.advance_phase()

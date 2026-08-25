@@ -377,6 +377,86 @@ def deltas_relate(source: str, relation: str, target: str, by: str | None,
         click.echo("      Proposed, not asserted. A detector suggested it.")
 
 
+@deltas.command("search")
+@click.argument("text")
+def deltas_search(text: str) -> None:
+    """Find deltas by name, title or branch, across every repository.
+
+    **EVERY OTHER WAY OF FINDING ONE STARTS BY CHOOSING A REPOSITORY**, and a
+    compound crosses them by construction -- a relation joins two addresses,
+    and an address carries its own owner.
+    """
+    from sqlmodel import select
+
+    from dossier.compound import search
+    from dossier.models.schemas import Project, ProjectDelta
+
+    with get_session() as session:
+        rows = session.exec(select(ProjectDelta)).all()
+        found = search(rows, text)
+        names = {p.id: (p.full_name or p.name)
+                 for p in session.exec(select(Project)).all()}
+        listed = [
+            (f"{names.get(row.project_id, '?')}/delta/{row.id}",
+             row.title or row.name or "",
+             getattr(row.phase, "value", str(row.phase)))
+            for row in found
+        ]
+
+    if not listed:
+        click.echo(f"No delta matches {text!r}.")
+        return
+    click.echo(f"{len(listed)} delta(s) match {text!r}:")
+    for address, title, phase in listed:
+        click.echo(f"  {address:<40} {phase:<16} {title[:44]}")
+
+
+@deltas.command("compound")
+@click.argument("address")
+def deltas_compound(address: str) -> None:
+    """Every delta that moves together with ADDRESS, and whether each can.
+
+    Walks `part-of` -- closing the whole requires closing this -- and
+    `same-as`, which denotes one strand under two addresses. It does not walk
+    `blocks`: "this must close first" is not "these close together", and that
+    is the distinction the relation vocabulary exists to make possible.
+
+    Reads and prints. Nothing is advanced.
+    """
+    from sqlmodel import select
+
+    from dossier.compound import can_advance, compound_of, edges_from
+    from dossier.models.harness import DeltaRelation
+    from dossier.models.schemas import Project, ProjectDelta
+
+    with get_session() as session:
+        edges = edges_from(session.exec(select(DeltaRelation)).all())
+        names = {p.id: (p.full_name or p.name)
+                 for p in session.exec(select(Project)).all()}
+        rows = []
+        for row in session.exec(select(ProjectDelta)).all():
+            row.address = f"{names.get(row.project_id, '?')}/delta/{row.id}"
+            rows.append(row)
+        found = compound_of(address, edges, rows)
+
+    if found.is_alone:
+        click.echo(f"{address} is the whole of it -- nothing else is stated to "
+                   f"move with it.")
+        return
+
+    click.echo(f"{found.size} delta(s) move with {address}:")
+    for one in found.members:
+        why = can_advance(one)
+        mark = f"   ({why})" if why else ""
+        click.echo(f"  {one.address:<40} {one.because:<10} "
+                   f"{one.phase or '--':<14}{mark}")
+
+    if found.truncated:
+        click.echo("")
+        click.echo("The walk stopped at its depth limit, so this may be part "
+                   "of something larger. It is not a complete answer.")
+
+
 @deltas.command("tangles")
 def deltas_tangles() -> None:
     """Every cycle the relations form. Reports, and changes nothing.
