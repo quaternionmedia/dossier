@@ -823,13 +823,45 @@ class TestTheRingIsRecorded:
                 f"{first_child!r} should be showing after entering the first verb")
             self._record(app, "rad_ring_one_level_in")
 
-    def test_both_recordings_exist_after_the_tests_above(self):
+    @pytest.mark.asyncio
+    async def test_two_levels_in_shows_a_view_and_is_recorded(self):
+        """THE LEVEL THAT DID NOT EXIST BEFORE.
+
+        `Go` held six views and now holds four groups that hold eighteen, so
+        the picture a reader needs is the one showing a group opened. Without
+        it the README documents a two-level ring and ships a photograph of it.
+        """
+        from dossier.rad import resolve
+
+        app = await self._app()
+        async with app.run_test(size=(120, 34)) as pilot:
+            await pilot.pause()
+            await pilot.press("m")
+            await pilot.pause()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.pause()
+
+            drawn = app.export_screenshot()
+            group = resolve()[0].children[0]
+            assert group.children, "the first verb's first child holds nothing"
+            leaf = group.children[0].label
+            assert leaf in drawn, (
+                f"{leaf!r} should be showing two levels in")
+            self._record(app, "rad_ring_two_levels_in")
+
+    def test_every_recording_exists_after_the_tests_above(self):
         """They ride the ordinary test command, so a run leaves them current.
 
         This asserts the artifact, not the picture: an image comparison would
         fail on a font change and teach a reader to regenerate without looking.
         """
-        for name in ("rad_ring_top_level", "rad_ring_one_level_in"):
+        for name in ("rad_ring_top_level", "rad_ring_one_level_in",
+                     "rad_ring_two_levels_in"):
             path = self.OUTPUT / f"{name}.svg"
             assert path.is_file(), f"{path} was not recorded"
             assert path.stat().st_size > 0

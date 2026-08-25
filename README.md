@@ -15,7 +15,7 @@
   <img src="docs/screenshots/tab_dossier_wide.svg" alt="Dossier Tab" width="800">
 </p>
 <p align="center">
-  <img src="docs/screenshots/tab_prs_desktop.svg" alt="Dossier Pull Requests" width="800">
+  <img src="docs/screenshots/tab_deltas_desktop.svg" alt="Dossier On deck: open deltas, and the open pull requests no delta claims" width="800">
 </p>
 <p align="center">
   <img src="docs/screenshots/dashboard_help.svg" alt="Dossier Help" width="800">
@@ -92,7 +92,16 @@ different slice, **Reach** into another system. What sits under them does, so
 you learn the menu once instead of learning each screen's menu.
 
 <p align="center">
-  <img src="docs/screenshots/rad_ring_one_level_in.svg" alt="One level into Go: Overview, Deltas, Governance, Disk and Details on numbered cells, with 5 offering to go back" width="800">
+  <img src="docs/screenshots/rad_ring_one_level_in.svg" alt="One level into Go: Repositories, Work, Code and Machine on numbered cells, with 5 offering to go back" width="800">
+</p>
+
+Under **Go** the views are grouped, because eighteen of them do not fit on nine
+cells. The group is a level you press through rather than a heading somebody
+invented for a page — which is what keeps the number and the route the same
+thing.
+
+<p align="center">
+  <img src="docs/screenshots/rad_ring_two_levels_in.svg" alt="Two levels into Go, inside Repositories: Overview, Details, Dossier, Documentation and Languages on numbered cells" width="800">
 </p>
 
 **Or walk there.** Arrow keys move, and so does `wasd` — the same directions
@@ -112,13 +121,15 @@ are acting on makes you remember what you were looking at.
 
 It counts what it costs you. Every choice records how many keystrokes it took
 from opening the menu to committing, so a menu that grows awkward shows up as a
-number rather than as a vague feeling. A digit press is two: open, choose.
+number rather than as a vague feeling. One input to open, then one per level.
 
 **Every command has a number, and the number is the route.** `6.2` is sync:
 `6` opens Do, `2` is the third thing under it. So it is `m` `6` `2` from
-anywhere. [docs/rad-commands.md](docs/rad-commands.md) is the full sheet —
-generated from the menu itself, marking which commands are wired and which are
-in the menu but not applied yet.
+anywhere. [docs/commands.md](docs/commands.md) is the index — every command,
+numbered by the keys that reach it, with the command that does the same thing
+outside the application beside it. [docs/rad-commands.md](docs/rad-commands.md)
+is the menu sheet, marking which commands are wired and which are in the menu
+but not applied yet. Both are generated from the menu itself.
 
 **`m` `6` `2` makes what you are looking at current.** The tab decides what
 gets refreshed rather than whatever happens to be selected, anything already
@@ -126,7 +137,7 @@ current is left alone, and a large fetch states what it would do and waits for
 you to press it again.
 
 Two more are wired: **`m` `4` `6`** puts a conversation export into the archive,
-and **`m` `6` `4`** reviews a dependency sweep across every repository that
+and **`m` `8` `6` `6`** reviews a dependency sweep across every repository that
 declares it. The rest of the menu is greyed out and cannot be selected — an
 unavailable command keeps its cell, because dropping it would renumber every
 command after it. The sheet says which are which; this page deliberately does
