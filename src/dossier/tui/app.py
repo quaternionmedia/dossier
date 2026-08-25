@@ -1314,6 +1314,24 @@ class DossierApp(App):
         
         yield Footer()
     
+    def on_mouse_down(self, event) -> None:
+        """Right-click opens the ring, on whatever is under the pointer.
+
+        **THE POINTER HAD NO ROUTE INTO THE MENU.** `RingScreen` had no click
+        handler of any kind, so somebody reaching for the mouse could see the
+        ring and not use it -- and every act the ring reaches was, for them,
+        reachable only through whichever buttons a tab happened to carry.
+
+        Opening on right-click rather than on a button keeps the two hands
+        symmetric: `m` from the keyboard, right-click from the mouse, same
+        menu, same numbers, same cost. And it arrives with the selection
+        already made, because a person right-clicks *something*.
+        """
+        if getattr(event, "button", 0) != 3:
+            return
+        event.stop()
+        self.action_rad_menu()
+
     def action_rad_menu(self) -> None:
         """Open the rad ring, and apply whatever it commits.
 
