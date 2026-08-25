@@ -18,10 +18,10 @@
 | [Overview](overview.md) | Core concepts and use cases |
 | [Workflows](workflows.md) | Copy-paste ready examples |
 | [Architecture](architecture.md) | Cache-merge design and data models |
-| [Analysis & Consolidation](ANALYSIS_AND_CONSOLIDATION.md) | Scope review, duplicates, and delta tutorial |
 | [Extending](extending.md) | Customize for personal/team needs |
 | [Contributing](contributing.md) | Development guide |
 | [Roadmap](roadmap.md) | Future features and vision |
+| [Walkthrough](../walkthrough/01-first-run.md) | Six pages whose every example is executed by the test suite. An example that stops being true fails the build |
 
 ## What is Dossier?
 

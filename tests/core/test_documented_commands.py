@@ -169,3 +169,66 @@ def test_prose_in_a_fence_is_not_read_as_a_command():
 
     assert "export show" in body
     assert "files with" not in body
+
+
+# --- the other half of a page being true: where it sends you --------------------
+
+
+LINK = re.compile(r"\[[^\]]*\]\(([^)#\s]+)(?:#[^)]*)?\)")
+
+
+def internal_links() -> list[tuple[Path, str]]:
+    """Every link in these pages that points at a file rather than the web."""
+    found = []
+    for page in PAGES:
+        if not page.is_file():
+            continue
+        text = page.read_text(encoding="utf-8", errors="replace")
+        for target in LINK.findall(text):
+            if target.startswith(("http://", "https://", "mailto:")):
+                continue
+            found.append((page, target))
+    return found
+
+
+def test_the_link_scan_finds_something():
+    """A scan that matched nothing would pass the test below it."""
+    assert len(internal_links()) > 40
+
+
+def test_every_link_points_at_a_file_that_exists():
+    """**A DEAD LINK ON THE FRONT DOOR IS THE FIRST THING A READER MEETS.**
+
+    `docs/index.md` offered "Analysis & Consolidation" in its Quick Links
+    table. `git log --all` has no record of that file ever being committed, so
+    the row had pointed at nothing since the day it was written -- on the page
+    that exists to send people somewhere.
+
+    Mutation, quoted as it printed: restoring that row.
+
+        AssertionError: docs/index.md links to ANALYSIS_AND_CONSOLIDATION.md,
+        which is not a file
+    """
+    broken = []
+    for page, target in internal_links():
+        if not (page.parent / target).exists():
+            broken.append(
+                f"{page.relative_to(ROOT).as_posix()} links to {target}, "
+                f"which is not a file")
+
+    assert not broken, "\n".join(broken)
+
+
+def test_the_executable_walkthrough_is_reachable_from_the_docs_front_door():
+    """The two halves of this documentation have different guarantees.
+
+    `walkthrough/` is executed by the ordinary test command -- `testpaths =
+    ["tests", "walkthrough"]` -- so an example that stops being true fails the
+    build. `docs/` is hand-written prose. The README linked the executable
+    half and `docs/index.md` did not, so a reader who started at the docs
+    never found the pages that cannot lie to them.
+    """
+    index = (ROOT / "docs" / "index.md").read_text(encoding="utf-8")
+
+    assert "walkthrough/" in index, (
+        "the docs front door does not offer the executable walkthrough")
