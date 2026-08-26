@@ -1018,6 +1018,78 @@ def clone_cmd(repo, everything, into, depth, yes):
     click.echo(summarise(outcomes))
 
 
+@cli.group("docs")
+def docs() -> None:
+    """The documentation site, and the pictures it records while it builds.
+
+    **THE DEMO IS A COMMAND, NOT A SEQUENCE SOMEBODY REMEMBERS.** The pictures
+    in `docs/` are recorded by `hooks/pictures.py` during the build, so looking
+    at them means building or serving the site -- and that has to be reachable
+    by name rather than assembled from `mkdocs` invocations a reader has to be
+    told. `governance/qm` names the declared entry point as the mechanism, and
+    a route that does not exist is that mechanism being described instead.
+    """
+
+
+def _mkdocs(*args: str) -> int:
+    """Run mkdocs in this project, and say what was run.
+
+    The docs group is not installed by default -- `mkdocs` is in the `docs`
+    dependency group -- so an absent module is reported as the command that
+    installs it rather than as a traceback.
+    """
+    import importlib.util
+    import subprocess
+    import sys
+
+    # **CHECKED BEFORE IT IS RUN.** A missing module is reported by the
+    # interpreter as a non-zero exit and a line on stderr, not as a
+    # `FileNotFoundError` -- so catching that exception printed nothing and
+    # the reader got `No module named mkdocs` with no way to act on it.
+    if importlib.util.find_spec("mkdocs") is None:
+        click.echo("mkdocs is not installed. It lives in the docs group, "
+                   "which is not installed by default:", err=True)
+        click.echo("  uv sync --group docs", err=True)
+        return 1
+
+    cmd = [sys.executable, "-m", "mkdocs", *args]
+    click.echo(f"Running: {' '.join(cmd)}")
+    click.echo("-" * 60)
+    return subprocess.run(cmd).returncode
+
+
+@docs.command("serve")
+@click.option("--port", default=8000, show_default=True,
+              help="The port to serve on.")
+@click.option("--host", default="127.0.0.1", show_default=True,
+              help="Loopback by default. This is a local preview.")
+def docs_serve(port: int, host: str) -> None:
+    """Build the site, record the narrative pictures, and serve it.
+
+    Every narrative in `dossier.narratives` is recorded first, so what is
+    served is a picture of the application at this commit rather than whatever
+    was last committed.
+    """
+    click.echo(f"  The site will be at http://{host}:{port}/")
+    click.echo("  The narrative pictures are recorded before it is served.")
+    click.echo("")
+    raise SystemExit(_mkdocs("serve", "--dev-addr", f"{host}:{port}"))
+
+
+@docs.command("build")
+@click.option("--strict/--no-strict", default=True, show_default=True,
+              help="Refuse on a warning. A broken link is a broken page.")
+def docs_build(strict: bool) -> None:
+    """Record the pictures and build the site into `site/`."""
+    args = ["build"] + (["--strict"] if strict else [])
+    code = _mkdocs(*args)
+    if code == 0:
+        click.echo("")
+        click.echo("  Built into site/. Open site/index.html, or serve it:")
+        click.echo("    uv run dossier docs serve")
+    raise SystemExit(code)
+
+
 @cli.command("capabilities")
 @click.option("--gap", is_flag=True, default=False,
               help="Only the ones whose claim outruns the evidence named for it.")
