@@ -59,3 +59,25 @@ path = [
 precedence = "override"
 SPDX-FileCopyrightText = "Copyright (c) 2026 Quaternion Media"
 SPDX-License-Identifier = "Apache-2.0"
+
+# --- A vendored typeface, so a generated picture is the same everywhere ------
+# `docs/fonts/` carries DejaVu Sans Mono because `dossier.filmstrip` draws the
+# narrative GIFs with it. Rendering with whatever monospace face the generating
+# machine happens to have would make the committed artifact depend on who ran
+# it -- a Linux CI run and a Windows one would differ visibly, and the diff
+# would be noise nobody can read.
+#
+# Not this project's copyright and not this project's licence. The fonts are
+# Bitstream's under the Bitstream Vera licence, with DejaVu's own changes in
+# the public domain and imported Arev glyphs copyright Tavmjong Bah; the full
+# text travels beside them as `LICENSE_DEJAVU`. `LicenseRef-DejaVu` names that
+# file rather than claiming an SPDX identifier the licence does not have.
+[[annotations]]
+path = [
+  "docs/fonts/DejaVuSansMono.ttf",
+  "docs/fonts/DejaVuSansMono-Bold.ttf",
+  "docs/fonts/LICENSE_DEJAVU",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (c) 2003 Bitstream, Inc.; DejaVu changes are in the public domain; Arev glyphs (c) Tavmjong Bah"
+SPDX-License-Identifier = "LicenseRef-DejaVu"

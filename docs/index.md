@@ -21,7 +21,7 @@
 | [Extending](extending.md) | Customize for personal/team needs |
 | [Contributing](contributing.md) | Development guide |
 | [Roadmap](roadmap.md) | Future features and vision |
-| [Walkthrough](../walkthrough/01-first-run.md) | Six pages whose every example is executed by the test suite. An example that stops being true fails the build |
+| [Walkthrough](https://github.com/quaternionmedia/dossier/blob/main/walkthrough/01-first-run.md) | Six pages whose every example is executed by the test suite. An example that stops being true fails the build |
 
 ## What is Dossier?
 
@@ -102,7 +102,7 @@ uv run dossier github sync-user your-username
 uv run dossier dashboard
 ```
 
-![Every repository in one reading, with what needs attention first](screenshots/tab_overview_desktop.svg)
+![What the dashboard shows when it opens](screenshots/first-run.gif)
 
 That is the Overview tab, which is where the dashboard opens. `m` then a digit
 reaches any other view; [the dashboard guide](dashboard.md) has the rest.

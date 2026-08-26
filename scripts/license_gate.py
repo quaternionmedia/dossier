@@ -34,20 +34,36 @@ import argparse
 import json
 import sys
 from importlib import metadata
+from pathlib import Path
 
 # OSI-approved identifiers cleared for this project. Extending this list is an
 # amendment to the org record, not a local edit -- see the module docstring.
-ALLOWLIST = {
-    "Apache-2.0",
-    "BSD-2-Clause",
-    "BSD-3-Clause",
-    "CC0-1.0",
-    "ISC",
-    "MIT",
-    "MPL-2.0",
-    "PSF-2.0",
-    "Python-2.0",
-}
+# **THE ALLOWLIST IS GENERATED, NOT TYPED HERE.** `scripts/allowlist.json` is
+# written by `scripts/spdx_allowlist.py` from SPDX's own data: the union of
+# `osi_approved` and `fsf_libre`, deprecated identifiers excluded, which is
+# exactly what the record's section 1 admits.
+#
+# It replaced nine identifiers written in by hand, and the hand-kept list was
+# wrong in both directions. Too narrow: section 1 admits a hundred and
+# eighty-two, so every honest dependency outside the nine failed and needed an
+# individual adjudication. Too wide: it held `PSF-2.0`, which SPDX marks
+# neither OSI-approved nor FSF-libre, so the gate was admitting an identifier
+# the record does not.
+#
+# Read at import rather than embedded, so the file and the gate cannot drift.
+def _admitted() -> frozenset[str]:
+    import json
+
+    path = Path(__file__).resolve().parent / "allowlist.json"
+    if not path.is_file():
+        raise SystemExit(
+            f"{path.name} is missing. It is generated:\n"
+            f"  uv run --with spdx-license-list python "
+            f"scripts/spdx_allowlist.py --write")
+    return frozenset(json.loads(path.read_text(encoding="utf-8"))["admitted"])
+
+
+ALLOWLIST = _admitted()
 
 # Observed spellings that are not SPDX identifiers, mapped to the identifier
 # they mean. Anything absent from here and from ALLOWLIST is UNRESOLVED, which
@@ -58,7 +74,18 @@ SPELLINGS = {
     "bsd license": "BSD-3-Clause",
     "mit license": "MIT",
     "mozilla public license 2.0 (mpl 2.0)": "MPL-2.0",
-    "python software foundation license": "PSF-2.0",
+    # **READ BEFORE IT WAS ADDED, WHICH IS THE RULE ABOVE.** `typing_extensions`
+    # declares `PSF-2.0`, an identifier on neither list, and ships the full
+    # Python licence stack: PSF License Version 2, followed by the BeOpen,
+    # CNRI and CWI agreements. That composite is what SPDX calls `Python-2.0`,
+    # which is both OSI-approved and FSF-libre. `PSF-2.0` names one clause of
+    # it.
+    #
+    # So this is a spelling, not an exception: the package is honest and its
+    # metadata is imprecise, which is the case the record's section 4 describes
+    # when it says a gate comparing raw strings fails honest packages.
+    "psf-2.0": "Python-2.0",
+    "python software foundation license": "Python-2.0",
     "the unlicense (unlicense)": "Unlicense",
 }
 
@@ -105,11 +132,106 @@ def declared(dist: metadata.Distribution) -> str | None:
     return None
 
 
-def collect() -> list[dict[str, str]]:
+def runtime_closure() -> set[str] | None:
+    """Every distribution reachable from this project's runtime dependencies.
+
+    **SECTION 1 BINDS A DEPLOYED RUNTIME PATH, AND THE ENVIRONMENT IS NOT ONE.**
+    Reading `metadata.distributions()` scans the whole virtualenv -- pytest,
+    ruff, the docs toolchain -- which passed for a long time only because those
+    happened to be MIT or BSD. The risk the record is about is a clause in
+    somebody else's contract embedded in *our stack*: a library that draws
+    documentation on a developer's machine is not in anything shipped, and if
+    it relicensed tomorrow nothing deployed would change.
+
+    Returns `None` when the closure cannot be established -- an unreadable
+    manifest, a dependency not installed. **A closure nobody could compute is
+    not an empty one**, and the caller falls back to scanning everything rather
+    than quietly checking a smaller set than it claims.
+
+    WHAT IT CANNOT SEE. A dependency imported at runtime and declared nowhere.
+    That is a packaging defect rather than a licence one, and this reports the
+    manifest it was given.
+    """
+    import tomllib
+
+    manifest = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    if not manifest.is_file():
+        return None
+    try:
+        declared_deps = tomllib.loads(
+            manifest.read_text(encoding="utf-8"))["project"]["dependencies"]
+    except (KeyError, ValueError):
+        return None
+
+    from packaging.requirements import Requirement
+
+    def parse(raw: str):
+        try:
+            return Requirement(raw)
+        except Exception:                              # noqa: BLE001
+            return None
+
+    seen: set[str] = set()
+    queue: list[tuple[str, bool]] = []
+    for raw in declared_deps:
+        parsed = parse(raw)
+        if parsed is None:
+            return None
+        queue.append((parsed.name.lower().replace("_", "-"), False))
+
+    while queue:
+        name, gated = queue.pop()
+        if not name or name in seen:
+            continue
+        try:
+            requires = metadata.requires(name) or []
+        except metadata.PackageNotFoundError:
+            # **A GATED REQUIREMENT THAT IS ABSENT IS NOT A HOLE.**
+            # `importlib-metadata`, `exceptiongroup` and `tomli` are all
+            # declared for older interpreters and correctly not installed on
+            # this one. Treating them as a broken closure made the gate fall
+            # back to scanning the whole environment, which is the thing this
+            # function exists to stop.
+            #
+            # An *ungated* requirement that is missing is a real hole, and the
+            # closure is refused rather than quietly shrunk.
+            if gated:
+                continue
+            return None
+        seen.add(name)
+        for raw in requires:
+            parsed = parse(raw)
+            if parsed is None:
+                return None
+            marker = parsed.marker
+            # An extra's dependencies arrive only when the extra is asked for,
+            # and nothing here asks for one.
+            if marker is not None and "extra" in str(marker):
+                continue
+            applies = marker is None or marker.evaluate()
+            if not applies:
+                continue
+            queue.append((parsed.name.lower().replace("_", "-"),
+                          marker is not None))
+    return seen
+
+
+def collect(runtime_only: bool = True) -> list[dict[str, str]]:
+    """Every distribution the gate judges, and what it declares.
+
+    `runtime_only` narrows to `runtime_closure()`. When that cannot be
+    computed the whole environment is scanned instead, which is the safe
+    direction: it reports more than the record binds rather than less.
+    """
+    closure = runtime_closure() if runtime_only else None
     rows = []
     for dist in metadata.distributions():
+        if closure is not None:
+            name = (dist.metadata.get("Name") or "").lower().replace("_", "-")
+            if name not in closure:
+                continue
         name = dist.metadata.get("Name") or "<unnamed>"
-        raw = declared(dist)
+        raw = declared(dist)  # noqa: E501
         rows.append(
             {
                 "name": name,
@@ -150,10 +272,23 @@ SELFTEST_CASES = [
     ("UNKNOWN", UNRESOLVED, True),
     ("", UNRESOLVED, True),
     (None, UNRESOLVED, True),
-    # Resolvable, OSI-approved, and still outside this project's allowlist:
-    # the adjudication case the record describes, which must fail rather than
-    # pass quietly.
-    ("GPL-3.0-or-later", UNRESOLVED, True),
+    # **COPYLEFT IS ADMITTED, AND THIS IS WHERE THAT IS ASSERTED.** Section 1
+    # says so outright -- "copyleft is explicitly acceptable and contractually
+    # handled, never technically avoided" -- and the hand-kept allowlist did
+    # avoid it technically, by holding nine permissive identifiers and nothing
+    # else. This case failed the day the allowlist started encoding what the
+    # record actually admits, which is how the gap was found.
+    ("GPL-3.0-or-later", "GPL-3.0-or-later", False),
+    ("AGPL-3.0-only", "AGPL-3.0-only", False),
+    # Permissive, widely used, and on neither list. Being reasonable is not the
+    # criterion: section 1 names two lists, and `MIT-CMU` is in neither.
+    ("MIT-CMU", UNRESOLVED, True),
+    # `PSF-2.0` is on neither list *as an identifier*, and the package
+    # declaring it ships the full Python licence stack, which is `Python-2.0`
+    # and is on both. Normalising it is reading the text, not making an
+    # exception -- and this asserts the difference: it resolves, and it
+    # resolves to the licence the file actually contains.
+    ("PSF-2.0", "Python-2.0", False),
 ]
 
 

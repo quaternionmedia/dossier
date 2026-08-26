@@ -556,6 +556,9 @@ uv run dossier db upgrade                          # Run migrations
 
 ### Deltas
 
+![One change across every repository that needs it](screenshots/a-sweep.gif)
+
+
 ```bash
 uv run dossier deltas search <text>                # Find deltas anywhere
 uv run dossier deltas compose <address>            # What one is made of
