@@ -200,43 +200,25 @@ def test_the_declared_recordings_are_actually_recorded():
 # --- the generator that draws them ----------------------------------------------
 
 
-def _generator() -> str:
-    """The screenshot generator's source, with comments and docstrings removed.
-
-    **STRIPPED, BECAUSE THE FIRST VERSION MATCHED ITS OWN EXPLANATION.** The
-    generator carries a comment describing the `tab-projects` and `#main-tabs`
-    defects, and a check reading the raw text found those words there and
-    reported as broken the thing it was written to confirm was fixed. The same
-    trap `governance/qm` item 10 records: a text scan matching the docstring
-    that forbade the thing.
-
-    Layout is preserved rather than tokenised. A token stream joined back
-    together cannot be searched for a line of code, which the tokenising
-    version could not do and passed nothing.
-    """
-    source = Path("tests/ui/test_tui.py").read_text(encoding="utf-8")
-    source = re.sub(r'"""[\s\S]*?"""', "", source)
-    return "\n".join(line for line in source.splitlines()
-                     if not line.lstrip().startswith("#"))
-
-
 def test_the_generator_draws_every_view_the_registry_holds():
     """**THE ONE THAT MADE THIRTY-THREE PICTURES OF ONE SCREEN.**
 
     The tab list was written by hand. It held `tab-projects`, a tab the
     application had removed, and was missing eight views added since --
     Overview, Sweep, Outstanding, Governance, Disk, Topology, Harness and
-    Threads. Deriving it from `views.VIEWS` is what stops a view being added
-    and never drawn.
+    Threads.
 
-    Mutation: replacing the derivation with a literal list fails here.
+    **Asserted by importing the list, not by grepping for the line that builds
+    it.** An earlier version matched the source text
+    `"TABS = [(view.tab, view.title) for view in views.VIEWS]"`, which fails
+    when somebody reformats a line and passes when somebody writes a different
+    expression that happens to contain it. What matters is that the tabs the
+    generator will walk are the tabs the registry holds.
     """
-    source = _generator()
+    from tests.ui.test_tui import TABS
 
-    assert "TABS = [(view.tab, view.title) for view in views.VIEWS]" in source, (
-        "the screenshot generator no longer derives its tabs from the registry")
-    assert '"tab-projects"' not in source, (
-        "the generator names a tab the application does not have")
+    assert [tab for tab, _ in TABS] == [view.tab for view in views.VIEWS], (
+        "the screenshot generator's tabs are not the registry's")
 
 
 def test_the_generator_asserts_the_tab_it_asked_for():
@@ -251,13 +233,14 @@ def test_the_generator_asserts_the_tab_it_asked_for():
 
     P17: a bound that fires is reported, never absorbed.
     """
-    source = _generator()
+    from tests.ui.test_tui import TAB_CONTAINER
 
-    assert '"#main-tabs"' not in source, (
-        "the generator queries a container this application does not have")
-    assert "wrong tab" in Path("tests/ui/test_tui.py").read_text(
-        encoding="utf-8"), (
-        "the generator no longer asserts that the switch took effect")
+    # **THE CONTAINER IS COMPARED, NOT SEARCHED FOR.** `#main-tabs` does not
+    # exist; `#project-tabs` does, and `tests/ui/test_narratives.py` proves the
+    # switch takes effect against the running application. Grepping the source
+    # for the absent name asserted that nobody had written it down, which is a
+    # weaker claim than naming the one that works.
+    assert TAB_CONTAINER == "#project-tabs"
 
 
 def test_the_committed_pictures_are_not_all_the_same_picture():

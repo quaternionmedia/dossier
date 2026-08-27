@@ -198,7 +198,13 @@ def internal_links() -> list[tuple[Path, str]]:
 
 
 def test_the_link_scan_finds_something():
-    """A scan that matched nothing would pass the test below it."""
+    """A scan that matched nothing would pass the test below it.
+
+    A floor rather than a count: how many links these pages carry is nobody's
+    decision to hold steady, and asserting an exact number would fail every
+    time a page gained a cross-reference. What must not happen is the scan
+    going silently empty and every check below it passing on nothing.
+    """
     assert len(internal_links()) > 40
 
 
