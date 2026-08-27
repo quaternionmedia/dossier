@@ -4,9 +4,12 @@
     uv run --with spdx-license-list python scripts/spdx_allowlist.py --write
 
 **GENERATED, NEVER HAND-COMPILED**, which is the rule the record already
-applies to the licence report itself. The allowlist this replaced held nine
-identifiers typed in by hand against a criterion -- section 1's "OSI-approved
-or FSF-free" -- that admits a hundred and eighty-two. Every honest dependency
+applies to the licence report itself. The allowlist this replaced was typed in
+by hand and held a small fraction of what section 1's criterion -- OSI-approved
+or FSF-free -- actually admits. **The size is deliberately not written here**:
+it is whatever SPDX says today, `allowlist.json` carries the figure and the
+date it was taken, and a docstring naming a number would be a second count
+nothing updates. Every honest dependency
 outside those nine failed the gate and needed an individual adjudication, and
 the list was wrong in the other direction too: it admitted `PSF-2.0`, which is
 on neither list.

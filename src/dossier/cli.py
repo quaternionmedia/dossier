@@ -5364,6 +5364,66 @@ def harness() -> None:
     """What a harness reports about itself."""
 
 
+@harness.command("queue")
+@click.option("--base", default=None,
+              help="A harness other than the one on this machine.")
+@click.option("--limit", default=None, type=int,
+              help="How many rows to ask for. The count not shown is reported.")
+def harness_queue(base: str | None, limit: int | None) -> None:
+    """What is waiting on a person, read from the harness itself.
+
+    Live rather than from a payload file: a file is a snapshot somebody
+    exported, and a queue changes while you look at it. `dossier harness
+    ingest` still reads the file, and the two are different claims.
+    """
+    from dossier.human import PAGE, render, waiting
+
+    reading = waiting(base=base, limit=limit or PAGE)
+    click.echo(render(reading))
+    if not reading.reachable:
+        raise SystemExit(1)
+
+
+@harness.command("answer")
+@click.argument("request_id")
+@click.argument("response")
+@click.option("--as", "answered_by", required=True,
+              help="Who is answering. Required: an answer with nobody's name "
+                   "on it is not an attested act.")
+@click.option("--base", default=None,
+              help="A harness other than the one on this machine.")
+def harness_answer(request_id: str, response: str, answered_by: str,
+                   base: str | None) -> None:
+    """Answer one question in the harness's queue, as a named person.
+
+    **One question, and the name is required.** Answering a question in this
+    queue is an act `governance/qm/ci/attested-registry.yaml` reserves for a
+    person: a batch answer is one keystroke asserting many judgements, and an
+    unnamed one cannot be told from a machine's.
+
+    The harness refuses four ways -- unknown request, already answered,
+    expired, or a response outside the options it offered -- and each arrives
+    here in its own words.
+    """
+    from dossier.human import answer
+
+    try:
+        outcome = answer(request_id, response, by=answered_by, base=base)
+    except ValueError as refusal:
+        raise click.ClickException(str(refusal))
+
+    if outcome.accepted:
+        click.echo(f"  {outcome.request_id} answered {outcome.response!r} "
+                   f"by {outcome.answered_by}.")
+        click.echo("  The harness recorded who answered; nothing here did it "
+                   "on your behalf.")
+        return
+
+    click.echo(f"  {outcome.request_id} was not answered: {outcome.detail}",
+               err=True)
+    raise SystemExit(1)
+
+
 @harness.command("ingest")
 @click.argument("payload", type=click.Path(exists=True, path_type=Path))
 @click.option("--write", is_flag=True, help="Apply it. Without this nothing changes.")

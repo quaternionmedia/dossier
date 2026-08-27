@@ -43,12 +43,14 @@ from pathlib import Path
 # `osi_approved` and `fsf_libre`, deprecated identifiers excluded, which is
 # exactly what the record's section 1 admits.
 #
-# It replaced nine identifiers written in by hand, and the hand-kept list was
-# wrong in both directions. Too narrow: section 1 admits a hundred and
-# eighty-two, so every honest dependency outside the nine failed and needed an
-# individual adjudication. Too wide: it held `PSF-2.0`, which SPDX marks
-# neither OSI-approved nor FSF-libre, so the gate was admitting an identifier
-# the record does not.
+# It replaced a handful of identifiers written in by hand, and that list was
+# wrong in both directions. Too narrow: section 1 admits far more, so every
+# honest dependency outside it failed and needed an individual adjudication.
+# Too wide: it held `PSF-2.0`, which SPDX marks neither OSI-approved nor
+# FSF-libre, so the gate was admitting an identifier the record does not.
+#
+# The count lives in `allowlist.json` with the date it was taken, and nowhere
+# else -- a figure repeated in prose is a second number nothing updates.
 #
 # Read at import rather than embedded, so the file and the gate cannot drift.
 def _admitted() -> frozenset[str]:
