@@ -311,6 +311,99 @@ def _store_links(session, delta, links: list[dict]) -> None:
         ))
 
 
+def _clones_for(session, only: str | None = None) -> dict:
+    """A checkout for each project this machine has one of.
+
+    `find_clone` is the rule the rest of this application already uses -- a
+    repository beside this one -- so nothing here invents a second convention
+    for where clones live. A project with no clone is simply absent from the
+    map, and `drift.survey` reports it as unknown rather than as current.
+    """
+    from sqlmodel import select
+
+    from dossier.branches import find_clone
+    from dossier.models.schemas import Project
+
+    found = {}
+    for row in session.exec(select(Project)).all():
+        short = row.name.rsplit("/", 1)[-1]
+        if only and short != only:
+            continue
+        clone = find_clone(short)
+        if clone is not None:
+            found[short] = clone
+    return found
+
+
+@deltas.command("drift")
+@click.option("--project", default=None,
+              help="only this project, by its short name")
+def deltas_drift(project: str | None) -> None:
+    """Where the board and the repositories on disk disagree.
+
+    Reports and changes nothing. The first block is the verdict: a board behind
+    its own clone cannot be called clean however few disagreements follow it,
+    because every other line compares two tables this application wrote, and
+    two stale tables agree with each other perfectly.
+    """
+    from dossier import drift
+
+    with get_session() as session:
+        findings, lags = drift.survey(
+            session, _clones_for(session, project), only=project)
+    click.echo(drift.render(findings, lags))
+
+
+@deltas.command("reconcile")
+@click.option("--apply", is_flag=True,
+              help="write the moves; without it nothing is changed")
+def deltas_reconcile(apply: bool) -> None:
+    """Advance the deltas whose pull request has already landed.
+
+    **ONE FINDING OF THE FIVE.** A merged pull request is a fact and `complete`
+    is the phase it implies, so the move is arithmetic. The other four are
+    refused by `drift.reconcilable` and its docstring says why: creating a
+    delta for work nobody chose to track, deciding whether a bot's pull request
+    is work at all, and "go and sync" are none of them this command's to make.
+
+    Without `--apply` it prints what it would do and writes nothing.
+    """
+    from dossier import drift
+    from dossier.models.schemas import utcnow
+
+    with get_session() as session:
+        findings, lags = drift.survey(session, _clones_for(session))
+        moves = drift.reconcilable(findings, session)
+        behind = sum(lag.behind for lag in lags)
+
+        if not moves:
+            click.echo("  Nothing is mechanically settled.")
+        for move in moves:
+            click.echo(f"  {move.delta.name}: {move.delta.phase.value} -> "
+                       f"{move.to.value}  ({move.because})")
+        if apply and moves:
+            for move in moves:
+                move.delta.phase = move.to
+                move.delta.phase_changed_at = utcnow()
+                move.delta.completed_at = move.delta.completed_at or utcnow()
+                session.add(move.delta)
+            session.commit()
+            click.echo("")
+            click.echo(f"  {len(moves)} delta(s) advanced.")
+        elif moves:
+            click.echo("")
+            click.echo(f"  {len(moves)} delta(s) would move. Nothing was "
+                       f"written; pass --apply.")
+
+    if behind:
+        # Printed whether or not anything moved. Advancing what two stale
+        # tables happen to agree on, while the board is behind its own clone,
+        # is how a board gets tidier and less true at the same time.
+        click.echo("")
+        click.echo(f"  The board is {behind} pull request(s) behind the "
+                   f"clones. Sync before trusting this.")
+
+
 @deltas.command("relate")
 @click.argument("source")
 @click.argument("relation")
