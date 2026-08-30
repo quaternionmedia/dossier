@@ -37,7 +37,7 @@ RAD_VECTORS = Path(__file__).resolve().parents[3] / "rad" / "conformance" / "vec
 
 # The version this host claims. It must match the file it loads, or the replay
 # cannot say what it proved.
-PINNED = "0.6.0"
+PINNED = "0.0.1"
 
 
 def vectors() -> dict:
