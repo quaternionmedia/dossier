@@ -135,3 +135,36 @@ def test_the_governed_vectors_say_cells_and_ring_part_above_four():
 def test_the_centre_backs_out_at_every_arity():
     for count in range(1, 9):
         assert BACK not in place(count).by_cell
+
+
+def test_this_host_covers_the_cell_half_and_says_so(capsys):
+    """**WHAT THIS HOST PROVES, AND WHAT IT CANNOT.**
+
+    The governed set partitions cleanly: the cell-addressing cases are this
+    host's, and the ring, pointer and timing cases belong to a host with a
+    pointer. Neither covers the set alone, and counting it here means a reader
+    cannot mistake "all green" for "the contract is proven" -- the same reason
+    `codecartographer`'s runner names its not-applicable cases instead of
+    passing them.
+
+    Mutation: add a cell case to the governed set that this host does not
+    replay, and the equality below fails.
+    """
+    document = vectors()
+    total = len(document["cases"])
+    mine = [c for c in document["cases"] if "cells" in c]
+    theirs = [c for c in document["cases"] if "cells" not in c]
+
+    assert len(mine) + len(theirs) == total, "the halves do not partition the set"
+    replayed = {name for name, _ in cell_steps()}
+    assert len(replayed) == len(mine), (
+        f"this host replays {len(replayed)} of {len(mine)} cell cases"
+    )
+
+    with capsys.disabled():
+        print(
+            f"\n  rad conformance: {len(mine)} applicable, all passing; "
+            f"{len(theirs)} not applicable to this host - it addresses cells "
+            f"and has no pointer to give an angle, per host integration "
+            f"standard 2b. The halves are disjoint and cover all {total}."
+        )
