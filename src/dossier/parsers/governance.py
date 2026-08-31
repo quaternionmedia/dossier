@@ -361,7 +361,12 @@ def load_harness(path: Path | str) -> HarnessDocument:
     two. It is surfaced here so a renderer can show it.
     """
     path = Path(path)
-    data = _read(path, json.loads)
+    # YAML, because the corpus's config standard moved this document to
+    # status/harness.yaml as real YAML on 2026-08-31 -- and YAML is a superset
+    # of JSON, so a pinned corpus still carrying harness-status.json parses
+    # through the same reader. Two parsers for one document is how the two
+    # layouts would start disagreeing.
+    data = _read(path, yaml.safe_load)
 
     raw_repos = data.get("repositories")
     if not isinstance(raw_repos, list):
