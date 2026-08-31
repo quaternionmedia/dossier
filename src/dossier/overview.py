@@ -511,3 +511,46 @@ def _redact_private(picture: OrgOverview, session: Any) -> OrgOverview:
         generated_from=picture.generated_from,
         scope=scrub(picture.scope),
     )
+
+
+# The seam version. A consumer that reads an unknown number should decline
+# rather than guess; bump it when a field's meaning changes, not when a facet
+# is added (a new section is data, not a schema change).
+OVERVIEW_SCHEMA = 1
+
+
+def as_dict(picture: OrgOverview) -> dict[str, Any]:
+    """The overview as the data seam a second window reads.
+
+    **THIS IS THE SAME INFORMATION THE TERMINAL PRINTS, AS DATA.** `dossier` is
+    one window onto the org registry and `codecartographer` is the other; the
+    terminal renders these sections as tables and the canvas renders them as a
+    graph, but both must show the same reading or the two windows disagree about
+    one estate. So this serialises the built picture and computes nothing —
+    a second way of deriving a figure is how two views of one number start to
+    diverge.
+
+    **REDACTION IS INHERITED, NOT REPEATED.** `build` returns a picture that has
+    already been through `_redact_private`, so every name here is whatever the
+    producer decided to publish. A consumer shows these bytes verbatim and needs
+    no private-repository policy of its own — the seam carries a safe reading or
+    it carries none.
+    """
+    return {
+        "schema": OVERVIEW_SCHEMA,
+        "scope": picture.scope,
+        "generated_from": picture.generated_from,
+        "masthead": [
+            {"label": c.label, "value": c.value, "note": c.note}
+            for c in picture.masthead
+        ],
+        "sections": [
+            {
+                "title": s.title,
+                "headers": list(s.headers),
+                "rows": [list(row) for row in s.rows],
+                "note": s.note,
+            }
+            for s in picture.sections
+        ],
+    }

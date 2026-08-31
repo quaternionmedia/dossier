@@ -111,3 +111,30 @@ def test_a_private_name_is_redacted_as_a_token_prefix_but_not_as_a_suffix():
     assert "factorio-server" not in rows[0][1], "a private name leaked as a tag prefix"
     assert rows[0][1].startswith("private/"), "the whole prefixed token was not redacted"
     assert rows[1][1] == "meta-intro-video", "a public branch ending in a private word was over-redacted"
+
+
+def test_the_data_seam_carries_the_redacted_reading_not_the_names():
+    """The seam a second window reads is `as_dict(build(...))`, and `build`
+    redacts before it returns — so the seam inherits the redaction and a
+    consumer needs no private-repository policy of its own. This is the
+    guarantee the two windows rest on: codecarto shows these bytes verbatim.
+
+    Mutation: have `overview.build` return the un-redacted picture and this
+    fails, because the private name reappears in the serialised seam.
+    """
+    import json as _json
+
+    session = _session()
+    session.add(Project(name="hidden-svc", full_name="quaternionmedia/hidden-svc",
+                        github_owner="quaternionmedia", github_repo="hidden-svc",
+                        is_private=True))
+    session.add(Project(name="looksatwords", full_name="quaternionmedia/looksatwords",
+                        github_owner="quaternionmedia", github_repo="looksatwords",
+                        is_private=False))
+    session.commit()
+
+    seam = overview.as_dict(overview.build(session, owner="quaternionmedia"))
+    blob = _json.dumps(seam)
+    assert seam["schema"] == overview.OVERVIEW_SCHEMA
+    assert "sections" in seam and isinstance(seam["sections"], list)
+    assert "hidden-svc" not in blob, "a private name reached the shared data seam"
