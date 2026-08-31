@@ -66,6 +66,11 @@ class Project(SQLModel, table=True):
     # exclude forks by default rather than deleting the data.
     is_fork: bool = Field(default=False)
     is_archived: bool = Field(default=False)
+    # A private repository's NAME is not this org's to publish. The overview
+    # redacts it to a stable reference; the sync records this flag from the
+    # host's `private` field. A row synced before this field existed reads
+    # False, so the overview also treats unknown visibility conservatively.
+    is_private: bool = Field(default=False)
 
     last_synced_at: Optional[datetime] = None
     

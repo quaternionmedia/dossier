@@ -31,6 +31,7 @@ can see how old the whole picture is before reading any number in it.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Sequence
@@ -429,7 +430,7 @@ def build(session: Any, limit: int = 12, now: datetime | None = None,
     ids = scope_ids(session, owner, include_forks=include_forks)
     horizon = _one(session, _in_scope(
         select(func.max(Project.last_synced_at)), Project.id, ids), default=None)
-    return OrgOverview(
+    picture = OrgOverview(
         masthead=_masthead(session, now, ids),
         sections=(
             _governance(session, now),
@@ -446,4 +447,67 @@ def build(session: Any, limit: int = 12, now: datetime | None = None,
             + (f"owned by {owner}" if owner else "in this dossier")
             + ("" if include_forks else ", forks excluded")
         ),
+    )
+    return _redact_private(picture, session)
+
+
+def _private_map(session: Any) -> dict[str, str]:
+    """Every string a private repository is known by, mapped to a reference.
+
+    **A PRIVATE REPOSITORY'S NAME IS NOT THIS ORG'S TO PUBLISH**, and the
+    overview is meant to be pasted into a pull request or shared. The governance
+    facet already reads a pre-redacted corpus document and shows `private-NN`;
+    every other facet reads this store, which carries real names from the sync —
+    so before this pass those facets leaked two private names in a shared report.
+
+    dossier does not hold the corpus's `private-NN` mapping (that is an
+    uncommitted companion), so it references by its own stable id: `private/<id>`.
+    Different scheme, same guarantee — the name never leaves.
+    """
+    mapping: dict[str, str] = {}
+    for project in session.exec(select(Project).where(Project.is_private == True)):  # noqa: E712
+        ref = f"private/{project.id}"
+        for token in (project.name, project.full_name, project.github_repo,
+                      (f"{project.github_owner}/{project.github_repo}"
+                       if project.github_owner and project.github_repo else None)):
+            if token:
+                mapping[token] = ref
+    return mapping
+
+
+def _redact_private(picture: OrgOverview, session: Any) -> OrgOverview:
+    """Rewrite every private repository name in the built overview to a
+    reference, at one choke point, so no facet can leak regardless of how it
+    renders a name."""
+    mapping = _private_map(session)
+    if not mapping:
+        return picture
+    # Longest first: `owner/repo` before `repo`, so the qualified form is
+    # replaced whole rather than leaving a dangling owner.
+    pairs = sorted(mapping.items(), key=lambda kv: len(kv[0]), reverse=True)
+    # A private name is also redacted when it is the leading segment of a longer
+    # token — a `factorio-server-v1` tag names the private `factorio-server` just
+    # as plainly as the repo cell does. The trailing group consumes `-`/`_`/`.`
+    # delimited suffixes (a version, a variant) but stops at `/`, so `owner/repo`
+    # forms stay whole and are handled by their own longer key first.
+    patterns = [(re.compile(rf"(?<![A-Za-z0-9_./-]){re.escape(name)}(?:[._-][A-Za-z0-9]+)*(?![A-Za-z0-9])"), ref)
+                for name, ref in pairs]
+
+    def scrub(text: str) -> str:
+        if not text:
+            return text
+        for pattern, ref in patterns:
+            text = pattern.sub(ref, text)
+        return text
+
+    return OrgOverview(
+        masthead=tuple(Cell(c.label, scrub(c.value), scrub(c.note)) for c in picture.masthead),
+        sections=tuple(
+            Section(s.title, s.headers,
+                    tuple(tuple(scrub(cell) for cell in row) for row in s.rows),
+                    scrub(s.note))
+            for s in picture.sections
+        ),
+        generated_from=picture.generated_from,
+        scope=scrub(picture.scope),
     )
