@@ -436,6 +436,13 @@ class DossierApp(App):
         Binding("/", "search", "Search", show=True),
         Binding("f", "cycle_filter", "Filter", show=True),
         Binding("m", "rad_menu", "Menu (rad)", show=True),
+        # The middle rank, reachable from the keyboard as well as the buttons
+        # beside the search box: 4 opens the ring on Reach, 6 on Do, 5 closes
+        # it. Which cell each opens is `RANK_KEYS`, so a rebind moves the key
+        # and the button together.
+        Binding("4", "rank('4')", "Reach", show=False),
+        Binding("5", "rank('5')", "Close", show=False),
+        Binding("6", "rank('6')", "Do", show=False),
         Binding("?", "help", "Help", show=True),
         Binding("`", "settings", "Settings", show=False),
         Binding("l", "link_selected", "Link as Project", show=False),
@@ -695,43 +702,46 @@ class DossierApp(App):
         
         yield Footer()
     
-    # Which verb each button in the row opens the ring at. The numbers are
-    # the numpad's, so the label a person clicks and the digit they would have
-    # pressed are the same character.
-    RANK = {"btn-rank-4": 4, "btn-rank-6": 6}
+    # Which ring cell each middle-rank digit opens on. Digit-keyed so the
+    # keyboard binding, the button beside the search box, and any rebind read
+    # one mapping -- the label a person clicks and the digit they would press
+    # are the same character. `5` is the centre; it closes the ring and opens
+    # nothing, so it is not here. Configurable: override to remap the rank.
+    RANK_KEYS: dict[str, int] = {"4": 4, "6": 6}
 
-    # Set by the row, read once by the next open. See `action_rad_menu`.
+    # Set by the row or a key, read once by the next open. See `action_rad_menu`.
     _rad_open_at_cell = None
+
+    def action_rank(self, key: str) -> None:
+        """The middle-rank shortcut, from a digit key or its button alike.
+
+        **TWO INPUTS, BECAUSE IT IS TWO INPUTS.** It opens the ring on the cell
+        `RANK_KEYS` names; the open and the cell are the two presses `m` then
+        `6` are, and rad charges for both. Jumping straight to a verb would be
+        one press on screen and a cost ledger that disagreed with the keyboard.
+        `5` is the centre: it closes the ring, and says so when nothing is open.
+        """
+        if key == "5":
+            self.notify("Nothing to close. 5 backs out of the ring when it is "
+                        "open, at any depth.", timeout=4)
+            return
+        cell = self.RANK_KEYS.get(key)
+        if cell is not None:
+            self._rad_open_at_cell = cell
+            self.action_rad_menu()
 
     @on(Button.Pressed, "#btn-rank-4")
     @on(Button.Pressed, "#btn-rank-6")
     def on_rank_pressed(self, event: Button.Pressed) -> None:
-        """Open the ring, then press the cell the button names.
-
-        **TWO INPUTS, BECAUSE IT IS TWO INPUTS.** The click opens the menu and
-        the cell chooses a verb, exactly as `m` then `6` does, and rad charges
-        for both. Jumping straight to the verb would be one press on screen and
-        a cost ledger that quietly disagreed with the keyboard.
-        """
+        """The button takes the same route its digit key does."""
         event.stop()
-        cell = self.RANK.get(event.button.id)
-        if cell is None:
-            return
-        self._rad_open_at_cell = cell
-        self.action_rad_menu()
+        self.action_rank(event.button.id.removeprefix("btn-rank-"))
 
     @on(Button.Pressed, "#btn-rank-5")
     def on_rank_five_pressed(self, event: Button.Pressed) -> None:
-        """`5` closes, at every depth and from outside as well.
-
-        The centre of the ring is the one cell whose meaning never changes, so
-        the button carrying its number does not get a second meaning here. With
-        the ring shut there is nothing to back out of, and it says so rather
-        than opening the menu a person just declined to open.
-        """
+        """`5` closes; with the ring shut there is nothing to back out of."""
         event.stop()
-        self.notify("Nothing to close. 5 backs out of the ring when it is "
-                    "open, at any depth.", timeout=4)
+        self.action_rank("5")
 
     def on_mouse_down(self, event) -> None:
         """Right-click opens the ring, on whatever is under the pointer.
@@ -1284,18 +1294,42 @@ class DossierApp(App):
             panel.finish(said)
 
     def rad_can_apply(self, wedge) -> bool:
-        """Whether this app can act on one leaf wedge.
+        """Whether this app can act on one leaf wedge *right now*.
 
         Passed to `RadSession`, which greys out what comes back false and
         refuses to select it. Submenus are not asked about -- the session works
         those out from their descendants, because a verb whose every child is
         dead should be dead too rather than open onto a level of dead cells.
 
-        `wedge.action or wedge.id` is the same fallback `RadSession.enter` uses
-        to build the intent. Reading it differently here would grey out a wedge
-        the dispatch would in fact have handled, or the reverse.
+        Two conditions, both required. First the app must have a handler for the
+        act -- `wedge.action or wedge.id`, the same fallback `RadSession.enter`
+        uses to build the intent, so reading it differently would grey a wedge
+        the dispatch would in fact have handled. Second the act's context must
+        hold: Remove needs a repository chosen, Sweep a dependency, the delta
+        acts a repository, Read a conversation. A verb offered with nothing to
+        act on is a click that ends in a warning, and rad greys it instead.
         """
-        return (wedge.action or wedge.id) in self.RAD_HANDLED
+        action = wedge.action or wedge.id
+        return action in self.RAD_HANDLED and self._rad_context_ok(action)
+
+    def _rad_context_ok(self, action: str) -> bool:
+        """Whether one act's context holds now. Everything not named is
+        context-free -- a view, a sync, an add -- and available whenever its
+        handler exists, which keeps every group's middle rank reachable."""
+        if action == "project.remove":
+            return self.selected_project is not None
+        if action in ("delta.advance", "delta.note"):
+            return self.selected_project is not None
+        if action == "sweep.review":
+            return bool(self.selected_dependency)
+        if action == "reach.read":
+            # A conversation is chosen when the threads table has a row under
+            # its cursor. Defensive: the table may not be composed yet.
+            try:
+                return self.query_one("#threads-table", DataTable).cursor_row is not None
+            except Exception:
+                return False
+        return True
 
     # How many repositories `6.2` will fetch off two keystrokes without asking
     # again. Above this it states the plan and waits for the same two keys a
