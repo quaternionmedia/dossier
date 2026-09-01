@@ -18,6 +18,8 @@ change with a different risk.
 """
 
 from typing import Callable, Optional
+
+from rich.markup import escape
 from sqlmodel import Session, select, or_, and_
 from textual import on, work
 from textual.app import App, ComposeResult
@@ -670,10 +672,15 @@ class ChatScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         with Vertical(id="chat-dialog"):
             with Horizontal(id="chat-header"):
-                yield Static(f"💬 {self.conversation.title or '(untitled)'}",
+                yield Static(f"💬 {escape(self.conversation.title or '(untitled)')}",
                              id="chat-title")
             with VerticalScroll(id="chat-transcript"):
-                yield Static(self.drawn.text(), id="chat-body")
+                # Escaped, not rendered as markup: an archived turn is somebody's
+                # text, and a stray `[b]` or `[=32)]` in it is characters they
+                # typed, not a style to apply -- rendering it as markup let the
+                # bracket restyle or, when malformed, crash the whole read. The
+                # same reason the class docstring gives for it not being markdown.
+                yield Static(escape(self.drawn.text()), id="chat-body")
             with Horizontal(id="chat-footer"):
                 yield Button("Close", id="btn-close", variant="default")
                 # Named rather than omitted: a reader comparing this with the
