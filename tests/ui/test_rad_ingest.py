@@ -75,13 +75,13 @@ async def test_it_opens_the_archive_and_focuses_the_field():
     app = app_for()
     async with app.run_test(size=(100, 35)) as pilot:
         await pilot.pause()
-        assert app.query_one("#project-tabs").active != "tab-threads"
+        assert app.query_one("#project-tabs").active != "tab-deltas"
 
         app._apply_rad_intent(Intent("reach.ingest"))
         await pilot.pause()
         await pilot.pause()
 
-        assert app.query_one("#project-tabs").active == "tab-threads"
+        assert app.query_one("#project-tabs").active == "tab-deltas"
         assert app.focused is app.query_one("#thread-export-path", Input), (
             f"focus landed on {app.focused!r}")
 

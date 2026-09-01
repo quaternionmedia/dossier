@@ -27,14 +27,11 @@ depth -- so it is never an item and no number contains it. Arrows and
       `dossier show issues`
   - **`8.6`  Plan**
     - `8.6.8`  On deck -- `m` `8` `6` `8`
-      Open deltas, and every open pull request no delta claims.
-      `dossier show deltas`
+      Open deltas, every open pull request no delta claims, and every line of work in flight -- the harness's threads, read over its seam.
+      `dossier governance threads`
     - `8.6.6`  Sweep -- `m` `8` `6` `6`
       What one dependency change would touch, and where it needs a person.
       `dossier sweep`
-    - `8.6.2`  Threads -- `m` `8` `6` `2`
-      Every line of work in flight, most idle first.
-      `dossier governance threads`
   - **`8.2`  Explore**
     - `8.2.8`  Details -- `m` `8` `2` `8`
       One repository's own facts: description, owner, when it last synced.
@@ -108,7 +105,7 @@ depth -- so it is never an item and no number contains it. Arrows and
 
 ## Outside the ring
 
-`dossier --help` reaches **82** leaf commands; **23**
+`dossier --help` reaches **82** leaf commands; **22**
 of them are named above beside the view they belong to. The rest are
 not menu items and are not meant to be: the ring is for what somebody
 does repeatedly, and a cell spent on a once-a-quarter migration is a

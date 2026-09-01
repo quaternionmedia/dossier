@@ -176,13 +176,12 @@ VIEWS: tuple[View, ...] = (
     # they belong beside each other, not one filed under "work" and the other
     # under "machine".
     View("tab-deltas", "On deck", "Plan",
-         "Open deltas, and every open pull request no delta claims."),
+         "Open deltas, every open pull request no delta claims, and every line "
+         "of work in flight -- the harness's threads, read over its seam.",
+         "dossier governance threads"),
     View("tab-sweep", "Sweep", "Plan",
          "What one dependency change would touch, and where it needs a person.",
          "dossier sweep"),
-    View("tab-threads", "Threads", "Plan",
-         "Every line of work in flight, most idle first.",
-         "dossier governance threads"),
 
     # Explore -- understand what exists: one repository's facts, and the code,
     # people and releases across them.

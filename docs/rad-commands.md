@@ -35,7 +35,6 @@ same cell.
 | `8.6` | `m` `8` `6` | &nbsp;&nbsp;Plan | *opens a submenu* | yes |
 | `8.6.8` | `m` `8` `6` `8` | &nbsp;&nbsp;&nbsp;&nbsp;On deck | `view.deltas` | yes |
 | `8.6.6` | `m` `8` `6` `6` | &nbsp;&nbsp;&nbsp;&nbsp;Sweep | `view.sweep` | yes |
-| `8.6.2` | `m` `8` `6` `2` | &nbsp;&nbsp;&nbsp;&nbsp;Threads | `view.threads` | yes |
 | `8.2` | `m` `8` `2` | &nbsp;&nbsp;Explore | *opens a submenu* | yes |
 | `8.2.8` | `m` `8` `2` `8` | &nbsp;&nbsp;&nbsp;&nbsp;Details | `view.details` | yes |
 | `8.2.6` | `m` `8` `2` `6` | &nbsp;&nbsp;&nbsp;&nbsp;Dossier | `view.dossier` | yes |

@@ -54,7 +54,7 @@ async def test_selecting_a_row_opens_the_conversation(
                         lambda source, ident, **kw: a_conversation())
 
     app = DossierApp(session_factory=lambda: no_close(test_session),
-                     initial_tab="tab-threads")
+                     initial_tab="tab-deltas")
     async with app.run_test(size=(160, 50)) as pilot:
         await pilot.pause()
         with_one_row(app)
@@ -93,7 +93,7 @@ async def test_the_button_opens_the_same_thing(
                         lambda source, ident, **kw: a_conversation())
 
     app = DossierApp(session_factory=lambda: no_close(test_session),
-                     initial_tab="tab-threads")
+                     initial_tab="tab-deltas")
     async with app.run_test(size=(160, 50)) as pilot:
         await pilot.pause()
         with_one_row(app)
@@ -125,7 +125,7 @@ async def test_an_unreachable_harness_still_opens_and_says_why(
                             remedy="`uv run qm dashboard --start harness`"))
 
     app = DossierApp(session_factory=lambda: no_close(test_session),
-                     initial_tab="tab-threads")
+                     initial_tab="tab-deltas")
     async with app.run_test(size=(160, 50)) as pilot:
         await pilot.pause()
         with_one_row(app)
@@ -159,7 +159,7 @@ async def test_a_row_with_no_address_is_refused_with_a_reason(
                         lambda name, **kw: asked.append(name) or None)
 
     app = DossierApp(session_factory=lambda: no_close(test_session),
-                     initial_tab="tab-threads")
+                     initial_tab="tab-deltas")
     async with app.run_test(size=(160, 50)) as pilot:
         await pilot.pause()
         with_one_row(app, address="--")
@@ -181,7 +181,7 @@ async def test_an_empty_table_is_refused_before_any_lookup(
                         lambda name, **kw: asked.append(name) or None)
 
     app = DossierApp(session_factory=lambda: no_close(test_session),
-                     initial_tab="tab-threads")
+                     initial_tab="tab-deltas")
     async with app.run_test(size=(160, 50)) as pilot:
         await pilot.pause()
         table = app.query_one("#threads-table", DataTable)

@@ -92,7 +92,8 @@ from dossier.views import VIEWS
 from dossier.tui.widgets import (ChatScreen, ContentViewerScreen, DraggableSplitter,
                                   ProjectDetailPanel, ProjectListItem, StatsWidget,
                                   SyncStatusWidget, WorkProgress)
-from dossier.facets import (BY_TAB as FACET_BY_TAB,
+from dossier.facets import (BY_KEY as FACET_BY_KEY,
+                            BY_TAB as FACET_BY_TAB,
                             BY_TITLE as FACET_BY_TITLE,
                             only_on)
 from dossier.tui.delta_board import DeltaBoard
@@ -537,8 +538,24 @@ class DossierApp(App):
         elif tab == "tab-issues":
             yield DataTable(id="issues-table")
         elif tab == "tab-deltas":
+            # Deltas are the planned units of work; threads are the lines of
+            # work in flight, read over the harness's seam. One tab, because a
+            # reader should not pick between them before knowing which they need.
             with Vertical():
                 yield DataTable(id="deltas-table")
+                yield Static("Threads -- lines of work in flight, over the "
+                             "harness's seam", id="threads-heading")
+                yield DataTable(id="threads-table")
+                with Horizontal(id="thread-buttons"):
+                    yield Input(placeholder="path to an export "
+                                            "(conversations.json or the "
+                                            "folder holding it)",
+                                id="thread-export-path")
+                    yield Button("Ingest", id="btn-ingest-threads",
+                                 variant="primary")
+                    yield Button("Read", id="btn-read-thread",
+                                 variant="default")
+                yield WorkProgress(id="thread-progress")
         elif tab == "tab-sweep":
             # A review is a thing you leave and return to, so it is a tab rather
             # than a modal you are inside of.
@@ -551,18 +568,6 @@ class DossierApp(App):
                 yield Static("", id="sweep-summary")
                 yield DataTable(id="sweep-table")
                 yield Static("", id="sweep-note")
-        elif tab == "tab-threads":
-            yield DataTable(id="threads-table")
-            with Horizontal(id="thread-buttons"):
-                yield Input(placeholder="path to an export "
-                                        "(conversations.json or the "
-                                        "folder holding it)",
-                            id="thread-export-path")
-                yield Button("Ingest", id="btn-ingest-threads",
-                             variant="primary")
-                yield Button("Read", id="btn-read-thread",
-                             variant="default")
-            yield WorkProgress(id="thread-progress")
         elif tab == "tab-details":
             yield ProjectDetailPanel(id="project-detail")
         elif tab == "tab-dossier":
@@ -872,11 +877,11 @@ class DossierApp(App):
         it, which is the whole complaint `PRINCIPLES.md` P13 is about.
         """
         try:
-            self.query_one("#project-tabs").active = "tab-threads"
+            self.query_one("#project-tabs").active = "tab-deltas"
             # Filled on arrival rather than left to whatever fires on a tab
             # change: a person routed here by `4.6` should see the archive they
             # are about to add to, not an empty table.
-            self._load_tab_data("tab-threads")
+            self._load_tab_data("tab-deltas")
         except Exception:
             pass
 
@@ -963,7 +968,7 @@ class DossierApp(App):
         # watching stayed empty while the message said two hundred and three.
         # Measured: rows after a real ingest were 0.
         self.action_refresh()
-        self.reload_tab("tab-threads")
+        self.reload_tab("tab-deltas")
         self.notify(line, title="Ingested")
 
     def reload_tab(self, tab_id: str) -> None:
@@ -1207,8 +1212,8 @@ class DossierApp(App):
         export somebody might not still have.
         """
         try:
-            self.query_one("#project-tabs").active = "tab-threads"
-            self._load_tab_data("tab-threads")
+            self.query_one("#project-tabs").active = "tab-deltas"
+            self._load_tab_data("tab-deltas")
         except Exception:
             pass
         self._progress_start(self.RECONCILE_STAGES[0][1],
@@ -1252,7 +1257,7 @@ class DossierApp(App):
         except Exception:
             pass
         self.action_refresh()
-        self.reload_tab("tab-threads")
+        self.reload_tab("tab-deltas")
 
         reachable = "" if archive.reachable else "  (the archive did not answer)"
         self._progress_finish(line + reachable)
@@ -3105,6 +3110,13 @@ class DossierApp(App):
             self._load_governance_tab()
             return
 
+        # On-deck holds two readings, one of which asks the harness over HTTP.
+        # Routed to its own loader before the facet path below so the threads
+        # reading keeps its worker rather than blocking on the org path.
+        if tab_id == "tab-deltas":
+            self._load_on_deck_tab(getattr(self, "_current_project", None))
+            return
+
         # A facet reads the same table at either scope, so the tab does not
         # need to know which one it is showing -- only which facet it holds.
         owner = getattr(self, "_scope_owner", None)
@@ -3130,10 +3142,13 @@ class DossierApp(App):
         # neither is scoped to a project, and both drew blank on a fresh
         # installation because the gate below returned first. The gate is right
         # for the repository tabs and wrong for these.
+        # On-deck is here too: the deltas are org-wide and the threads read the
+        # harness over its seam, so neither is scoped to a project and both drew
+        # blank on a fresh install when the gate below returned first.
         unscoped = {
             "tab-sweep": self._load_sweep_tab,
             "tab-topology": self._load_topology_tab,
-            "tab-threads": self._load_threads_tab,
+            "tab-deltas": self._load_on_deck_tab,
         }
         if tab_id in unscoped:
             unscoped[tab_id](getattr(self, "_current_project", None))
@@ -3152,10 +3167,8 @@ class DossierApp(App):
             "tab-contributors": self._load_contributors_tab,
             "tab-issues": self._load_issues_tab,
             "tab-releases": self._load_releases_tab,
-            "tab-deltas": self._load_deltas_tab,
-            # Reads the harness over HTTP rather than the database, so it takes
-            # no project -- the archive is not scoped to one repository.
-            "tab-threads": self._load_threads_tab,
+            # On-deck (deltas + threads) is loaded unscoped above, before the
+            # project gate, because neither reading needs a repository.
             # Reads no database of its own: a review is arranged from a
             # dispatcher run, and is empty until somebody asks for one.
             "tab-sweep": self._load_sweep_tab,
@@ -4410,6 +4423,16 @@ class DossierApp(App):
             "each row carrying why. Approving is a person's act -- "
             "governance/qm/ci/attested-registry.yaml.")
 
+    def _load_on_deck_tab(self, project=None) -> None:
+        """The On-deck tab holds two readings: a repository's deltas (units of
+        planned work) and the harness's threads (lines of work in flight, over
+        its seam). The deltas are scoped to a repository and stay blank until
+        one is chosen -- as they did before the fold; the threads are not, and
+        load either way."""
+        if project is not None:
+            self._load_deltas_tab(project)
+        self._load_threads_tab(project)
+
     def _load_threads_tab(self, project=None) -> None:
         """Fill the archive table from the same facet the overview reads.
 
@@ -4435,7 +4458,7 @@ class DossierApp(App):
         # `threads_org` because an archive is not scoped to a repository, so
         # both scopes see the same rows -- which is the honest answer and not a
         # shortcut.
-        self._render_facet_for_project(only_on("tab-threads"), project)
+        self._render_facet_for_project(FACET_BY_KEY["threads"], project)
 
     def _load_deltas_tab(self, project: Project) -> None:
         """Load deltas tab."""

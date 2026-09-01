@@ -144,7 +144,7 @@ NARRATIVES: tuple[Narrative, ...] = (
             ("tab-branches", "Branches: what carries work nowhere else"),
             ("tab-governance", "Governance: where each project stands"),
             ("tab-disk", "Disk: what is eating the workstation"),
-            ("tab-threads", "Threads: the conversations behind the work"),
+            ("tab-deltas", "On deck: the work in flight, and the threads behind it"),
         ),
     ),
     Narrative(

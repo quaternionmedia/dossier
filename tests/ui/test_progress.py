@@ -30,7 +30,7 @@ def app_for():
 
 
 async def open_threads(pilot, app):
-    app.query_one("#project-tabs").active = "tab-threads"
+    app.query_one("#project-tabs").active = "tab-deltas"
     await pilot.pause()
     await pilot.pause()
 
