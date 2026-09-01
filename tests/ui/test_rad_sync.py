@@ -310,13 +310,27 @@ def test_the_sync_wedge_is_marked_wired():
 
 def test_every_handled_action_exists_in_the_palette():
     """The other direction: an action the app dispatches that no wedge names is
-    dead code the sheet will never mention.
+    dead code the sheet will never mention. Counted across contexts, because
+    some wedges are context-gated -- the harness acts appear only on the Seams
+    screen, and a check that resolved one context would call them dead.
 
     Mutation: add a typo'd action to `RAD_HANDLED` and this fails.
     """
-    from dossier.rad.index import index
+    from dossier.rad import resolve
     from dossier.tui.app import DossierApp
 
-    named = {c.action for c in index() if c.action}
+    def actions(context):
+        found = set()
+
+        def walk(wedges):
+            for wedge in wedges:
+                if wedge.action:
+                    found.add(wedge.action)
+                walk(wedge.children)
+
+        walk(resolve(context))
+        return found
+
+    named = actions(None) | actions({"seams": True})
     assert DossierApp.RAD_HANDLED <= named, (
         f"dispatched but not in the palette: {DossierApp.RAD_HANDLED - named}")

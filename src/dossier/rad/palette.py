@@ -30,10 +30,16 @@ from dossier.views import grouped
 def resolve(context: Any = None) -> tuple[Wedge, ...]:
     """The ring's top level, and everything under it.
 
-    `context` is accepted and currently unused: the durable verbs are the same
-    everywhere by design, and it is the *children* that will vary by selection.
-    Taking it now means the signature does not change when they do.
+    The durable verbs are the same everywhere; the *children* vary by context,
+    which is what this signature was built to allow. On the Seams screen -- where
+    dossier meets the harness -- Do gains 'Run a harness tool' and Reach gains
+    'Review the harness queue', so the ring opened there is relevant to running
+    the harness rather than only to the estate. `context` is a mapping the host
+    passes; `seams` is the one key read here.
     """
+    # Only a mapping that says so turns the harness acts on; any other context
+    # -- a string, None -- is accepted and ignored, as it always was.
+    seams = bool(isinstance(context, dict) and context.get("seams"))
     return (
         # **THE VIEWS COME FROM `dossier.views`, GROUPED, AND THAT IS A
         # LEVEL.** `Go` held six of the eighteen views this application has;
@@ -66,6 +72,10 @@ def resolve(context: Any = None) -> tuple[Wedge, ...]:
             # no button is an act only the keyboard can reach.
             Wedge("do.add", "Add a project", action="project.add"),
             Wedge("do.remove", "Remove a project", action="project.remove"),
+            # On the Seams screen only: start a harness run. The children vary
+            # by context, which is exactly what the resolver's signature allows.
+            *((Wedge("do.harness_run", "Run a harness tool", action="harness.run"),)
+              if seams else ()),
         )),
         Wedge(SHOW, "Show", children=(
             Wedge("show.all", "All", action="filter.all"),
@@ -87,5 +97,9 @@ def resolve(context: Any = None) -> tuple[Wedge, ...]:
             # clone here and closing that gap meant typing `git clone`
             # eighty-two times.
             Wedge("reach.clone", "Clone what is absent", action="reach.clone"),
+            # On the Seams screen only: review the harness's queue and answer.
+            *((Wedge("reach.harness_review", "Review the harness queue",
+                     action="harness.review"),)
+              if seams else ()),
         )),
     )

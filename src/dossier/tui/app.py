@@ -786,7 +786,64 @@ class DossierApp(App):
         # and a cell that survived one use would silently steer it.
         opening_on = self._rad_open_at_cell
         self._rad_open_at_cell = None
-        self.push_screen(RingScreen(self._rad, opening_on=opening_on), applied)
+        self.push_screen(
+            RingScreen(self._rad, context=self._rad_context(),
+                       opening_on=opening_on),
+            applied)
+
+    def _rad_context(self) -> dict:
+        """What the ring should know about where it was opened. `seams` is true
+        on the Harness and Topology screens, where the ring offers the acts that
+        run and review the harness."""
+        view = VIEW_BY_TAB.get(self._get_active_tab_id())
+        return {"seams": bool(view and view.group == "Seams")}
+
+    def _review_harness(self) -> None:
+        """`harness.review`. Show what the harness ran, to review it. Offered by
+        the ring's Reach only on the Seams screen."""
+        self._activate_tab("tab-harness")
+
+    def _run_harness_tool(self) -> None:
+        """`harness.run`. Choose a harness tool and start it.
+
+        The tools are read in a worker and the run started in another, so the
+        loop a person is looking at never stops for the network; the picker in
+        between only chooses which tool. Starting a run is a write to the
+        harness, so the outcome names the invocation it began.
+        """
+        self._fetch_harness_tools()
+
+    @work(thread=True, exclusive=True, group="harness-tools")
+    def _fetch_harness_tools(self) -> None:
+        from dossier import human
+        listing = human.tools()
+        self.call_from_thread(self._show_tool_picker, listing)
+
+    def _show_tool_picker(self, listing) -> None:
+        from dossier.tui.harness_run import ToolPickerScreen
+
+        def picked(name):
+            if name:
+                self.notify(f"harness: starting {name}…", timeout=3)
+                self._run_harness_tool_worker(name)
+
+        self.push_screen(ToolPickerScreen(listing), picked)
+
+    @work(thread=True, exclusive=True, group="harness-run")
+    def _run_harness_tool_worker(self, name: str) -> None:
+        from dossier import human
+        ran = human.run_tool(name)
+        self.call_from_thread(self._harness_ran, ran)
+
+    def _harness_ran(self, ran) -> None:
+        if ran.accepted:
+            where = (f" -- invocation {ran.invocation_id}"
+                     if ran.invocation_id else "")
+            self.notify(f"harness ran {ran.tool}{where}", timeout=5)
+            self._activate_tab("tab-harness")
+        else:
+            self.notify(f"{ran.tool} did not run: {ran.detail}",
+                        severity="warning", timeout=6)
 
     # One rad session for the app's lifetime, so the cost ledger accumulates
     # across actions rather than resetting each time the ring opens. A class
@@ -833,6 +890,10 @@ class DossierApp(App):
         "filter.all": "_show_all_projects",
         "filter.synced": "_show_synced_projects",
         "filter.drifting": "_show_drifting_projects",
+        # Seams: run the harness, and review what it is holding. Offered by the
+        # ring only on the Seams screen (see `dossier.rad.palette.resolve`).
+        "harness.run": "_run_harness_tool",
+        "harness.review": "_review_harness",
     }
 
     # Every ring action this app actually does something with. Declared rather

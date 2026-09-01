@@ -1045,3 +1045,52 @@ async def test_a_digit_key_opens_the_ring_like_its_button():
         await pilot.pause()
         await pilot.pause()
         assert type(app.screen).__name__ == "RingScreen", "6 did not open the ring"
+
+
+# --- the ring is relevant to the Seams screen ---------------------------------
+
+
+def test_the_ring_offers_harness_acts_only_on_the_seams_screen():
+    """On Seams -- where dossier meets the harness -- Do gains 'Run a harness
+    tool' and Reach gains 'Review the harness queue'. Elsewhere the ring holds
+    the estate's verbs and neither appears.
+
+    Mutation: drop the `seams` guard in `resolve` and this fails, because the
+    harness acts leak onto every other screen.
+    """
+    from dossier.rad import resolve
+
+    def actions(context):
+        out = []
+
+        def walk(wedges):
+            for w in wedges:
+                if w.action:
+                    out.append(w.action)
+                walk(w.children)
+
+        walk(resolve(context))
+        return out
+
+    off = actions({"seams": False})
+    on = actions({"seams": True})
+    assert "harness.run" not in off and "harness.review" not in off
+    assert "harness.run" in on and "harness.review" in on
+
+
+@pytest.mark.asyncio
+async def test_the_ring_context_is_seams_on_a_seams_screen():
+    """`_rad_context` reads the active view's group, so the ring opened on
+    Harness or Topology knows it is on Seams and offers the harness acts."""
+    app = _mount_app()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._activate_tab("tab-harness")
+        await pilot.pause()
+        assert app._rad_context() == {"seams": True}
+        app._activate_tab("tab-overview")
+        await pilot.pause()
+        assert app._rad_context() == {"seams": False}
+        # both harness acts dispatch to a wired handler
+        assert "harness.run" in app.RAD_HANDLED
+        assert "harness.review" in app.RAD_HANDLED
