@@ -55,3 +55,21 @@ def test_run_tool_carries_a_tool_error_through(monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: _Reply())
     ran = human.run_tool("planner", base="http://x")
     assert ran.accepted is False and "refused" in ran.detail
+
+
+def test_monitor_summarises_the_invocations_by_status(monkeypatch):
+    monkeypatch.setattr(human, "_get", lambda url: ({"invocations": [
+        {"status": "success"}, {"status": "success"}, {"status": "running"},
+        {"status": "pending"}]}, "", ""))
+    m = human.monitor(base="http://x")
+    assert m.reachable
+    assert m.total == 4
+    assert m.running == 2  # running + pending
+    assert dict(m.by_status) == {"pending": 1, "running": 1, "success": 2}
+
+
+def test_monitor_reports_an_unreachable_harness_rather_than_raising():
+    m = human.monitor(base="http://127.0.0.1:59999")
+    assert m.reachable is False
+    assert m.problem
+    assert m.total == 0

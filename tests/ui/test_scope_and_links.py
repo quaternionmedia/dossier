@@ -336,6 +336,10 @@ async def test_a_global_tab_fills_without_a_selection(session, tab, table):
     the table renders no columns when loading never fires.
     """
     app = app_for(session)
+    # The Harness tab's live refresh reads the harness over the network; this
+    # test is about the facet table filling, not the live half, so stub it --
+    # a lingering worker thread otherwise slows unrelated captures under load.
+    app._refresh_harness_live = lambda: None
     async with app.run_test(size=(160, 50)) as pilot:
         await pilot.pause()
         app._activate_tab(tab)

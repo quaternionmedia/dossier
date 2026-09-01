@@ -163,6 +163,7 @@ FIELDS_WITH_THEIR_OWN_MEANING: dict[str, str] = {
     "topology-subject": "draws the topology for that subject",
     "sweep-package": "reviews a sweep of that package",
     "thread-export-path": "writes the export to that path",
+    "harness-answer": "sends the typed text to the harness's waiting question",
     # Settings, not a form. Both carry `@on(Input.Changed)` handlers that
     # validate and `_auto_save()` on every keystroke, so the value is already
     # persisted by the time Enter could do anything. Declared rather than

@@ -425,6 +425,22 @@ class DossierApp(App):
         padding: 1 1 0 1;
         text-style: bold;
     }
+
+    /* The Harness tab's live console: a status line, the question it is
+       holding, and the field that answers it. */
+    #harness-status {
+        color: $text-muted;
+        padding: 0 1;
+    }
+
+    #harness-question {
+        color: $warning;
+        padding: 0 1;
+    }
+
+    #harness-answer {
+        margin: 0 1;
+    }
     """
     
     BINDINGS = [
@@ -618,9 +634,18 @@ class DossierApp(App):
                 yield Static("", id="governance-threads-age")
                 yield DataTable(id="governance-threads-table")
         elif tab == "tab-harness":
-            # The harness half of the pair qmcp reports having run, read through
-            # the address that names the same row on both sides.
-            yield DataTable(id="harness-table")
+            # A live harness console, all on this screen: a status line polled
+            # while the tab is open, the invocations it reports, the question it
+            # is holding for a person, and a field to answer it. The harness half
+            # of the pair qmcp reports, read through the address that names the
+            # same row on both sides.
+            with Vertical():
+                yield Static("", id="harness-status")
+                yield DataTable(id="harness-table")
+                yield Static("", id="harness-question")
+                yield Input(
+                    placeholder="answer the harness's question, then Enter",
+                    id="harness-answer")
         elif tab == "tab-topology":
             with Vertical():
                 yield Static("", id="topology-caveat")
@@ -3284,6 +3309,8 @@ class DossierApp(App):
         than an unmade selection. The rest fill from a repository, so they wait
         on one -- `pane.id` (`tab-docs`), never `tab.id` (`--content-tab-...`).
         """
+        # The harness monitoring heartbeat runs only while its tab is watched.
+        self._sync_harness_poll(view_tab)
         if not view_tab:
             return
         if view_tab == "tab-governance":
@@ -4034,6 +4061,102 @@ class DossierApp(App):
         with self.session_factory() as session:
             section = FACET_BY_KEY["harness"].at(session, ids=None, limit=self.TAB_ROWS)
         self._render_section("harness-table", section)
+        # The live half: what the harness is running now and what it is asking,
+        # read over the seam in a worker so the loop never stops for it.
+        self._refresh_harness_live()
+
+    # The pending request the answer field answers. Set by the live refresh from
+    # the oldest question the harness is holding; None when it is holding none.
+    _harness_request = None
+
+    @work(thread=True, exclusive=True, group="harness-live")
+    def _refresh_harness_live(self) -> None:
+        from dossier import human
+        status = human.monitor()
+        queue = human.waiting(limit=1)
+        self.call_from_thread(self._harness_live_drawn, status, queue)
+
+    def _harness_live_drawn(self, status, queue) -> None:
+        try:
+            status_line = self.query_one("#harness-status", Static)
+            question = self.query_one("#harness-question", Static)
+        except Exception:
+            return
+        if not status.reachable:
+            status_line.update(f"harness unreachable -- {status.problem}")
+        else:
+            by = ", ".join(f"{n} {s}" for s, n in status.by_status) or "none"
+            status_line.update(
+                f"harness reachable -- {status.total} invocation(s): {by}"
+                + (f"  ·  {status.running} running" if status.running else ""))
+        ask = queue.asks[0] if getattr(queue, "asks", ()) else None
+        self._harness_request = ask.id if ask else None
+        if ask:
+            options = f"  [{' / '.join(ask.options)}]" if ask.options else ""
+            question.update(f"waiting: {ask.prompt}{options}")
+        else:
+            question.update("no question is waiting.")
+
+    # The monitoring heartbeat, alive only while the Harness tab is watched.
+    _harness_poll_timer = None
+
+    def _sync_harness_poll(self, view_tab) -> None:
+        """Start the heartbeat behind 'monitoring status' when the Harness tab is
+        the one being watched, and stop it when it is not. A harness nobody is
+        looking at costs no requests, and no timer ticks behind another screen --
+        which is what kept the periodic tick out of the deterministic captures."""
+        on = view_tab == "tab-harness"
+        if on and self._harness_poll_timer is None:
+            self._harness_poll_timer = self.set_interval(
+                5.0, self._refresh_harness_live)
+        elif not on and self._harness_poll_timer is not None:
+            self._harness_poll_timer.stop()
+            self._harness_poll_timer = None
+
+    @on(Input.Submitted, "#harness-answer")
+    def on_harness_answer_submitted(self, event: Input.Submitted) -> None:
+        """Send text to the harness: answer its waiting question, as a named
+        person. The name is the workstation's git identity -- answering is an
+        attested act, and one with nobody's name on it asserts nothing."""
+        event.stop()
+        text = event.value.strip()
+        if not text:
+            return
+        if self._harness_request is None:
+            self.notify("No question is waiting to answer.", severity="warning")
+            return
+        by = self._harness_answerer()
+        if not by:
+            self.notify("Set a name to answer with: `git config user.name`.",
+                        severity="warning", timeout=6)
+            return
+        event.input.value = ""
+        self._answer_harness(self._harness_request, text, by)
+
+    @staticmethod
+    def _harness_answerer() -> str:
+        import subprocess
+        try:
+            out = subprocess.run(["git", "config", "user.name"],
+                                 capture_output=True, text=True, timeout=3)
+            return out.stdout.strip()
+        except Exception:                              # noqa: BLE001
+            return ""
+
+    @work(thread=True, exclusive=True, group="harness-answer")
+    def _answer_harness(self, request_id: str, response: str, by: str) -> None:
+        from dossier import human
+        outcome = human.answer(request_id, response, by=by)
+        self.call_from_thread(self._harness_answered, outcome)
+
+    def _harness_answered(self, outcome) -> None:
+        if outcome.accepted:
+            self.notify(f"answered {outcome.request_id} as {outcome.answered_by}",
+                        timeout=4)
+        else:
+            self.notify(f"not answered: {outcome.detail}",
+                        severity="warning", timeout=6)
+        self._refresh_harness_live()
 
     def _load_waiting_tab(self) -> None:
         """Render the outstanding queue, at any scope.

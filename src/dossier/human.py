@@ -308,6 +308,42 @@ def run_tool(name: str, params: dict[str, Any] | None = None,
     return Ran(tool=name, accepted=True, invocation_id=inv)
 
 
+@dataclass(frozen=True)
+class Monitor:
+    """A live reading of what the harness is doing, or why it could not be read.
+
+    `by_status` counts the invocations the harness holds by their status;
+    `running` is how many are not yet finished. An unreachable harness is a
+    reason, not a crash -- the same contract every read here keeps.
+    """
+
+    reachable: bool = False
+    problem: str = ""
+    remedy: str = ""
+    by_status: tuple[tuple[str, int], ...] = ()
+    running: int = 0
+    total: int = 0
+
+
+def monitor(base: str | None = None) -> Monitor:
+    """What the harness is running now, read live. **Never raises.**"""
+    root = (base or base_url()).rstrip("/")
+    where = f"{root}/v1/invocations?limit=200"
+    document, problem, remedy = _get(where)
+    if document is None:
+        return Monitor(problem=problem, remedy=remedy)
+    invocations = document.get("invocations") or []
+    counts: dict[str, int] = {}
+    for row in invocations:
+        status = (str(row.get("status", "unknown"))
+                  if isinstance(row, dict) else "unknown")
+        counts[status] = counts.get(status, 0) + 1
+    running = sum(n for s, n in counts.items()
+                  if s in ("running", "pending", "in_progress"))
+    return Monitor(reachable=True, running=running, total=len(invocations),
+                   by_status=tuple(sorted(counts.items())))
+
+
 def render(reading: Reading) -> str:
     """The queue, for the person who is going to answer it."""
     if not reading.reachable:

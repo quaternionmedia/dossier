@@ -40,3 +40,18 @@ class NoClose:
 def no_close():
     """The wrapper class, for `session_factory=lambda: no_close(session)`."""
     return NoClose
+
+
+@pytest.fixture(autouse=True)
+def _no_live_harness(monkeypatch):
+    """**THE HARNESS TAB POLLS THE HARNESS OVER THE NETWORK, AND A TEST MUST NOT
+    DEPEND ON ONE BEING UP.** Its live half runs in a worker thread; when a dev
+    harness *is* up, that worker does real I/O, and under the parallel suite the
+    thread slows unrelated screenshot captures into an intermittent failure. So
+    it is stubbed for every UI test -- the client is tested against a mock in
+    `tests/core/test_harness_run.py` and the panel update it feeds is driven
+    directly in `test_harness_console.py`, neither of which needs a live worker.
+    """
+    from dossier.tui.app import DossierApp
+    monkeypatch.setattr(DossierApp, "_refresh_harness_live",
+                        lambda self: None, raising=False)
