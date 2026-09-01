@@ -476,6 +476,40 @@ class DossierApp(App):
     #harness-answer {
         margin: 0 1;
     }
+
+    /* The Goals tab: a goal, its context, the send, and the plan that comes
+       back. The plan scrolls inside its own region so the page does not. */
+    #goals-intro {
+        color: $text-muted;
+        padding: 1 1 0 1;
+    }
+
+    #goal-input, #goal-context {
+        margin: 0 1;
+    }
+
+    #goal-buttons {
+        height: auto;
+        padding: 1 1;
+    }
+
+    #goal-status {
+        color: $warning;
+        padding: 0 1;
+    }
+
+    #goal-plan-scroll {
+        height: 1fr;
+    }
+
+    #goal-plan {
+        padding: 0 1;
+    }
+
+    #goal-history {
+        color: $text-muted;
+        padding: 1 1;
+    }
     """
     
     BINDINGS = [
@@ -717,6 +751,26 @@ class DossierApp(App):
                     yield Button("Mermaid", id="btn-topology-mermaid")
                 yield Static("", id="topology-drawing")
                 yield Static("", id="topology-note")
+        elif tab == "tab-goals":
+            # Where a person originates work: a goal, optional context, and the
+            # plan the harness drafts from it. The plan is shown, not run --
+            # approving it is the human queue's act (Outstanding), and this
+            # screen ends at the draft on purpose. It is the outbound side of
+            # the seam every other Seams view reads.
+            with Vertical():
+                yield Static("Send the harness a new goal. It drafts a plan; "
+                             "approving that plan happens at Outstanding, not "
+                             "here.", id="goals-intro")
+                yield Input(placeholder="the goal, in your words",
+                            id="goal-input")
+                yield Input(placeholder="optional context -- a repo, a delta, "
+                                        "a constraint", id="goal-context")
+                with Horizontal(id="goal-buttons"):
+                    yield Button("Send goal", id="goal-send", variant="primary")
+                yield Static("", id="goal-status")
+                with VerticalScroll(id="goal-plan-scroll"):
+                    yield Static("", id="goal-plan")
+                yield Static("", id="goal-history")
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -3388,6 +3442,12 @@ class DossierApp(App):
             # Outstanding is global for the same reason and had the same gap.
             self._load_waiting_tab()
             return
+        if view_tab == "tab-goals":
+            # Goals composes rather than reads: it fills with no selection
+            # because it has nothing to read until a goal is sent, and only
+            # prefills the context from whatever repo is selected.
+            self._load_goals_tab()
+            return
         if hasattr(self, "_current_project_id"):
             self._load_tab_data(view_tab)
 
@@ -3744,6 +3804,91 @@ class DossierApp(App):
             self.query_one("#dossier-topology-note", Static).update(note)
         except Exception:                          # noqa: BLE001
             pass
+
+    # --- Goals: originating a new goal for the harness -----------------------
+
+    _goals_sent: tuple[str, ...] = ()
+    """The goals sent this session, newest first, for the small history the tab
+    keeps. A class attribute so it exists however the app was constructed."""
+
+    def _load_goals_tab(self) -> None:
+        """Prefill the context from whatever is selected, so a goal originates
+        from the triage base rather than a blank field. The tab is otherwise a
+        compose form -- nothing is read from the harness until a goal is sent,
+        which is why it fills with no selection where the other Seams views wait
+        on one.
+        """
+        try:
+            context = self.query_one("#goal-context", Input)
+        except Exception:                          # noqa: BLE001
+            return
+        project = getattr(self, "selected_project", None)
+        if project is not None and not context.value.strip():
+            context.value = f"repo {project.full_name or project.name}"
+
+    @on(Button.Pressed, "#goal-send")
+    def on_goal_send_pressed(self, event) -> None:
+        self._begin_send_goal()
+
+    @on(Input.Submitted, "#goal-input")
+    def on_goal_input_submitted(self, event) -> None:
+        self._begin_send_goal()
+
+    @on(Input.Submitted, "#goal-context")
+    def on_goal_context_submitted(self, event) -> None:
+        self._begin_send_goal()
+
+    def _begin_send_goal(self) -> None:
+        """Validate the goal on this side, then hand the send to a worker.
+
+        An empty goal is refused here rather than sent: the planner turns a goal
+        into a plan, and there is nothing to plan from an empty one -- the same
+        guard `human.send_goal` keeps, said before the network so the field can
+        show it.
+        """
+        goal = self.query_one("#goal-input", Input).value.strip()
+        context = self.query_one("#goal-context", Input).value.strip()
+        if not goal:
+            self.query_one("#goal-status", Static).update(
+                "a goal needs words before it can be sent")
+            return
+        self.query_one("#goal-status", Static).update(
+            "sending the goal to the harness's planner…")
+        self.query_one("#goal-plan", Static).update("")
+        self._send_goal_worker(goal, context)
+
+    @work(thread=True, exclusive=True, group="goal-send")
+    def _send_goal_worker(self, goal: str, context: str) -> None:
+        from dossier import human
+        planned = human.send_goal(goal, context)
+        self.call_from_thread(self._goal_planned, planned)
+
+    def _goal_planned(self, planned) -> None:
+        status = self.query_one("#goal-status", Static)
+        plan = self.query_one("#goal-plan", Static)
+        if not planned.accepted:
+            status.update(f"the goal was not planned: {planned.detail}")
+            plan.update("")
+            return
+        where = (f"  (invocation {planned.invocation_id})"
+                 if planned.invocation_id else "")
+        status.update(f"planned -- {planned.estimated} step(s){where}. "
+                      "Approve it at Outstanding to carry it further.")
+        lines = [f"Goal: {planned.goal}", ""]
+        for step in planned.steps:
+            head = (f"  {step.number}. {step.action}" if step.number
+                    else f"  {step.action}")
+            lines.append(head)
+            if step.description:
+                lines.append(f"      {step.description}")
+        plan.update("\n".join(lines))
+        self._goals_sent = (planned.goal,) + self._goals_sent
+        history = "Sent this session:\n" + "\n".join(
+            f"  - {g}" for g in self._goals_sent[:6])
+        self.query_one("#goal-history", Static).update(history)
+        # Clear the goal for the next one; keep the context, which is usually
+        # the same repo across a few goals in a sitting.
+        self.query_one("#goal-input", Input).value = ""
 
     def _load_languages_tab(self, project: Project) -> None:
         """Render the `languages` facet for one repository, part of the Dossier

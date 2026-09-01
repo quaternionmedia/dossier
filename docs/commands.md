@@ -62,6 +62,9 @@ depth -- so it is never an item and no number contains it. Arrows and
     - `8.9.6`  Topology -- `m` `8` `9` `6`
       How the harness, its projects and their deltas connect.
       `dossier topology`
+    - `8.9.2`  Goals -- `m` `8` `9` `2`
+      Send the harness a new goal, and read the plan it drafts.
+      `dossier harness goal`
 - **`6`  Do**
   - `6.8`  Advance phase -- `m` `6` `8`
     *in the application only*
@@ -96,7 +99,7 @@ depth -- so it is never an item and no number contains it. Arrows and
 
 ## Outside the ring
 
-`dossier --help` reaches **82** leaf commands; **19**
+`dossier --help` reaches **83** leaf commands; **20**
 of them are named above beside the view they belong to. The rest are
 not menu items and are not meant to be: the ring is for what somebody
 does repeatedly, and a cell spent on a once-a-quarter migration is a

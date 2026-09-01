@@ -5556,6 +5556,48 @@ def harness_ingest(payload: Path, write: bool) -> None:
         session.commit()
 
 
+@harness.command("goal")
+@click.argument("goal")
+@click.option("--context", default="",
+              help="Optional context to inform the plan -- a repo, a delta, "
+                   "a constraint.")
+@click.option("--base", default=None,
+              help="A harness other than the one on this machine.")
+def harness_goal(goal: str, context: str, base: str | None) -> None:
+    """Send the harness a new goal, and print the plan it drafts.
+
+    **The outbound side of the seam.** `queue` and `answer` read the harness
+    and answer what it asked; this starts something by naming a goal. It
+    reaches the `planner` tool, which turns the goal into a step-by-step plan.
+
+    **Nothing is executed.** Approving the plan is a later act at the human
+    queue (`dossier harness queue`, then `answer`), which is where this
+    estate's attested approval lives. This drafts; it does not commit.
+    """
+    from dossier.human import send_goal
+
+    try:
+        planned = send_goal(goal, context=context, base=base)
+    except ValueError as refusal:
+        raise click.ClickException(str(refusal))
+
+    if not planned.accepted:
+        click.echo(f"  the goal was not planned: {planned.detail}", err=True)
+        raise SystemExit(1)
+
+    where = (f" (invocation {planned.invocation_id})"
+             if planned.invocation_id else "")
+    click.echo(f"  planned -- {planned.estimated} step(s){where}")
+    click.echo(f"  goal: {planned.goal}")
+    for step in planned.steps:
+        head = (f"  {step.number}. {step.action}" if step.number
+                else f"  {step.action}")
+        click.echo(head)
+        if step.description:
+            click.echo(f"      {step.description}")
+    click.echo("  Nothing ran. Approve the plan at `dossier harness queue`.")
+
+
 # Last in the file, deliberately. Commands appended after this guard are not
 # registered when the module is run as `python -m dossier.cli`: the guard calls
 # through to the group at the point it appears, so anything defined below it

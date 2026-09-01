@@ -242,6 +242,16 @@ VIEWS: tuple[View, ...] = (
          needs=(Need(HARNESS,
                      "the shapes are the harness's own, served over its port",
                      "uv run qmcp serve"),)),
+    # The outbound side of the seam: every other Seams view reads what the
+    # harness did, and this one starts something -- a new goal, drafted into a
+    # plan. Nothing is executed here; approving the plan is the human queue's
+    # act (Outstanding), which is where attested approval already lives.
+    View("tab-goals", "Goals", "Seams",
+         "Send the harness a new goal, and read the plan it drafts.",
+         "dossier harness goal",
+         needs=(Need(HARNESS,
+                     "the goal reaches the harness's planner over its port",
+                     "uv run qmcp serve"),)),
 )
 
 BY_TAB = {view.tab: view for view in VIEWS}

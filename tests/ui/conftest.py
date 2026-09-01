@@ -61,3 +61,10 @@ def _no_live_harness(monkeypatch):
     # beside it is dossier's own data and still draws.
     monkeypatch.setattr(DossierApp, "_run_dossier_topology",
                         lambda self, subject: None, raising=False)
+    # Sending a goal is a WRITE to the harness -- it starts a planner run. A UI
+    # test must never post one to a dev harness that happens to be up, so the
+    # send worker is stubbed; the render it feeds is driven directly in
+    # `test_goals_tab.py`, and the client is tested against a mock in
+    # `tests/core/test_harness_run.py`.
+    monkeypatch.setattr(DossierApp, "_send_goal_worker",
+                        lambda self, goal, context: None, raising=False)

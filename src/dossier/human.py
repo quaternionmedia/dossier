@@ -309,6 +309,90 @@ def run_tool(name: str, params: dict[str, Any] | None = None,
 
 
 @dataclass(frozen=True)
+class Step:
+    """One step of a plan the harness drafted from a goal."""
+
+    number: str
+    action: str
+    description: str = ""
+
+
+@dataclass(frozen=True)
+class Planned:
+    """The harness's answer to a new goal: the plan it drafted, or why not.
+
+    A goal reaches the `planner` tool, which the harness describes as "Create a
+    step-by-step execution plan from a goal". `steps` is that plan;
+    `invocation_id` is how the run is read afterward. **Nothing is executed** --
+    approving the plan is a later act at the human queue, where this estate's
+    attested approval already lives. That separation is the point: originating a
+    goal drafts, it does not commit.
+    """
+
+    accepted: bool
+    goal: str = ""
+    invocation_id: str = ""
+    steps: tuple[Step, ...] = ()
+    estimated: int = 0
+    detail: str = ""
+
+
+def send_goal(goal: str, context: str = "", base: str | None = None) -> Planned:
+    """Send the harness a new goal, and read the plan it drafts.
+
+    **The one outbound origination in this module.** Everything else here reads
+    the harness or answers a question it raised; this *starts* something by
+    naming a goal. It reaches `planner`, whose contract is a required `goal` and
+    an optional `context`. A goal with no words is refused here rather than
+    sent, the way an unnamed answer is -- an empty goal is not a plan request.
+
+    Never raises past that guard: an unreachable harness, a refused run and a
+    planner that errored are three reasons, the same contract `run_tool` keeps.
+    """
+    if not goal.strip():
+        raise ValueError(
+            "a goal needs words. The planner turns a goal into a plan, and "
+            "there is nothing to plan from an empty one.")
+    params: dict[str, Any] = {"goal": goal.strip()}
+    if context.strip():
+        params["context"] = context.strip()
+    root = (base or base_url()).rstrip("/")
+    where = f"{root}/v1/tools/planner"
+    payload = json.dumps({"input": params}).encode("utf-8")
+    request = urllib.request.Request(
+        where, data=payload, method="POST",
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as reply:
+            data = json.loads(reply.read())
+    except urllib.error.HTTPError as error:
+        detail = ""
+        try:
+            detail = str(json.loads(error.read()).get("detail", ""))
+        except Exception:                              # noqa: BLE001
+            pass
+        return Planned(accepted=False, goal=goal.strip(),
+                       detail=detail or f"the harness answered {error.code}")
+    except Exception:                                  # noqa: BLE001
+        return Planned(accepted=False, goal=goal.strip(),
+                       detail=f"nothing is answering at {root}")
+    if not isinstance(data, dict) or data.get("error"):
+        detail = (str(data.get("error")) if isinstance(data, dict)
+                  else "the harness sent no plan")
+        return Planned(accepted=False, goal=goal.strip(), detail=detail)
+    result = data.get("result") or {}
+    steps = tuple(
+        Step(number=str(s.get("step", "")), action=str(s.get("action", "")),
+             description=str(s.get("description", "")))
+        for s in (result.get("steps") or []) if isinstance(s, dict))
+    estimated = result.get("estimated_steps")
+    return Planned(
+        accepted=True, goal=str(result.get("goal") or goal.strip()),
+        invocation_id=str(data.get("invocation_id", "")), steps=steps,
+        estimated=int(estimated) if isinstance(estimated, int) else len(steps))
+
+
+@dataclass(frozen=True)
 class Monitor:
     """A live reading of what the harness is doing, or why it could not be read.
 

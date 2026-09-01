@@ -73,3 +73,62 @@ def test_monitor_reports_an_unreachable_harness_rather_than_raising():
     assert m.reachable is False
     assert m.problem
     assert m.total == 0
+
+
+# --- sending a new goal ------------------------------------------------------
+
+
+def test_send_goal_refuses_an_empty_goal_before_reaching_the_harness():
+    """A goal with no words is a mistake, not a plan request. It is refused on
+    this side, the way an unnamed answer is -- nothing is sent."""
+    import pytest
+
+    with pytest.raises(ValueError):
+        human.send_goal("   ", base="http://x")
+
+
+def test_send_goal_reads_the_plan_the_planner_drafts(monkeypatch):
+    import json
+
+    class _Reply:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self):
+            return json.dumps({
+                "invocation_id": "inv-9",
+                "result": {
+                    "goal": "tidy the sweep view",
+                    "steps": [
+                        {"step": 1, "action": "Analyze", "description": "understand"},
+                        {"step": 2, "action": "Sequence", "description": "order"},
+                    ],
+                    "estimated_steps": 2,
+                },
+            }).encode()
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: _Reply())
+    planned = human.send_goal("tidy the sweep view", context="repo x",
+                              base="http://x")
+    assert planned.accepted
+    assert planned.invocation_id == "inv-9"
+    assert planned.goal == "tidy the sweep view"
+    assert planned.estimated == 2
+    assert [s.action for s in planned.steps] == ["Analyze", "Sequence"]
+
+
+def test_send_goal_reports_an_unreachable_harness_rather_than_raising():
+    planned = human.send_goal("do a thing", base="http://127.0.0.1:59999")
+    assert planned.accepted is False
+    assert planned.detail  # a reason, never an exception
+    assert planned.goal == "do a thing"
+
+
+def test_send_goal_carries_a_planner_error_through(monkeypatch):
+    class _Reply:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b'{"error": "the planner refused", "invocation_id": "x"}'
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: _Reply())
+    planned = human.send_goal("go", base="http://x")
+    assert planned.accepted is False and "refused" in planned.detail
