@@ -3181,6 +3181,10 @@ class DossierApp(App):
             # blank until an owner was chosen, because it has no project loader.
             self._load_harness_tab()
             return
+        if view_tab == "tab-waiting":
+            # Outstanding is global for the same reason and had the same gap.
+            self._load_waiting_tab()
+            return
         if hasattr(self, "_current_project_id"):
             self._load_tab_data(view_tab)
 
@@ -3200,6 +3204,10 @@ class DossierApp(App):
 
         if tab_id == "tab-harness":
             self._load_harness_tab()
+            return
+
+        if tab_id == "tab-waiting":
+            self._load_waiting_tab()
             return
 
         # On-deck holds two readings, one of which asks the harness over HTTP.
@@ -3908,6 +3916,19 @@ class DossierApp(App):
         with self.session_factory() as session:
             section = FACET_BY_KEY["harness"].at(session, ids=None, limit=self.TAB_ROWS)
         self._render_section("harness-table", section)
+
+    def _load_waiting_tab(self) -> None:
+        """Render the outstanding queue, at any scope.
+
+        Global for the same reason as the harness: `waiting_org` reads the
+        queue whole -- a harness question names its own `owner/repo` and is not
+        a row in `project` -- and it also records the remedies in draw order for
+        the row handler to dispatch. So it loads with nothing selected rather
+        than drawing blank until an owner is chosen.
+        """
+        with self.session_factory() as session:
+            section = FACET_BY_KEY["waiting"].at(session, ids=None, limit=self.TAB_ROWS)
+        self._render_section("waiting-table", section)
 
     def _load_governance_tab(self) -> None:
         """Render what the corpus's generated documents say.
