@@ -5020,7 +5020,7 @@ def disk_dashboard(
 
     from dossier.tui import DossierApp
 
-    DossierApp(initial_tab="tab-disk").run()
+    DossierApp(initial_tab="tab-sweep").run()
 
 
 @disk_group.command(name="cookbook")

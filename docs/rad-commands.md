@@ -46,7 +46,6 @@ same cell.
 | `8.2.7` | `m` `8` `2` `7` | &nbsp;&nbsp;&nbsp;&nbsp;Releases | `view.releases` | yes |
 | `8.4` | `m` `8` `4` | &nbsp;&nbsp;Health | *opens a submenu* | yes |
 | `8.4.8` | `m` `8` `4` `8` | &nbsp;&nbsp;&nbsp;&nbsp;Governance | `view.governance` | yes |
-| `8.4.6` | `m` `8` `4` `6` | &nbsp;&nbsp;&nbsp;&nbsp;Disk | `view.disk` | yes |
 | `8.9` | `m` `8` `9` | &nbsp;&nbsp;Seams | *opens a submenu* | yes |
 | `8.9.8` | `m` `8` `9` `8` | &nbsp;&nbsp;&nbsp;&nbsp;Harness | `view.harness` | yes |
 | `8.9.6` | `m` `8` `9` `6` | &nbsp;&nbsp;&nbsp;&nbsp;Topology | `view.topology` | yes |
@@ -92,11 +91,10 @@ the common case stays three keys.
 **Some views a sync cannot help**, and it says which rather than
 reporting nothing to do:
 
-- `tab-deltas` -- deltas arrive by ingest, not by sync -- see Reach > Ingest deltas
-- `tab-disk` -- read from disk at the moment you look
+- `tab-deltas` -- deltas arrive by ingest and the threads over HTTP, not by sync
 - `tab-docs` -- documents are read from disk
 - `tab-harness` -- the harness reports about itself; dossier does not fetch it
-- `tab-threads` -- the thread archive is the harness's, reached over HTTP
+- `tab-sweep` -- a sweep is computed on request; disk is read at the moment you look
 - `tab-waiting` -- questions are raised by a harness run, not fetched
 
 ## `4.6` -- putting an export into the archive

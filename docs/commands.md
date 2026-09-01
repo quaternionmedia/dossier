@@ -30,7 +30,7 @@ depth -- so it is never an item and no number contains it. Arrows and
       Open deltas, every open pull request no delta claims, and every line of work in flight -- the harness's threads, read over its seam.
       `dossier governance threads`
     - `8.6.6`  Sweep -- `m` `8` `6` `6`
-      What one dependency change would touch, and where it needs a person.
+      What one dependency change would touch and where it needs a person, and what a cleanup of this workstation would get back -- the two sweeps, one that spans the estate and one that spans the disk.
       `dossier sweep`
   - **`8.2`  Explore**
     - `8.2.8`  Details -- `m` `8` `2` `8`
@@ -61,9 +61,6 @@ depth -- so it is never an item and no number contains it. Arrows and
     - `8.4.8`  Governance -- `m` `8` `4` `8`
       Where every project stands against the corpus: current, drifted, unmeasured.
       `dossier governance show`
-    - `8.4.6`  Disk -- `m` `8` `4` `6`
-      What is eating this machine, and what it would take to get it back.
-      `dossier disk status`
   - **`8.9`  Seams**
     - `8.9.8`  Harness -- `m` `8` `9` `8`
       What the harness ran, when, and whether it finished.
@@ -105,7 +102,7 @@ depth -- so it is never an item and no number contains it. Arrows and
 
 ## Outside the ring
 
-`dossier --help` reaches **82** leaf commands; **22**
+`dossier --help` reaches **82** leaf commands; **21**
 of them are named above beside the view they belong to. The rest are
 not menu items and are not meant to be: the ring is for what somebody
 does repeatedly, and a cell spent on a once-a-quarter migration is a
@@ -149,6 +146,7 @@ cell taken from something else.
   dossier disk load
   dossier disk reclaim
   dossier disk reclaims
+  dossier disk status
   dossier docs build
   dossier docs serve
   dossier export all

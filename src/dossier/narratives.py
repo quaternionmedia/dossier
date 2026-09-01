@@ -143,7 +143,7 @@ NARRATIVES: tuple[Narrative, ...] = (
             ("tab-dossier", "Dossier: one project's own record"),
             ("tab-branches", "Branches: what carries work nowhere else"),
             ("tab-governance", "Governance: where each project stands"),
-            ("tab-disk", "Disk: what is eating the workstation"),
+            ("tab-sweep", "Sweep: one change across the estate, and disk reclaim"),
             ("tab-deltas", "On deck: the work in flight, and the threads behind it"),
         ),
     ),

@@ -557,8 +557,9 @@ class DossierApp(App):
                                  variant="default")
                 yield WorkProgress(id="thread-progress")
         elif tab == "tab-sweep":
-            # A review is a thing you leave and return to, so it is a tab rather
-            # than a modal you are inside of.
+            # Two sweeps in one view: a dependency change across the estate, and
+            # a reclaim across this workstation's disk. A review is a thing you
+            # leave and return to, so it is a tab rather than a modal.
             with Vertical():
                 with Horizontal(id="sweep-picker"):
                     yield Input(
@@ -568,6 +569,12 @@ class DossierApp(App):
                 yield Static("", id="sweep-summary")
                 yield DataTable(id="sweep-table")
                 yield Static("", id="sweep-note")
+                yield Static("Disk -- what a cleanup of this workstation would "
+                             "get back", id="disk-heading")
+                yield Static("", id="disk-age")
+                yield DataTable(id="disk-volumes-table")
+                yield Static("", id="disk-delta-age")
+                yield DataTable(id="disk-targets-table")
         elif tab == "tab-details":
             yield ProjectDetailPanel(id="project-detail")
         elif tab == "tab-dossier":
@@ -612,12 +619,6 @@ class DossierApp(App):
                 yield DataTable(id="governance-table")
                 yield Static("", id="governance-threads-age")
                 yield DataTable(id="governance-threads-table")
-        elif tab == "tab-disk":
-            with Vertical():
-                yield Static("", id="disk-age")
-                yield DataTable(id="disk-volumes-table")
-                yield Static("", id="disk-delta-age")
-                yield DataTable(id="disk-targets-table")
         elif tab == "tab-harness":
             # The harness half of the pair qmcp reports having run, read through
             # the address that names the same row on both sides.
@@ -3081,12 +3082,13 @@ class DossierApp(App):
             # reads as "nothing is wrong".
             self._load_governance_tab()
             return
-        if event.pane.id == "tab-disk":
-            # Same bypass, same reason: disk is machine-wide. It belongs to no
-            # project, so the guard below would leave it blank until somebody
-            # happened to select one -- and a blank disk table reads as a
-            # machine with nothing on it.
-            self._load_disk_tab()
+        if event.pane.id == "tab-sweep":
+            # Bypass the project guard below: a sweep spans the estate and the
+            # disk reclaim on the same tab spans this machine, so neither is
+            # scoped to a project, and both would stay blank until one was
+            # selected -- a blank disk table reads as a machine with nothing on
+            # it.
+            self._load_sweep_and_disk(getattr(self, "_current_project", None))
             return
         if hasattr(self, "_current_project_id"):
             # Use pane.id (the TabPane ID like "tab-docs") not tab.id (which is "--content-tab-tab-docs")
@@ -3101,10 +3103,6 @@ class DossierApp(App):
             return  # Already loaded
         
         self._tabs_loaded.add(tab_id)
-
-        if tab_id == "tab-disk":
-            self._load_disk_tab()
-            return
 
         if tab_id == "tab-governance":
             self._load_governance_tab()
@@ -3146,7 +3144,7 @@ class DossierApp(App):
         # harness over its seam, so neither is scoped to a project and both drew
         # blank on a fresh install when the gate below returned first.
         unscoped = {
-            "tab-sweep": self._load_sweep_tab,
+            "tab-sweep": self._load_sweep_and_disk,
             "tab-topology": self._load_topology_tab,
             "tab-deltas": self._load_on_deck_tab,
         }
@@ -3171,7 +3169,7 @@ class DossierApp(App):
             # project gate, because neither reading needs a repository.
             # Reads no database of its own: a review is arranged from a
             # dispatcher run, and is empty until somebody asks for one.
-            "tab-sweep": self._load_sweep_tab,
+            "tab-sweep": self._load_sweep_and_disk,
             "tab-topology": self._load_topology_tab,
         }
         
@@ -3667,7 +3665,8 @@ class DossierApp(App):
 
     def _on_disk_tab(self) -> bool:
         try:
-            return self.query_one("#project-tabs", TabbedContent).active == "tab-disk"
+            # The disk reading lives on the Sweep tab now.
+            return self.query_one("#project-tabs", TabbedContent).active == "tab-sweep"
         except Exception:
             return False
 
@@ -4361,6 +4360,14 @@ class DossierApp(App):
         """Draw whatever the subject box names, or a shape when it is blank."""
         event.stop()
         self._load_topology_tab()
+
+    def _load_sweep_and_disk(self, project=None) -> None:
+        """The Sweep tab holds two sweeps: a dependency change across the estate
+        (empty until a review is asked for) and the disk reclaim across this
+        workstation (read every time the tab is shown). Neither is scoped to a
+        repository."""
+        self._load_sweep_tab(project)
+        self._load_disk_tab()
 
     def _load_sweep_tab(self, project=None) -> None:
         """Draw the review: every batch, then everything waiting.

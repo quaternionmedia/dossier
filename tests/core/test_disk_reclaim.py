@@ -389,7 +389,7 @@ def test_composing_only_unavailable_deltas_says_so(session, tmp_path: Path) -> N
 async def disk_app(engine, corpus: Path):
     from dossier.tui import DossierApp
 
-    app = DossierApp(session_factory=lambda: Session(engine), initial_tab="tab-disk")
+    app = DossierApp(session_factory=lambda: Session(engine), initial_tab="tab-sweep")
     app._disk_corpus_override = corpus
     return app
 
