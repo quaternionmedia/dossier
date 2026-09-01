@@ -109,7 +109,7 @@ async def test_selecting_the_owner_scopes_the_whole_screen(session):
         # is active afterwards would pass whether or not selecting did anything.
         app._activate_tab("tab-dossier")
         await pilot.pause()
-        assert app.query_one("#project-tabs").active == "tab-dossier"
+        assert app._get_active_tab_id() == "tab-dossier"
 
         tree = app.query_one("#project-tree", Tree)
         node = org_node(app)
@@ -120,7 +120,7 @@ async def test_selecting_the_owner_scopes_the_whole_screen(session):
         assert app._scope_owner == "org"
         assert app._current_project is None, "the org replaced the project selection"
         assert app.query_one(OverviewPanel).owner == "org"
-        assert app.query_one("#project-tabs").active == "tab-overview"
+        assert app._get_active_tab_id() == "tab-overview"
 
 
 @pytest.mark.asyncio
@@ -198,7 +198,7 @@ async def test_selecting_an_overview_row_opens_the_tab_holding_its_detail(sessio
         table.action_select_cursor()
         await pilot.pause()
         await pilot.pause()
-        assert app.query_one("#project-tabs").active == "tab-deltas"
+        assert app._get_active_tab_id() == "tab-deltas"
         assert app.selected_project.full_name == "org/one", (
             "the row named a repository, so that repository is now selected")
 

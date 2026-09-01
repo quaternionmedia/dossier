@@ -225,10 +225,10 @@ def test_the_generator_asserts_the_tab_it_asked_for():
     """A swallowed switch publishes a confident wrong picture.
 
     `query_one("#main-tabs")` raised `NoMatches` on the first line of the
-    switch -- there is one `TabbedContent` here and it is `#project-tabs` --
-    and `except Exception: pass` absorbed it, for every tab at every
-    resolution. `tab_issues_desktop.svg`, `tab_contributors_desktop.svg` and
-    `tab_deltas_desktop.svg` came out byte-identical, and the third is
+    switch -- the strip is two layers, an outer `#group-tabs` and an inner
+    `#views-<group>` -- and `except Exception: pass` absorbed it, for every tab
+    at every resolution. `tab_issues_desktop.svg`, `tab_contributors_desktop.svg`
+    and `tab_deltas_desktop.svg` came out byte-identical, and the third is
     committed and shipped.
 
     P17: a bound that fires is reported, never absorbed.
@@ -236,11 +236,11 @@ def test_the_generator_asserts_the_tab_it_asked_for():
     from tests.ui.test_tui import TAB_CONTAINER
 
     # **THE CONTAINER IS COMPARED, NOT SEARCHED FOR.** `#main-tabs` does not
-    # exist; `#project-tabs` does, and `tests/ui/test_narratives.py` proves the
-    # switch takes effect against the running application. Grepping the source
-    # for the absent name asserted that nobody had written it down, which is a
-    # weaker claim than naming the one that works.
-    assert TAB_CONTAINER == "#project-tabs"
+    # exist; the outer `#group-tabs` does, and `tests/ui/test_narratives.py`
+    # proves the switch takes effect against the running application. Grepping
+    # the source for the absent name asserted that nobody had written it down,
+    # which is a weaker claim than naming the one that works.
+    assert TAB_CONTAINER == "#group-tabs"
 
 
 def test_the_committed_pictures_are_not_all_the_same_picture():

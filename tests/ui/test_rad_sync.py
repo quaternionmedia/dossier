@@ -108,7 +108,7 @@ async def test_sync_works_with_nothing_selected(session, monkeypatch):
         await pilot.pause()
         recorder = Recorder()
         monkeypatch.setattr(app, "run_sync_batch", recorder)
-        assert app.query_one("#project-tabs").active == "tab-overview"
+        assert app._get_active_tab_id() == "tab-overview"
         assert app._current_project is not None, (
             "the app selects one on mount, so this test would prove nothing "
             "about ignoring the selection if it did not")
@@ -136,7 +136,7 @@ async def test_a_selected_repository_narrows_the_sync_to_it(session, monkeypatch
         await pilot.pause()
         recorder = Recorder()
         monkeypatch.setattr(app, "run_sync_batch", recorder)
-        app.query_one("#project-tabs").active = "tab-dossier"
+        app._activate_tab("tab-dossier")
         app._current_project = chosen
         await pilot.pause()
 
@@ -281,7 +281,7 @@ async def test_a_view_a_sync_does_not_feed_says_what_does(session, monkeypatch):
         await pilot.pause()
         recorder = Recorder()
         monkeypatch.setattr(app, "run_sync_batch", recorder)
-        app.query_one("#project-tabs").active = "tab-deltas"
+        app._activate_tab("tab-deltas")
         await pilot.pause()
 
         plan = app.sync_plan()

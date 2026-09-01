@@ -474,7 +474,7 @@ class TestRingInTheApp:
                 await pilot.press("enter")
                 await pilot.pause()
             expected = DossierApp.RAD_VIEWS[leaf.action]
-            assert app.query_one("#project-tabs").active == expected
+            assert app._get_active_tab_id() == expected
 
     @pytest.mark.asyncio
     async def test_the_cost_ledger_survives_across_actions(self):

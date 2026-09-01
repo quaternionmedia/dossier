@@ -104,8 +104,10 @@ class TestTUIWidgets:
 # produced was a picture of the same screen. Three causes, each hidden by the
 # next:
 #
-#   * they named a `#main-tabs` container that does not exist. There is one
-#     `TabbedContent` in this application and it is `#project-tabs`;
+#   * they named a `#main-tabs` container that does not exist. The strip is two
+#     layers now -- an outer `#group-tabs` of groups and an inner
+#     `#views-<group>` of views -- and a view is reached through `_activate_tab`
+#     rather than by naming a container;
 #   * so `query_one("#main-tabs")` raised `NoMatches` on the first line of the
 #     switch, for every tab, at every resolution;
 #   * and the switch was wrapped in `except Exception: pass`, so the failure
@@ -120,7 +122,9 @@ class TestTUIWidgets:
 # screenshotted without anybody remembering this file.
 TABS = [(view.tab, view.title) for view in views.VIEWS]
 
-TAB_CONTAINER = "#project-tabs"
+# The outer strip, the one container that always exists. The inner strips are
+# `#views-<group>`; a view is reached through `app._activate_tab`, not by id.
+TAB_CONTAINER = "#group-tabs"
 
 RESOLUTIONS = [
     ((120, 40), "desktop"),      # Standard terminal
@@ -636,13 +640,15 @@ class TestTUIScreenshotsParameterized:
             # capture went ahead regardless, which is a confident wrong
             # artifact rather than a missing one. A tab that cannot be reached
             # fails this test.
-            tabs = app.query_one(TAB_CONTAINER, TabbedContent)
-            tabs.active = tab_id
+            # The strip is two layers; `_activate_tab` selects the view's group
+            # then the view, and `_get_active_tab_id` reads the view back.
+            app._activate_tab(tab_id)
             await pilot.pause()
             await pilot.pause()
-            assert tabs.active == tab_id, (
-                f"asked for {tab_id} and the container is showing "
-                f"{tabs.active}; the capture below would be of the wrong tab")
+            shown = app._get_active_tab_id()
+            assert shown == tab_id, (
+                f"asked for {tab_id} and the strip is showing "
+                f"{shown}; the capture below would be of the wrong tab")
             
             # Generate descriptive filename
             filename = f"tab_{tab_id.replace('tab-', '')}_{resolution_name}"

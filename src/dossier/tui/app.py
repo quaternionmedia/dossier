@@ -88,7 +88,8 @@ def extract_file_path(source_file: str | None) -> str | None:
 
 
 from dossier import actions
-from dossier.views import VIEWS
+from dossier.views import VIEWS, grouped as _grouped_views
+from dossier.views import BY_TAB as VIEW_BY_TAB
 from dossier.tui.widgets import (ChatScreen, ContentViewerScreen, DraggableSplitter,
                                   ProjectDetailPanel, ProjectListItem, StatsWidget,
                                   SyncStatusWidget, WorkProgress)
@@ -682,15 +683,20 @@ class DossierApp(App):
                         yield Button("Star", id="btn-filter-starred", variant="default")
 
             with Vertical(id="main-content"):
-                with TabbedContent(id="project-tabs"):
-                    # The tabs are the registry's, in the registry's order, so
-                    # the strip reads in the same job-groups the ring is
-                    # navigated -- Triage, Plan, Explore, Health, Seams. A view
-                    # added to `dossier.views` gets its tab here with no second
-                    # edit; `_compose_pane` holds each pane's body.
-                    for view in VIEWS:
-                        with TabPane(view.title, id=view.tab):
-                            yield from self._compose_pane(view.tab)
+                # Two layers, mirroring the ring: an outer strip of the job
+                # groups, and inside each an inner strip of that group's views.
+                # `m` `8` `2` `8` in the ring is Go, Explore, Dossier; here it is
+                # the Explore group tab, then the Dossier view tab -- the same
+                # two presses. Both strips are the registry's, in its order, so a
+                # view added to `dossier.views` gets a tab with no second edit.
+                with TabbedContent(id="group-tabs"):
+                    for group, group_views in _grouped_views():
+                        slug = group.lower()
+                        with TabPane(group, id=f"group-{slug}"):
+                            with TabbedContent(id=f"views-{slug}"):
+                                for view in group_views:
+                                    with TabPane(view.title, id=view.tab):
+                                        yield from self._compose_pane(view.tab)
 
         # **ONE ROW, AND IT IS THE RING'S MIDDLE RANK.** Four buttons here
         # and nine more scattered across three tabs were thirteen affordances
@@ -879,7 +885,7 @@ class DossierApp(App):
         it, which is the whole complaint `PRINCIPLES.md` P13 is about.
         """
         try:
-            self.query_one("#project-tabs").active = "tab-deltas"
+            self._activate_tab("tab-deltas")
             # Filled on arrival rather than left to whatever fires on a tab
             # change: a person routed here by `4.6` should see the archive they
             # are about to add to, not an empty table.
@@ -1101,7 +1107,7 @@ class DossierApp(App):
         is not something to do on the loop a person is looking at.
         """
         try:
-            self.query_one("#project-tabs").active = "tab-sweep"
+            self._activate_tab("tab-sweep")
         except Exception:
             pass
         try:
@@ -1214,7 +1220,7 @@ class DossierApp(App):
         export somebody might not still have.
         """
         try:
-            self.query_one("#project-tabs").active = "tab-deltas"
+            self._activate_tab("tab-deltas")
             self._load_tab_data("tab-deltas")
         except Exception:
             pass
@@ -1329,7 +1335,7 @@ class DossierApp(App):
         if tab is not None:
             self._sync_pending = None
             try:
-                self.query_one("#project-tabs").active = tab
+                self._activate_tab(tab)
             except Exception:
                 pass
             self.notify(f"{intent.action}  (ipa {intent.ipa})", timeout=3)
@@ -1365,7 +1371,7 @@ class DossierApp(App):
         from dossier.freshness import plan_for
 
         try:
-            tab = self.query_one("#project-tabs").active
+            tab = self._get_active_tab_id()
         except Exception:
             tab = None
 
@@ -1581,8 +1587,7 @@ class DossierApp(App):
         # applied last for that reason: _restore_view_state may select a
         # project, which switches to the configured default tab.
         if self._initial_tab:
-            tabs = self.query_one("#project-tabs", TabbedContent)
-            tabs.active = self._initial_tab
+            self._activate_tab(self._initial_tab)
             self._load_tab_data(self._initial_tab)
 
     def _populate_language_filter(self) -> None:
@@ -2991,28 +2996,48 @@ class DossierApp(App):
             # Link delta as project and navigate to it
             self._link_delta_project(nav_data)
 
+    def _group_slug(self, tab_id: str) -> Optional[str]:
+        """The slug of the group a view tab sits under, from the registry."""
+        view = VIEW_BY_TAB.get(tab_id)
+        return view.group.lower() if view else None
+
     def _activate_tab(self, tab_id: str) -> None:
-        """Activate a main or project sub-tab by id."""
+        """Show a view, activating both layers of the strip.
+
+        The strip is two `TabbedContent`s: an outer one of groups and, inside
+        the active group, an inner one of that group's views. Reaching a view
+        means selecting its group first, then the view -- the same two presses
+        the ring takes. This is the routing the earlier nested design got wrong
+        by missing views and setting one widget twice; the group comes from the
+        registry, so no view is left unreachable.
+        """
         if not tab_id:
             return
+        slug = self._group_slug(tab_id)
+        if slug is None:
+            return
         try:
-            main_tabs = self.query_one("#project-tabs", TabbedContent)
+            outer = self.query_one("#group-tabs", TabbedContent)
+            inner = self.query_one(f"#views-{slug}", TabbedContent)
         except Exception:
             return
-        # There is one `TabbedContent`. The two-step routing this replaced was
-        # left over from a nested-tab design that was not adopted: it set the
-        # active tab to `tab-details` and then to the requested one on the same
-        # widget, and it listed neither `tab-overview` nor `tab-governance` --
-        # so activating either silently did nothing.
-        if any(pane.id == tab_id for pane in main_tabs.query(TabPane)):
-            main_tabs.active = tab_id
+        outer.active = f"group-{slug}"
+        inner.active = tab_id
 
     def _get_active_tab_id(self) -> Optional[str]:
-        """Return the active tab id. One `TabbedContent`, so this is its active
-        pane -- the two-step lookup that stood here was the last of the
-        abandoned nested-tab design, and it queried the same widget twice."""
+        """The active view tab -- the active view of the active group. Reads
+        both layers: the outer strip names the group, the group's inner strip
+        names the view."""
         try:
-            return self.query_one("#project-tabs", TabbedContent).active
+            outer = self.query_one("#group-tabs", TabbedContent)
+        except Exception:
+            return None
+        group_pane = outer.active
+        if not group_pane:
+            return None
+        slug = group_pane.removeprefix("group-")
+        try:
+            return self.query_one(f"#views-{slug}", TabbedContent).active
         except Exception:
             return None
 
@@ -3059,36 +3084,43 @@ class DossierApp(App):
         if active_tab and active_tab != "tab-dossier":
             self._load_tab_data(active_tab)
 
-    @on(TabbedContent.TabActivated, "#project-tabs")
-    def on_main_tab_activated(self, event: TabbedContent.TabActivated) -> None:
-        """Lazy load tab data when a main tab is activated."""
-        if not hasattr(self, "_current_project_id"):
+    @on(TabbedContent.TabActivated)
+    def on_any_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        """One handler for both layers of the strip. A group tab becoming active
+        shows that group's currently-active view; a view tab becoming active
+        shows that view. Either way the shown view is what gets loaded, so a
+        person landing on a group sees its open view filled rather than blank.
+        """
+        pane_id = event.pane.id or ""
+        if pane_id.startswith("group-"):
+            slug = pane_id.removeprefix("group-")
+            try:
+                inner = self.query_one(f"#views-{slug}", TabbedContent)
+            except Exception:
+                return
+            self._on_view_shown(inner.active)
+        elif pane_id.startswith("tab-"):
+            self._on_view_shown(pane_id)
+
+    def _on_view_shown(self, view_tab: Optional[str]) -> None:
+        """Load a view when it becomes visible.
+
+        Governance and Sweep load even with nothing selected: they are org- and
+        machine-wide, and a blank table there reads as an empty estate rather
+        than an unmade selection. The rest fill from a repository, so they wait
+        on one -- `pane.id` (`tab-docs`), never `tab.id` (`--content-tab-...`).
+        """
+        if not view_tab:
             return
-        if event.pane.id == "tab-deltas":
-            self._load_tab_data("tab-deltas")
-    
-    @on(TabbedContent.TabActivated, "#project-tabs")
-    def on_tab_activated(self, event: TabbedContent.TabActivated) -> None:
-        """Lazy load tab data when tab is activated."""
-        if event.pane.id == "tab-governance":
-            # Handled before the project guard below on purpose: governance is
-            # org-wide and has to render with nothing selected. Hanging it off
-            # the per-project path would leave it permanently blank, and blank
-            # reads as "nothing is wrong".
+        if view_tab == "tab-governance":
             self._load_governance_tab()
             return
-        if event.pane.id == "tab-sweep":
-            # Bypass the project guard below: a sweep spans the estate and the
-            # disk reclaim on the same tab spans this machine, so neither is
-            # scoped to a project, and both would stay blank until one was
-            # selected -- a blank disk table reads as a machine with nothing on
-            # it.
+        if view_tab == "tab-sweep":
             self._load_sweep_and_disk(getattr(self, "_current_project", None))
             return
         if hasattr(self, "_current_project_id"):
-            # Use pane.id (the TabPane ID like "tab-docs") not tab.id (which is "--content-tab-tab-docs")
-            self._load_tab_data(event.pane.id)
-    
+            self._load_tab_data(view_tab)
+
     def _load_tab_data(self, tab_id: str) -> None:
         """Load data for a specific tab if not already loaded."""
         if not hasattr(self, "_tabs_loaded"):
@@ -3669,7 +3701,7 @@ class DossierApp(App):
     def _on_disk_tab(self) -> bool:
         try:
             # The disk reading lives on the Sweep tab now.
-            return self.query_one("#project-tabs", TabbedContent).active == "tab-sweep"
+            return self._get_active_tab_id() == "tab-sweep"
         except Exception:
             return False
 

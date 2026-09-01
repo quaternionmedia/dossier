@@ -174,15 +174,15 @@ class _AnyProject:
 
 
 @pytest.mark.asyncio
-async def test_the_tab_strip_reads_in_the_registrys_order(test_session, no_close):
-    """**THE STRIP FOLLOWS THE REGISTRY, IN ITS ORDER.** compose() iterates
-    dossier.views, so the dashboard's tabs cluster by the same job-groups the
-    ring is navigated -- Triage, Plan, Explore, Health, Seams -- and reordering
-    the registry moves the strip with it. This is the guard the hand-written
-    strip never had, which is how it drifted from the ring while the settings
-    list and the index followed along.
+async def test_the_tab_strip_is_two_layers_in_the_registrys_order(test_session, no_close):
+    """**THE STRIP IS TWO LAYERS, BOTH THE REGISTRY'S, IN ITS ORDER.** compose()
+    nests a view strip inside each group, mirroring the ring: an outer strip of
+    groups (Triage, Plan, Explore, Health, Seams) and, inside each, its views.
+    Reordering the registry moves both layers with it. This is the guard the
+    hand-written strip never had, which is how it drifted from the ring.
 
-    Mutation: hard-code compose() back to a fixed TabPane order and this fails.
+    Mutation: flatten compose() back to one strip and the interleaving of group
+    panes with view panes below fails.
     """
     from textual.widgets import TabPane
     from dossier import views
@@ -192,4 +192,17 @@ async def test_the_tab_strip_reads_in_the_registrys_order(test_session, no_close
         await pilot.pause()
         composed = [pane.id for pane in app.query(TabPane)]
 
-    assert composed == [view.tab for view in views.VIEWS], composed
+        # Every view is reachable through both layers -- the failure that sank
+        # the earlier nested design was a view the routing never selected.
+        for view in views.VIEWS:
+            app._activate_tab(view.tab)
+            await pilot.pause()
+            assert app._get_active_tab_id() == view.tab, view.tab
+
+    # The DOM order is: each group pane, then that group's view panes, in the
+    # registry's group order and view order.
+    expected: list[str] = []
+    for group, group_views in views.grouped():
+        expected.append(f"group-{group.lower()}")
+        expected.extend(view.tab for view in group_views)
+    assert composed == expected, composed

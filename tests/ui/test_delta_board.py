@@ -163,7 +163,7 @@ async def test_selecting_the_owner_group_shows_that_owner_s_overview(session):
         panel = app.query_one(OverviewPanel)
         assert panel.owner == "org"
         assert "owned by org" in panel.overview.scope
-        assert app.query_one("#project-tabs").active == "tab-overview"
+        assert app._get_active_tab_id() == "tab-overview"
 
 
 @pytest.mark.asyncio

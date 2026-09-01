@@ -543,7 +543,7 @@ async def test_the_keys_do_nothing_off_the_disk_tab(
     app = await disk_app(engine, fake_corpus(tmp_path, [400, 100]))
     async with app.run_test(size=(200, 50)) as pilot:
         await pilot.pause()
-        app.query_one("#project-tabs").active = "tab-governance"
+        app._activate_tab("tab-governance")
         await pilot.pause()
         app.action_disk_plan()
         await app.workers.wait_for_complete()
