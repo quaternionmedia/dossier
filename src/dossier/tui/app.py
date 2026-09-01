@@ -1692,6 +1692,24 @@ class DossierApp(App):
         project_tree.clear()
         project_tree.root.expand()
 
+        # The tree mirrors the ring: a node per job group, in the ring's order.
+        # Every group but Explore holds its views as leaves that open the tab;
+        # Explore is the repository hierarchy -- owner, repo, and each repo's
+        # aspects are the Explore views scoped to that repo. So the left panel,
+        # the tab strip and the ring are one taxonomy.
+        explore_node = None
+        for group, group_views in _grouped_views():
+            gnode = project_tree.root.add(
+                group, expand=(group == "Explore"),
+                data={"type": "ring-group", "group": group})
+            if group == "Explore":
+                explore_node = gnode
+            else:
+                for view in group_views:
+                    gnode.add_leaf(view.title, data={"type": "view", "tab": view.tab})
+        if explore_node is None:  # a registry with no Explore group; never happens
+            explore_node = project_tree.root
+
         # Pre-fetch deltas in a separate session to avoid corrupting main session
         # if delta tables don't exist
         deltas_by_project: dict[int, list] = {}
@@ -2417,7 +2435,7 @@ class DossierApp(App):
                     if isinstance(subgroup_items, list) and subgroup_items != group_data.get("_items"):
                         item_count += len(subgroup_items)
                 
-                group_node = project_tree.root.add(f"{group} ({item_count})", expand=group.startswith("🏢"))
+                group_node = explore_node.add(f"{group} ({item_count})", expand=group.startswith("🏢"))
                 # A category is a selectable thing, not just a heading. An
                 # owner group carries its owner so selecting it can show the
                 # aggregate for that owner rather than doing nothing -- the
@@ -2881,8 +2899,19 @@ class DossierApp(App):
         
         nav_data = node.data
         nav_type = nav_data.get("type")
-        
-        if nav_type == "project":
+
+        if nav_type == "view":
+            # A group's view leaf opens that view's tab. This is how the tree
+            # reaches the org-wide readings -- Overview, Governance, Harness --
+            # that are not scoped to one repository.
+            self._activate_tab(nav_data["tab"])
+
+        elif nav_type == "ring-group":
+            # A group node is a heading you expand; selecting Explore does
+            # nothing on its own, and the others opened their leaves already.
+            node.toggle()
+
+        elif nav_type == "project":
             project = nav_data.get("project")
             if project:
                 self.selected_project = project

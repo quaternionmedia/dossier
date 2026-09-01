@@ -177,7 +177,11 @@ async def test_the_owner_group_node_carries_its_owner(session):
     async with app.run_test(size=(160, 50)) as pilot:
         await pilot.pause()
         tree = app.query_one("#project-tree", Tree)
-        owners = [node.data.get("owner") for node in tree.root.children
+        # Owner groups hang under the Explore ring group now.
+        explore = next(n for n in tree.root.children
+                       if n.data and n.data.get("type") == "ring-group"
+                       and n.data.get("group") == "Explore")
+        owners = [node.data.get("owner") for node in explore.children
                   if node.data and node.data.get("type") == "group"]
     assert "org" in owners
 

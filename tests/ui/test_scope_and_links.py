@@ -74,8 +74,19 @@ def app_for(session):
 
 def org_node(app):
     tree = app.query_one("#project-tree", Tree)
-    return next(n for n in tree.root.children
-                if n.data and n.data.get("type") == "group")
+
+    # Owner groups live under the Explore ring group now, so the search is
+    # recursive rather than over the tree's direct children.
+    def walk(node):
+        for child in node.children:
+            if child.data and child.data.get("type") == "group":
+                return child
+            found = walk(child)
+            if found is not None:
+                return found
+        return None
+
+    return walk(tree.root)
 
 
 # --- the org is a selectable thing -------------------------------------------
