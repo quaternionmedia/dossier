@@ -319,3 +319,22 @@ async def test_scoping_to_an_owner_redraws_what_is_on_screen(session):
         assert before != after, (
             f"the screen still reads {after!r} after scoping to another owner")
         assert "other" in after
+
+
+@pytest.mark.asyncio
+async def test_the_harness_tab_fills_without_a_selection(session):
+    """The harness reading is global -- every invocation names its own
+    owner/repo and is not scoped to a project -- so the tab must fill with
+    nothing selected. It had no loader and drew blank until an owner was
+    chosen; this is the guard against that.
+
+    Mutation: drop the `tab-harness` branch in `_on_view_shown` and this fails,
+    because the table renders no columns when loading never fires.
+    """
+    app = app_for(session)
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        app._activate_tab("tab-harness")
+        await pilot.pause()
+        table = app.query_one("#harness-table", DataTable)
+        assert len(table.columns) > 0, "the harness tab drew blank -- loading never fired"

@@ -3174,6 +3174,13 @@ class DossierApp(App):
         if view_tab == "tab-sweep":
             self._load_sweep_and_disk(getattr(self, "_current_project", None))
             return
+        if view_tab == "tab-harness":
+            # The harness reading is global -- invocations name their own
+            # owner/repo and are not scoped to a project -- so it loads with
+            # nothing selected, the way Governance does. Without this it stayed
+            # blank until an owner was chosen, because it has no project loader.
+            self._load_harness_tab()
+            return
         if hasattr(self, "_current_project_id"):
             self._load_tab_data(view_tab)
 
@@ -3189,6 +3196,10 @@ class DossierApp(App):
 
         if tab_id == "tab-governance":
             self._load_governance_tab()
+            return
+
+        if tab_id == "tab-harness":
+            self._load_harness_tab()
             return
 
         # On-deck holds two readings, one of which asks the harness over HTTP.
@@ -3883,6 +3894,20 @@ class DossierApp(App):
                 "else writing counted too."
             )
         return f"Removed {claimed}; the volume gave back {freed}."
+
+    def _load_harness_tab(self) -> None:
+        """Render every invocation the harness has reported, at any scope.
+
+        The reading is global: `harness_org` reads the invocations whole because
+        each names its own `owner/repo` in its payload and is not a row in
+        `project`, so scoping by ids would return nothing and look like an idle
+        harness. It therefore loads with nothing selected, the way Governance
+        does -- an empty table here means no invocations were ingested, and the
+        section's own note says so rather than the tab drawing blank.
+        """
+        with self.session_factory() as session:
+            section = FACET_BY_KEY["harness"].at(session, ids=None, limit=self.TAB_ROWS)
+        self._render_section("harness-table", section)
 
     def _load_governance_tab(self) -> None:
         """Render what the corpus's generated documents say.
