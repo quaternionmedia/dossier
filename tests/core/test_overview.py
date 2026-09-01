@@ -94,6 +94,46 @@ def test_never_synced_is_a_headline_not_a_footnote(session):
     assert "absent" in cell.note
 
 
+def test_the_report_reads_in_the_rings_job_groups(session):
+    """**ONE TAXONOMY, TWO SURFACES.** The report clusters its sections into the
+    same groups the ring is navigated, in the same order -- Triage, Plan,
+    Explore, Health, Seams -- so a reader never meets one order in the menu and
+    another in the document.
+
+    Mutation: drop the sort in `overview._in_group_order` and the sections come
+    out in assembly order, interleaving groups, so `idx == sorted(idx)` fails.
+    """
+    from dossier import views
+    built = ov.build(session, now=NOW)
+    order = {g: i for i, g in enumerate(views.GROUPS)}
+
+    grouped = [s.group for s in built.sections if s.group]
+    assert grouped, "no section carried a job-group"
+    assert set(grouped) <= set(views.GROUPS), "a section named an unknown group"
+    idx = [order[g] for g in grouped]
+    assert idx == sorted(idx), "the report interleaves the ring's job-groups"
+
+
+def test_a_facet_section_carries_its_views_group(session):
+    """The group is resolved through the one registry: a facet knows its tab and
+    the view on that tab knows its group. So the section under which a reading
+    appears in the report is the group under which it sits in the ring -- they
+    cannot drift, because they are read from the same place."""
+    from dossier import views
+    from dossier.facets import BY_TITLE
+    built = ov.build(session, now=NOW)
+    for section in built.sections:
+        facet = BY_TITLE.get(section.title)
+        if facet is None:
+            continue
+        view = views.BY_TAB.get(facet.tab)
+        if view is None:
+            continue
+        assert section.group == view.group, (
+            f"{section.title!r} is under {section.group!r} in the report but "
+            f"{view.group!r} in the ring")
+
+
 def test_governance_values_are_passed_through_verbatim(session):
     """The generator's words, unrenamed. A renderer that re-spells one has
     defined a second governance vocabulary."""
@@ -261,10 +301,14 @@ async def test_the_overview_tab_draws_the_org_figures(session):
     # sections. The later ones are asserted through the panel's own overview
     # rather than the screen, because claiming they are visible at 60 rows
     # would be asserting something untrue of any real terminal.
-    for expected in ("repositories", "never synced", "GOVERNANCE POSTURE", "ON DECK"):
+    # The report reads in the ring's job-groups now, so Triage leads: its
+    # banner and its first reading are what a reader sees without scrolling,
+    # and Governance sits later under Health.
+    for expected in ("repositories", "never synced", "TRIAGE", "OPEN ISSUES"):
         assert expected in drawn, f"{expected!r} is not on the first screen"
 
-    assert titles[0] == "Governance posture"
+    assert titles[0] == "Open issues", "the report did not open on Triage"
+    assert "Governance posture" in titles
     assert "Wants attention" in titles
 
 

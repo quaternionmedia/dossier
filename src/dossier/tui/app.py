@@ -521,6 +521,116 @@ class DossierApp(App):
         except Exception:
             return False
     
+    def _compose_pane(self, tab: str) -> ComposeResult:
+        """The widgets inside one tab. `compose` supplies the `TabPane` and the
+        order -- both from `dossier.views` -- and this supplies the body, so a
+        tab lands in the ring's job-group without a second list to keep in step.
+        """
+        if tab == "tab-overview":
+            # Org-wide and first, so a reader arriving cold gets the shape of the
+            # organisation before being asked to pick a repository.
+            yield OverviewPanel(self.session_factory, id="org-overview")
+        elif tab == "tab-waiting":
+            # The one thing on the screen waiting for the reader; a queue nobody
+            # goes looking for is a queue nobody empties.
+            yield DataTable(id="waiting-table")
+        elif tab == "tab-issues":
+            yield DataTable(id="issues-table")
+        elif tab == "tab-deltas":
+            with Vertical():
+                yield DataTable(id="deltas-table")
+        elif tab == "tab-sweep":
+            # A review is a thing you leave and return to, so it is a tab rather
+            # than a modal you are inside of.
+            with Vertical():
+                with Horizontal(id="sweep-picker"):
+                    yield Input(
+                        placeholder="a package, to sweep; blank "
+                                    "takes the widest-shared",
+                        id="sweep-package")
+                yield Static("", id="sweep-summary")
+                yield DataTable(id="sweep-table")
+                yield Static("", id="sweep-note")
+        elif tab == "tab-threads":
+            yield DataTable(id="threads-table")
+            with Horizontal(id="thread-buttons"):
+                yield Input(placeholder="path to an export "
+                                        "(conversations.json or the "
+                                        "folder holding it)",
+                            id="thread-export-path")
+                yield Button("Ingest", id="btn-ingest-threads",
+                             variant="primary")
+                yield Button("Read", id="btn-read-thread",
+                             variant="default")
+            yield WorkProgress(id="thread-progress")
+        elif tab == "tab-details":
+            yield ProjectDetailPanel(id="project-detail")
+        elif tab == "tab-dossier":
+            with Horizontal(id="dossier-layout"):
+                yield VerticalScroll(Markdown("", id="dossier-view"), id="dossier-scroll")
+                yield DraggableSplitter("dossier-scroll", "dossier-components", id="dossier-splitter")
+                # The components pane, moved here whole: the tree keeps the
+                # hierarchy, the table is the flat editable reading, and the
+                # buttons are the only route to create or remove a link, which
+                # is why the row stays even after the ring ran out of cells.
+                with Vertical(id="dossier-components"):
+                    yield Tree("Components", id="component-tree")
+                    yield IntersectionsPanel(self.session_factory,
+                                             id="intersections")
+                    yield DataTable(id="components-table")
+                    with Horizontal(id="component-buttons"):
+                        yield Button("Add Component", id="btn-add-component", variant="primary")
+                        yield Button("Link as Parent", id="btn-link-parent", variant="default")
+                        yield Button("Remove", id="btn-remove-component", variant="error")
+        elif tab == "tab-languages":
+            yield DataTable(id="languages-table")
+        elif tab == "tab-docs":
+            yield Tree("📄 Documentation", id="docs-tree")
+        elif tab == "tab-branches":
+            # The sync reading, then the clone reading. Both are about branches;
+            # only one can say whether the commits exist anywhere else.
+            with Vertical():
+                yield DataTable(id="branches-table")
+                yield Static("Branch hygiene -- read from the "
+                             "clones on this machine",
+                             id="hygiene-heading")
+                yield DataTable(id="hygiene-table")
+        elif tab == "tab-dependencies":
+            yield DataTable(id="dependencies-table")
+        elif tab == "tab-contributors":
+            yield DataTable(id="contributors-table")
+        elif tab == "tab-releases":
+            yield DataTable(id="releases-table")
+        elif tab == "tab-governance":
+            with Vertical():
+                yield Static("", id="governance-age")
+                yield DataTable(id="governance-table")
+                yield Static("", id="governance-threads-age")
+                yield DataTable(id="governance-threads-table")
+        elif tab == "tab-disk":
+            with Vertical():
+                yield Static("", id="disk-age")
+                yield DataTable(id="disk-volumes-table")
+                yield Static("", id="disk-delta-age")
+                yield DataTable(id="disk-targets-table")
+        elif tab == "tab-harness":
+            # The harness half of the pair qmcp reports having run, read through
+            # the address that names the same row on both sides.
+            yield DataTable(id="harness-table")
+        elif tab == "tab-topology":
+            with Vertical():
+                yield Static("", id="topology-caveat")
+                with Horizontal(id="topology-picker"):
+                    yield Input(
+                        placeholder="a project, to read the archive "
+                                    "for; blank draws a shape",
+                        id="topology-subject")
+                    yield Button("Draw", id="btn-draw-topology",
+                                 variant="primary")
+                    yield Button("Mermaid", id="btn-topology-mermaid")
+                yield Static("", id="topology-drawing")
+                yield Static("", id="topology-note")
+
     def compose(self) -> ComposeResult:
         yield Header()
         
@@ -566,141 +676,14 @@ class DossierApp(App):
 
             with Vertical(id="main-content"):
                 with TabbedContent(id="project-tabs"):
-                    # First, and org-wide rather than per-project: a reader
-                    # arriving cold gets the shape of the organisation before
-                    # being asked to pick a repository out of 141.
-                    with TabPane("Overview", id="tab-overview"):
-                        yield OverviewPanel(self.session_factory, id="org-overview")
-                    with TabPane("Dossier", id="tab-dossier"):
-                        with Horizontal(id="dossier-layout"):
-                            yield VerticalScroll(Markdown("", id="dossier-view"), id="dossier-scroll")
-                            yield DraggableSplitter("dossier-scroll", "dossier-components", id="dossier-splitter")
-                            # **THE COMPONENTS TAB, MOVED HERE WHOLE.** It held
-                            # the same parent and child links this tree already
-                            # draws -- five of them across a hundred and fifteen
-                            # repositories -- and a top-level view that thin is
-                            # a cell spent on nothing. The tree keeps the
-                            # hierarchy and the grandchildren; the table is the
-                            # flat, editable reading and the buttons act on it.
-                            # Neither was dropped, because the tree's nodes
-                            # carry navigation and not link identity, and
-                            # selecting one already navigates away.
-                            with Vertical(id="dossier-components"):
-                                yield Tree("Components", id="component-tree")
-                                # What can be observed, above what was declared.
-                                yield IntersectionsPanel(self.session_factory,
-                                                         id="intersections")
-                                yield DataTable(id="components-table")
-                                # **THIS ROW STAYS, AND THE GUARD FROM #36 IS
-                                # WHY.** Consolidating the button rows removed
-                                # it, and `test_the_components_pane_moved_
-                                # rather_than_went` went red: these three are
-                                # the only way to create or remove a component
-                                # link, and none of them has a wedge. `Do`
-                                # already holds six children after `Add` and
-                                # `Remove`; three more would be nine, past the
-                                # eight cells a level has.
-                                #
-                                # So the consolidation stops where the ring
-                                # runs out of room, and says so, rather than
-                                # deleting the only route to an act.
-                                with Horizontal(id="component-buttons"):
-                                    yield Button("Add Component", id="btn-add-component", variant="primary")
-                                    yield Button("Link as Parent", id="btn-link-parent", variant="default")
-                                    yield Button("Remove", id="btn-remove-component", variant="error")
-                    with TabPane("Details", id="tab-details"):
-                        yield ProjectDetailPanel(id="project-detail")
-                    with TabPane("Documentation", id="tab-docs"):
-                        yield Tree("📄 Documentation", id="docs-tree")
-                    with TabPane("Languages", id="tab-languages"):
-                        yield DataTable(id="languages-table")
-                    with TabPane("Branches", id="tab-branches"):
-                        with Vertical():
-                            # The sync reading, then the clone reading. Both
-                            # are about branches; only one of them can say
-                            # whether the commits exist anywhere else.
-                            yield DataTable(id="branches-table")
-                            yield Static("Branch hygiene -- read from the "
-                                         "clones on this machine",
-                                         id="hygiene-heading")
-                            yield DataTable(id="hygiene-table")
-                    with TabPane("Dependencies", id="tab-dependencies"):
-                        yield DataTable(id="dependencies-table")
-                    with TabPane("Contributors", id="tab-contributors"):
-                        yield DataTable(id="contributors-table")
-                    with TabPane("Issues", id="tab-issues"):
-                        yield DataTable(id="issues-table")
-                    with TabPane("Releases", id="tab-releases"):
-                        yield DataTable(id="releases-table")
-                    # The harness half of the pair: what qmcp reports having
-                    # run, read through the address that names the same row on
-                    # both sides.
-                    with TabPane("Harness", id="tab-harness"):
-                        yield DataTable(id="harness-table")
-                    # Its own tab rather than a second table under Harness:
-                    # this is the one thing on the screen that is waiting for
-                    # the reader, and a queue somebody has to go looking for is
-                    # a queue nobody empties.
-                    with TabPane("Waiting", id="tab-waiting"):
-                        yield DataTable(id="waiting-table")
-                    # The harness's thread archive, read over the seam. This is
-                    # the only human surface for it: a second one would be a
-                    # second definition of what a figure means, and the CLI
-                    # beside it is for machines and for debugging.
-                    # One sweep: what may be approved together, and what may
-                    # not. Its own tab rather than a modal, because a person
-                    # comes back to a review and a modal is a thing you are
-                    # inside of rather than a thing you can leave and return to.
-                    with TabPane("Sweep", id="tab-sweep"):
-                        with Vertical():
-                            with Horizontal(id="sweep-picker"):
-                                yield Input(
-                                    placeholder="a package, to sweep; blank "
-                                                "takes the widest-shared",
-                                    id="sweep-package")
-                            yield Static("", id="sweep-summary")
-                            yield DataTable(id="sweep-table")
-                            yield Static("", id="sweep-note")
-                    with TabPane("Topology", id="tab-topology"):
-                        with Vertical():
-                            yield Static("", id="topology-caveat")
-                            with Horizontal(id="topology-picker"):
-                                yield Input(
-                                    placeholder="a project, to read the archive "
-                                                "for; blank draws a shape",
-                                    id="topology-subject")
-                                yield Button("Draw", id="btn-draw-topology",
-                                             variant="primary")
-                                yield Button("Mermaid", id="btn-topology-mermaid")
-                            yield Static("", id="topology-drawing")
-                            yield Static("", id="topology-note")
-                    with TabPane("Threads", id="tab-threads"):
-                        yield DataTable(id="threads-table")
-                        with Horizontal(id="thread-buttons"):
-                            yield Input(placeholder="path to an export "
-                                                    "(conversations.json or the "
-                                                    "folder holding it)",
-                                        id="thread-export-path")
-                            yield Button("Ingest", id="btn-ingest-threads",
-                                         variant="primary")
-                            yield Button("Read", id="btn-read-thread",
-                                         variant="default")
-                        yield WorkProgress(id="thread-progress")
-                    with TabPane("Governance", id="tab-governance"):
-                        with Vertical():
-                            yield Static("", id="governance-age")
-                            yield DataTable(id="governance-table")
-                            yield Static("", id="governance-threads-age")
-                            yield DataTable(id="governance-threads-table")
-                    with TabPane("Disk", id="tab-disk"):
-                        with Vertical():
-                            yield Static("", id="disk-age")
-                            yield DataTable(id="disk-volumes-table")
-                            yield Static("", id="disk-delta-age")
-                            yield DataTable(id="disk-targets-table")
-                    with TabPane("Deltas", id="tab-deltas"):
-                        with Vertical():
-                            yield DataTable(id="deltas-table")
+                    # The tabs are the registry's, in the registry's order, so
+                    # the strip reads in the same job-groups the ring is
+                    # navigated -- Triage, Plan, Explore, Health, Seams. A view
+                    # added to `dossier.views` gets its tab here with no second
+                    # edit; `_compose_pane` holds each pane's body.
+                    for view in VIEWS:
+                        with TabPane(view.title, id=view.tab):
+                            yield from self._compose_pane(view.tab)
 
         # **ONE ROW, AND IT IS THE RING'S MIDDLE RANK.** Four buttons here
         # and nine more scattered across three tabs were thirteen affordances

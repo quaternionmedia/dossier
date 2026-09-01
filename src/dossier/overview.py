@@ -32,7 +32,7 @@ can see how old the whole picture is before reading any number in it.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Sequence
 
@@ -78,6 +78,11 @@ class Section:
     headers: tuple[str, ...]
     rows: tuple[tuple[str, ...], ...]
     note: str = ""
+    group: str = ""
+    """Which job-group this reading serves, from `views.GROUPS`. The overview
+    clusters its sections under these so the report reads in the same order the
+    ring is navigated. Empty means ungrouped -- it sorts to the end rather than
+    inventing a heading."""
 
     @property
     def is_empty(self) -> bool:
@@ -412,6 +417,22 @@ def _facet_section(facet: Any, session: Any, ids: Any, limit: int,
     return facet.at(session, ids=ids, limit=limit)
 
 
+def _in_group_order(labelled: Sequence[tuple[Section, str]],
+                    groups: Sequence[str]) -> tuple[Section, ...]:
+    """Stamp each section with its group and order the report by the ring's.
+
+    The reader navigates the ring Triage, Plan, Explore, Health, Seams; the
+    report reads in that same order, so the two are one taxonomy rather than two
+    that happen to overlap. Order is stable within a group -- the sections keep
+    the order they were assembled in -- and a section whose group is unknown
+    sorts to the end rather than being dropped or inventing a heading.
+    """
+    order = {name: i for i, name in enumerate(groups)}
+    stamped = [replace(section, group=group) for section, group in labelled]
+    return tuple(sorted(stamped,
+                        key=lambda s: order.get(s.group, len(order))))
+
+
 def build(session: Any, limit: int = 12, now: datetime | None = None,
           owner: str | None = None, include_forks: bool = False,
           beyond_the_database: bool = False) -> OrgOverview:
@@ -425,21 +446,34 @@ def build(session: Any, limit: int = 12, now: datetime | None = None,
     # cycle. The registry is the single definition of each kind of fact; this
     # module owns only the sections that exist at org scope alone.
     from dossier.facets import FACETS
+    from dossier import views
 
     now = now or datetime.now(timezone.utc)
     ids = scope_ids(session, owner, include_forks=include_forks)
     horizon = _one(session, _in_scope(
         select(func.max(Project.last_synced_at)), Project.id, ids), default=None)
+
+    # Every section carries the job-group it serves, resolved through the one
+    # registry: a facet knows its tab, and the view on that tab knows its group,
+    # so the overview and the ring cannot name the same reading two jobs. The
+    # sections without a facet -- governance, the delta summary, the harness
+    # totals, attention -- name their group directly, because they have no tab
+    # to look one up by.
+    def _group_of(tab: str) -> str:
+        view = views.BY_TAB.get(tab)
+        return view.group if view else ""
+
+    labelled = (
+        (_governance(session, now), "Health"),
+        *((_facet_section(facet, session, ids, limit, beyond_the_database),
+           _group_of(facet.tab)) for facet in FACETS),
+        (_deltas(session, now, ids), "Plan"),
+        (_harness_totals(session, now), "Seams"),
+        (_attention(session, now, limit, ids), "Triage"),
+    )
     picture = OrgOverview(
         masthead=_masthead(session, now, ids),
-        sections=(
-            _governance(session, now),
-            *(_facet_section(facet, session, ids, limit, beyond_the_database)
-              for facet in FACETS),
-            _deltas(session, now, ids),
-            _harness_totals(session, now),
-            _attention(session, now, limit, ids),
-        ),
+        sections=_in_group_order(labelled, views.GROUPS),
         generated_from=_horizon_phrase(_age_days(horizon, now)) if horizon
         else "nothing synced yet",
         scope=(
@@ -505,7 +539,7 @@ def _redact_private(picture: OrgOverview, session: Any) -> OrgOverview:
         sections=tuple(
             Section(s.title, s.headers,
                     tuple(tuple(scrub(cell) for cell in row) for row in s.rows),
-                    scrub(s.note))
+                    scrub(s.note), s.group)
             for s in picture.sections
         ),
         generated_from=picture.generated_from,
@@ -547,6 +581,7 @@ def as_dict(picture: OrgOverview) -> dict[str, Any]:
         "sections": [
             {
                 "title": s.title,
+                "group": s.group,
                 "headers": list(s.headers),
                 "rows": [list(row) for row in s.rows],
                 "note": s.note,

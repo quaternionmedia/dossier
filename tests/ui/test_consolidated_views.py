@@ -34,8 +34,12 @@ GONE = frozenset({"tab-prs", "tab-components", "tab-hygiene"})
 
 
 def _composed() -> set[str]:
-    text = APP.read_text(encoding="utf-8")
-    return set(re.findall(r'TabPane\([^)]*id="(tab-[a-z-]+)"', text))
+    """The tabs the dashboard builds. `compose` iterates `dossier.views`, so a
+    tab is composed exactly when a view declares it -- reading the registry is
+    reading what the strip renders, and the two cannot disagree the way a
+    hand-kept list and a hand-written strip once did."""
+    from dossier import views
+    return {view.tab for view in views.VIEWS}
 
 
 # --- the three that went ------------------------------------------------------
@@ -87,8 +91,8 @@ def test_the_components_pane_moved_rather_than_went():
     Mutation: remove the components pane from the Dossier tab and this fails.
     """
     text = APP.read_text(encoding="utf-8")
-    dossier_tab = text[text.index('TabPane("Dossier"'):
-                       text.index('TabPane("Details"')]
+    dossier_tab = text[text.index('tab == "tab-dossier"'):
+                       text.index('tab == "tab-languages"')]
     for needed in ('id="components-table"', 'id="btn-add-component"',
                    'id="btn-link-parent"', 'id="btn-remove-component"',
                    "IntersectionsPanel", 'id="component-tree"'):
@@ -108,7 +112,8 @@ def test_both_branch_readings_are_on_the_branches_tab():
     assert on_branches == ["branches", "hygiene"], on_branches
 
     text = APP.read_text(encoding="utf-8")
-    tab = text[text.index('TabPane("Branches"'):text.index('TabPane("Dep')]
+    tab = text[text.index('tab == "tab-branches"'):
+               text.index('tab == "tab-dependencies"')]
     assert 'id="branches-table"' in tab and 'id="hygiene-table"' in tab
     assert "hygiene-heading" in tab, (
         "two tables with no heading between them is one table with a gap")
@@ -164,3 +169,25 @@ class _AnyProject:
     id = 1
     name = "org/one"
     full_name = "org/one"
+
+
+@pytest.mark.asyncio
+async def test_the_tab_strip_reads_in_the_registrys_order(test_session, no_close):
+    """**THE STRIP FOLLOWS THE REGISTRY, IN ITS ORDER.** compose() iterates
+    dossier.views, so the dashboard's tabs cluster by the same job-groups the
+    ring is navigated -- Triage, Plan, Explore, Health, Seams -- and reordering
+    the registry moves the strip with it. This is the guard the hand-written
+    strip never had, which is how it drifted from the ring while the settings
+    list and the index followed along.
+
+    Mutation: hard-code compose() back to a fixed TabPane order and this fails.
+    """
+    from textual.widgets import TabPane
+    from dossier import views
+
+    app = DossierApp(session_factory=lambda: no_close(test_session))
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        composed = [pane.id for pane in app.query(TabPane)]
+
+    assert composed == [view.tab for view in views.VIEWS], composed

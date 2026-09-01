@@ -155,13 +155,20 @@ def test_every_facet_names_the_same_columns_at_both_scopes(session):
 
 
 def test_every_facet_tab_exists_in_the_app():
-    """A facet pointing at a tab nothing renders is a dead link."""
-    from dossier.tui.app import DossierApp
+    """A facet pointing at a tab nothing renders is a dead link.
 
+    `compose` builds a `TabPane` per view in `dossier.views`, so a facet's tab
+    exists when a view declares it; its table is still a literal `_compose_pane`
+    yields, so that stays a source check.
+    """
+    from dossier.tui.app import DossierApp
+    from dossier import views
+
+    composed = {view.tab for view in views.VIEWS}
     source = __import__("pathlib").Path("src/dossier/tui/app.py").read_text(
         encoding="utf-8")
     for facet in FACETS:
-        assert f'id="{facet.tab}"' in source, f"{facet.key} names a tab that is not composed"
+        assert facet.tab in composed, f"{facet.key} names a tab no view composes"
         assert f'id="{facet.table}"' in source, f"{facet.key} names a table that is not composed"
     assert set(BY_TAB) <= {f.tab for f in FACETS}
     assert DossierApp is not None

@@ -44,7 +44,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 # The order the ring places them in, and therefore the order of the index.
-GROUPS = ("Repositories", "Work", "Code", "Machine")
+#
+# **THE GROUPS ARE JOBS, NOT DATA DOMAINS.** They used to be Repositories, Work,
+# Code and Machine -- where a fact lived, so a reader had to know a branch was
+# "Code" and an issue was "Work" before they could reach either. These are the
+# five things a person opens dossier to *do*: react to what is urgent (Triage),
+# decide what to change next (Plan), understand what exists (Explore), check the
+# estate and this box are sound (Health), and read the boundary where dossier
+# meets other systems (Seams). A view moves to the group whose job it serves,
+# not the shelf its data sits on.
+GROUPS = ("Triage", "Plan", "Explore", "Health", "Seams")
 
 
 @dataclass(frozen=True)
@@ -146,36 +155,11 @@ def _of_one_repository(what: str) -> tuple[Need, ...]:
 
 
 VIEWS: tuple[View, ...] = (
-    # Repositories -- all of them, then one of them.
-    View("tab-overview", "Overview", "Repositories",
+    # Triage -- what is urgent now, reacted to rather than gone looking for.
+    View("tab-overview", "Overview", "Triage",
          "Every repository in one reading, with what needs attention first.",
          "dossier overview"),
-    View("tab-details", "Details", "Repositories",
-         "One repository's own facts: description, owner, when it last synced.",
-         "dossier projects show",
-         needs=_of_one_repository("these facts")),
-    View("tab-dossier", "Dossier", "Repositories",
-         "The repository as a document, and the projects it is composed of.",
-         "dossier export show",
-         needs=_of_one_repository("the document and its parts")),
-    View("tab-docs", "Documentation", "Repositories",
-         "Every documentation section parsed out of the repository.",
-         "dossier query",
-         needs=_of_one_repository("parsed sections")),
-    View("tab-languages", "Languages", "Repositories",
-         "What the repository is written in, by share of its bytes.",
-         needs=_of_one_repository("the byte shares")),
-
-    # Work -- what is moving, and what is waiting.
-    View("tab-deltas", "On deck", "Work",
-         "Open deltas, and every open pull request no delta claims."),
-    View("tab-sweep", "Sweep", "Work",
-         "What one dependency change would touch, and where it needs a person.",
-         "dossier sweep"),
-    View("tab-issues", "Issues", "Work",
-         "Open issues, most recently updated first.",
-         needs=_of_one_repository("issues")),
-    View("tab-waiting", "Outstanding", "Work",
+    View("tab-waiting", "Outstanding", "Triage",
          "Everything three readings noticed -- harness questions, repositories "
          "nothing has read lately, invocations that failed -- and what would "
          "settle each. Zero is a real answer, not an empty table.",
@@ -183,9 +167,41 @@ VIEWS: tuple[View, ...] = (
                      "the rows are gathered from the overview's reading, and "
                      "that reading has to have been taken",
                      "overview"),)),
+    View("tab-issues", "Issues", "Triage",
+         "Open issues, most recently updated first.",
+         needs=_of_one_repository("issues")),
 
-    # Code -- what is in the repositories rather than what is being done to them.
-    View("tab-branches", "Branches", "Code",
+    # Plan -- the proactive job: what to change next, and what it would touch.
+    # Deltas are the planned units of work and threads are the work in flight;
+    # they belong beside each other, not one filed under "work" and the other
+    # under "machine".
+    View("tab-deltas", "On deck", "Plan",
+         "Open deltas, and every open pull request no delta claims."),
+    View("tab-sweep", "Sweep", "Plan",
+         "What one dependency change would touch, and where it needs a person.",
+         "dossier sweep"),
+    View("tab-threads", "Threads", "Plan",
+         "Every line of work in flight, most idle first.",
+         "dossier governance threads"),
+
+    # Explore -- understand what exists: one repository's facts, and the code,
+    # people and releases across them.
+    View("tab-details", "Details", "Explore",
+         "One repository's own facts: description, owner, when it last synced.",
+         "dossier projects show",
+         needs=_of_one_repository("these facts")),
+    View("tab-dossier", "Dossier", "Explore",
+         "The repository as a document, and the projects it is composed of.",
+         "dossier export show",
+         needs=_of_one_repository("the document and its parts")),
+    View("tab-languages", "Languages", "Explore",
+         "What the repository is written in, by share of its bytes.",
+         needs=_of_one_repository("the byte shares")),
+    View("tab-docs", "Documentation", "Explore",
+         "Every documentation section parsed out of the repository.",
+         "dossier query",
+         needs=_of_one_repository("parsed sections")),
+    View("tab-branches", "Branches", "Explore",
          "Branches from the sync, and what only the clones on this machine "
          "hold.",
          needs=(*_of_one_repository("branches"),
@@ -193,43 +209,44 @@ VIEWS: tuple[View, ...] = (
                      "the question is what would be lost if this disk died, "
                      "and that question has no answer on a server",
                      "dossier clone <repo>"))),
-    View("tab-dependencies", "Dependencies", "Code",
+    View("tab-dependencies", "Dependencies", "Explore",
          "What every repository declares, and what they share.",
          needs=_of_one_repository("declared manifests")),
-    View("tab-contributors", "Contributors", "Code",
+    View("tab-contributors", "Contributors", "Explore",
          "Who has committed where, by how many repositories they reach.",
          needs=_of_one_repository("commit counts")),
-    View("tab-releases", "Releases", "Code",
+    View("tab-releases", "Releases", "Explore",
          "Tags that were cut, newest first. The one human gate a project has.",
          needs=_of_one_repository("tags")),
 
-    # Machine -- this box, this organisation, and the harness beside them.
-    View("tab-governance", "Governance", "Machine",
+    # Health -- is this box and this organisation sound.
+    View("tab-governance", "Governance", "Health",
          "Where every project stands against the corpus: current, drifted, "
          "unmeasured.", "dossier governance show",
          needs=(Need(CORPUS,
                      "the reading is generated by the corpus, and this "
                      "checkout may be pinned before those documents existed",
                      "dossier governance dashboard"),)),
-    View("tab-disk", "Disk", "Machine",
+    View("tab-disk", "Disk", "Health",
          "What is eating this machine, and what it would take to get it back.",
          "dossier disk status"),
-    View("tab-topology", "Topology", "Machine",
-         "How the harness, its projects and their deltas connect.",
-         "dossier topology",
-         needs=(Need(HARNESS,
-                     "the shapes are the harness's own, served over its port",
-                     "uv run qmcp serve"),)),
-    View("tab-harness", "Harness", "Machine",
+
+    # Seams -- the boundary where dossier meets systems it does not own. The
+    # harness now; GitHub, the corpus and codecarto's window are the same kind
+    # of thing and would join here.
+    View("tab-harness", "Harness", "Seams",
          "What the harness ran, when, and whether it finished.",
          "dossier harness ingest",
          needs=(Need(HARNESS,
                      "these are the harness's invocations, and it is a "
                      "separate process on a separate port",
                      "uv run qmcp serve"),)),
-    View("tab-threads", "Threads", "Machine",
-         "Every line of work in flight, most idle first.",
-         "dossier governance threads"),
+    View("tab-topology", "Topology", "Seams",
+         "How the harness, its projects and their deltas connect.",
+         "dossier topology",
+         needs=(Need(HARNESS,
+                     "the shapes are the harness's own, served over its port",
+                     "uv run qmcp serve"),)),
 )
 
 BY_TAB = {view.tab: view for view in VIEWS}

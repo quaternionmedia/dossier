@@ -106,13 +106,22 @@ def test_the_settings_list_is_the_registry():
 
 def test_the_composed_tabs_are_the_registry():
     """A view in the registry with no tab is a keystroke onto nothing; a tab
-    with no registry entry is a view with no keystroke. Both were real.
+    with no registry entry is a view with no keystroke. Both were real, until
+    `compose` was made to iterate the registry: it now builds one `TabPane` per
+    view, so the composed set is the registry set by construction rather than a
+    hand-written strip that could drift from it.
 
-    Mutation: compose a TabPane that the registry does not name and this fails.
+    The runtime tab order is asserted by mounting the app in
+    `test_consolidated_views.py::test_the_tab_strip_reads_in_the_registrys_order`.
+
+    Mutation: replace the loop with a literal `TabPane(..., id="tab-x")` and this
+    fails on both the loop assertion and the no-hardcoded-tab one.
     """
-    composed = set(re.findall(r'TabPane\([^)]*id="(tab-[a-z-]+)"',
-                              APP.read_text(encoding="utf-8")))
-    assert composed == {v.tab for v in views.VIEWS}
+    source = APP.read_text(encoding="utf-8")
+    assert "for view in VIEWS:" in source, "compose no longer iterates the registry"
+    assert "TabPane(view.title, id=view.tab)" in source, "the tab is not built from the view"
+    hardcoded = set(re.findall(r'TabPane\([^)]*id="(tab-[a-z-]+)"', source))
+    assert not hardcoded, f"a hand-written tab escaped the registry loop: {hardcoded}"
 
 
 def test_the_dispatch_is_the_registry():

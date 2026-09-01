@@ -923,9 +923,19 @@ def overview(owner: Optional[str], limit: int, only: Optional[str],
                 click.echo(f"  {label:<28} {value}"
                            + (f"   {note}" if note else ""))
 
+        # The report reads in the ring's job-groups: a heading opens each one,
+        # so Triage's readings sit together and Seams' sit together, the same
+        # order a person navigates. A `--section` filter is answering about one
+        # reading, so the group banners are suppressed under it.
+        current_group = None
         for section in picture.sections:
             if only and only.lower() not in section.title.lower():
                 continue
+            if not only and section.group and section.group != current_group:
+                current_group = section.group
+                click.echo()
+                click.echo(f"=== {section.group} "
+                           + "=" * max(0, 74 - len(section.group)))
             click.echo()
             click.echo(f"--- {section.title} " + "-" * max(0, 74 - len(section.title)))
             if section.is_empty:

@@ -6,7 +6,7 @@ regenerating rides the ordinary test command.
 
 ## The number is the keystroke
 
-`8.8.9` is not a name somebody gave to Languages. It is the keys: `8` is **Go**, `8` is **Repositories**, and the last one is **Languages** itself. Press `m` to open the ring, then the digits -- so Languages is `m` `8` `8` `9`, from anywhere in the application.
+`8.9.8` is not a name somebody gave to Harness. It is the keys: `8` is **Go**, `9` is **Seams**, and the last one is **Harness** itself. Press `m` to open the ring, then the digits -- so Harness is `m` `8` `9` `8`, from anywhere in the application.
 
 `5` is the centre. It backs out one level, or closes the ring, at every
 depth -- so it is never an item and no number contains it. Arrows and
@@ -15,64 +15,65 @@ depth -- so it is never an item and no number contains it. Arrows and
 ## Contents
 
 - **`8`  Go**
-  - **`8.8`  Repositories**
+  - **`8.8`  Triage**
     - `8.8.8`  Overview -- `m` `8` `8` `8`
       Every repository in one reading, with what needs attention first.
       `dossier overview`
-    - `8.8.6`  Details -- `m` `8` `8` `6`
-      One repository's own facts: description, owner, when it last synced.
-      `dossier projects show`
-    - `8.8.2`  Dossier -- `m` `8` `8` `2`
-      The repository as a document, and the projects it is composed of.
-      `dossier export show`
-    - `8.8.4`  Documentation -- `m` `8` `8` `4`
-      Every documentation section parsed out of the repository.
-      `dossier query`
-    - `8.8.9`  Languages -- `m` `8` `8` `9`
-      What the repository is written in, by share of its bytes.
-      `dossier show languages`
-  - **`8.6`  Work**
+    - `8.8.6`  Outstanding -- `m` `8` `8` `6`
+      Everything three readings noticed -- harness questions, repositories nothing has read lately, invocations that failed -- and what would settle each. Zero is a real answer, not an empty table.
+      `dossier show waiting`
+    - `8.8.2`  Issues -- `m` `8` `8` `2`
+      Open issues, most recently updated first.
+      `dossier show issues`
+  - **`8.6`  Plan**
     - `8.6.8`  On deck -- `m` `8` `6` `8`
       Open deltas, and every open pull request no delta claims.
       `dossier show deltas`
     - `8.6.6`  Sweep -- `m` `8` `6` `6`
       What one dependency change would touch, and where it needs a person.
       `dossier sweep`
-    - `8.6.2`  Issues -- `m` `8` `6` `2`
-      Open issues, most recently updated first.
-      `dossier show issues`
-    - `8.6.4`  Outstanding -- `m` `8` `6` `4`
-      Everything three readings noticed -- harness questions, repositories nothing has read lately, invocations that failed -- and what would settle each. Zero is a real answer, not an empty table.
-      `dossier show waiting`
-  - **`8.2`  Code**
-    - `8.2.8`  Branches -- `m` `8` `2` `8`
+    - `8.6.2`  Threads -- `m` `8` `6` `2`
+      Every line of work in flight, most idle first.
+      `dossier governance threads`
+  - **`8.2`  Explore**
+    - `8.2.8`  Details -- `m` `8` `2` `8`
+      One repository's own facts: description, owner, when it last synced.
+      `dossier projects show`
+    - `8.2.6`  Dossier -- `m` `8` `2` `6`
+      The repository as a document, and the projects it is composed of.
+      `dossier export show`
+    - `8.2.2`  Languages -- `m` `8` `2` `2`
+      What the repository is written in, by share of its bytes.
+      `dossier show languages`
+    - `8.2.4`  Documentation -- `m` `8` `2` `4`
+      Every documentation section parsed out of the repository.
+      `dossier query`
+    - `8.2.9`  Branches -- `m` `8` `2` `9`
       Branches from the sync, and what only the clones on this machine hold.
       `dossier show branches`
-    - `8.2.6`  Dependencies -- `m` `8` `2` `6`
+    - `8.2.3`  Dependencies -- `m` `8` `2` `3`
       What every repository declares, and what they share.
       `dossier show dependencies`
-    - `8.2.2`  Contributors -- `m` `8` `2` `2`
+    - `8.2.1`  Contributors -- `m` `8` `2` `1`
       Who has committed where, by how many repositories they reach.
       `dossier show contributors`
-    - `8.2.4`  Releases -- `m` `8` `2` `4`
+    - `8.2.7`  Releases -- `m` `8` `2` `7`
       Tags that were cut, newest first. The one human gate a project has.
       `dossier show releases`
-  - **`8.4`  Machine**
+  - **`8.4`  Health**
     - `8.4.8`  Governance -- `m` `8` `4` `8`
       Where every project stands against the corpus: current, drifted, unmeasured.
       `dossier governance show`
     - `8.4.6`  Disk -- `m` `8` `4` `6`
       What is eating this machine, and what it would take to get it back.
       `dossier disk status`
-    - `8.4.2`  Topology -- `m` `8` `4` `2`
-      How the harness, its projects and their deltas connect.
-      `dossier topology`
-    - `8.4.4`  Harness -- `m` `8` `4` `4`
+  - **`8.9`  Seams**
+    - `8.9.8`  Harness -- `m` `8` `9` `8`
       What the harness ran, when, and whether it finished.
       `dossier harness ingest`
-    - `8.4.9`  Threads -- `m` `8` `4` `9`
-      Every line of work in flight, most idle first.
-      `dossier governance threads`
+    - `8.9.6`  Topology -- `m` `8` `9` `6`
+      How the harness, its projects and their deltas connect.
+      `dossier topology`
 - **`6`  Do**
   - `6.8`  Advance phase -- `m` `6` `8`
     *in the application only*
@@ -107,7 +108,7 @@ depth -- so it is never an item and no number contains it. Arrows and
 
 ## Outside the ring
 
-`dossier --help` reaches **81** leaf commands; **23**
+`dossier --help` reaches **82** leaf commands; **23**
 of them are named above beside the view they belong to. The rest are
 not menu items and are not meant to be: the ring is for what somebody
 does repeatedly, and a cell spent on a once-a-quarter migration is a
@@ -170,6 +171,7 @@ cell taken from something else.
   dossier harness queue
   dossier index
   dossier init
+  dossier numpad
   dossier parse
   dossier projects list
   dossier projects purge
