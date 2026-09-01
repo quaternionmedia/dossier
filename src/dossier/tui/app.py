@@ -97,7 +97,6 @@ from dossier.facets import (BY_KEY as FACET_BY_KEY,
                             BY_TAB as FACET_BY_TAB,
                             BY_TITLE as FACET_BY_TITLE,
                             only_on)
-from dossier.tui.delta_board import DeltaBoard
 from dossier.tui.intersections_panel import IntersectionsPanel
 
 # The prefix `load_projects` puts on an owner group node.
@@ -647,18 +646,13 @@ class DossierApp(App):
         
         with Horizontal(id="main-layout"):
             with Vertical(id="sidebar"):
-                # The work board first: deltas are the unit of work, and the
-                # project tree below is how you reach a repository that has no
-                # delta open. The board reads `project_delta`; the sidebar's
-                # old entity filter matched project rows whose *names* were
-                # addresses, which is a shape `ingest.py` refuses to create.
-                with Container(id="delta-board-container"):
-                    yield DeltaBoard(self.session_factory, id="delta-board")
+                # One hierarchy: the ring's groups, the repositories under
+                # Explore, and every repository's aspects. The org work board
+                # the sidebar used to hold is folded into the On-deck node under
+                # Plan. `auto_expand` toggles a node when it is *selected*, so
+                # clicking an owner collapsed its repositories and read as
+                # "nothing happened"; expansion is the toggle arrow's job.
                 with Container(id="project-list-container"):
-                    # `auto_expand` toggles a node when it is *selected*, so
-                    # clicking an owner collapsed its repositories and the
-                    # selection read as "nothing happened". Expansion is the
-                    # toggle arrow's job.
                     project_tree = Tree("Projects", id="project-tree")
                     project_tree.auto_expand = False
                     yield project_tree
@@ -1675,6 +1669,38 @@ class DossierApp(App):
         # Standard owner/repo format - return as-is
         return name
     
+    def _populate_on_deck(self, node) -> None:
+        """Fill the On-deck tree node with every open delta by phase, org-wide.
+
+        This is the board the sidebar `DeltaBoard` used to draw, folded into the
+        one hierarchy. Forks are excluded here as well as at derivation, because
+        a database synced before that rule existed still holds their deltas.
+        """
+        if not self._delta_tables_exist:
+            return
+        from dossier.tui.delta_board import (CLOSED_PHASES, group_by_phase,
+                                             label_for)
+        from dossier.models.schemas import DeltaPhase
+
+        with self.session_factory() as session:
+            deltas = list(session.exec(
+                select(ProjectDelta).order_by(ProjectDelta.updated_at.desc())).all())
+            projects = list(session.exec(select(Project)).all())
+            names = {p.id: (p.full_name or p.name) for p in projects}
+            forks = {p.id for p in projects if p.is_fork}
+            deltas = [d for d in deltas if d.project_id not in forks]
+            for delta in deltas:
+                session.expunge(delta)
+
+        closed = {p.value for p in CLOSED_PHASES}
+        for phase, rows in group_by_phase(deltas):
+            branch = node.add(f"{phase}  ({len(rows)})", expand=phase not in closed)
+            for delta in rows:
+                branch.add_leaf(
+                    label_for(delta, names.get(delta.project_id)),
+                    data={"type": "work-delta", "delta": delta,
+                          "project_id": delta.project_id})
+
     def load_projects(self, search: str = "", auto_select: bool = False, offset: int = 0) -> None:
         """Load projects into the tree view with filtering, sorting, and hierarchical grouping.
         
@@ -1706,7 +1732,16 @@ class DossierApp(App):
                 explore_node = gnode
             else:
                 for view in group_views:
-                    gnode.add_leaf(view.title, data={"type": "view", "tab": view.tab})
+                    if view.tab == "tab-deltas":
+                        # On deck folds in the org work board: an expandable node
+                        # of every open delta by phase. Selecting the node opens
+                        # the tab; expanding it reads the board the sidebar used
+                        # to hold.
+                        node = gnode.add(view.title, expand=False,
+                                         data={"type": "view", "tab": view.tab})
+                        self._populate_on_deck(node)
+                    else:
+                        gnode.add_leaf(view.title, data={"type": "view", "tab": view.tab})
         if explore_node is None:  # a registry with no Explore group; never happens
             explore_node = project_tree.root
 
@@ -2868,28 +2903,6 @@ class DossierApp(App):
             # Select the new project
             self.selected_project = project
 
-    @on(Tree.NodeSelected, "#delta-board")
-    def on_delta_board_selected(self, event: Tree.NodeSelected) -> None:
-        """Selecting a delta selects the project it belongs to.
-
-        Every per-project tab reads `selected_project`. A board that set only
-        the delta would leave the rest of the screen describing whatever was
-        selected before -- stale content that looks current.
-        """
-        data = event.node.data
-        if not data or data.get("type") != "delta":
-            return
-        project_id = data.get("project_id")
-        if project_id is None:
-            return
-        with self.session_factory() as session:
-            project = session.get(Project, project_id)
-            if project is None:
-                return
-            session.expunge(project)
-        self.selected_project = project
-        self.show_project_details(project)
-
     @on(Tree.NodeSelected, "#project-tree")
     def on_project_tree_selected(self, event: Tree.NodeSelected) -> None:
         """Handle project tree node selection."""
@@ -3024,6 +3037,20 @@ class DossierApp(App):
         elif nav_type == "delta":
             # Link delta as project and navigate to it
             self._link_delta_project(nav_data)
+
+        elif nav_type == "work-delta":
+            # A delta on the On-deck board selects the repository it belongs to,
+            # the way the sidebar board did: every per-repo tab reads the
+            # selection, so setting only the delta would leave the rest of the
+            # screen describing whatever was chosen before.
+            project_id = nav_data.get("project_id")
+            if project_id is not None:
+                with self.session_factory() as session:
+                    project = session.get(Project, project_id)
+                    if project is not None:
+                        session.expunge(project)
+                        self.selected_project = project
+                        self.show_project_details(project)
 
     def _group_slug(self, tab_id: str) -> Optional[str]:
         """The slug of the group a view tab sits under, from the registry."""

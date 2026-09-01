@@ -18,7 +18,18 @@ from dossier.models.schemas import (
     ProjectContributor,
     ProjectDelta,
 )
-from dossier.tui.delta_board import DeltaBoard, group_by_phase, label_for
+from dossier.tui.delta_board import group_by_phase, label_for
+
+
+def _on_deck_node(app):
+    """The On-deck node under Plan, which folded in the old sidebar board: the
+    org's open deltas by phase, in the one hierarchy."""
+    from textual.widgets import Tree
+    tree = app.query_one("#project-tree", Tree)
+    plan = next(n for n in tree.root.children
+                if n.data and n.data.get("group") == "Plan")
+    return next(n for n in plan.children
+                if n.data and n.data.get("tab") == "tab-deltas")
 
 NOW = datetime(2026, 8, 18, tzinfo=timezone.utc)
 
@@ -115,8 +126,9 @@ async def test_the_board_draws_the_open_deltas(session):
     app = DossierApp(session_factory=lambda: _Borrowed(session))
     async with app.run_test(size=(160, 50)) as pilot:
         await pilot.pause()
-        board = app.query_one(DeltaBoard)
-        headings = [str(node.label) for node in board.root.children]
+        app.load_projects()
+        await pilot.pause()
+        headings = [str(node.label) for node in _on_deck_node(app).children]
     assert any("review" in h for h in headings)
     assert any("planning" in h for h in headings)
 
@@ -235,7 +247,8 @@ async def test_the_board_does_not_show_a_forks_deltas(session):
     app = DossierApp(session_factory=lambda: _Borrowed(session))
     async with app.run_test(size=(160, 50)) as pilot:
         await pilot.pause()
-        board = app.query_one(DeltaBoard)
-        labels = [str(leaf.label) for node in board.root.children
+        app.load_projects()
+        await pilot.pause()
+        labels = [str(leaf.label) for node in _on_deck_node(app).children
                   for leaf in node.children]
     assert not any("Upstream thing" in label for label in labels)
