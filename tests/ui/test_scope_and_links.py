@@ -107,9 +107,9 @@ async def test_selecting_the_owner_scopes_the_whole_screen(session):
         await pilot.pause()
         # Start somewhere else: the app opens on the overview, so asserting it
         # is active afterwards would pass whether or not selecting did anything.
-        app._activate_tab("tab-languages")
+        app._activate_tab("tab-dossier")
         await pilot.pause()
-        assert app.query_one("#project-tabs").active == "tab-languages"
+        assert app.query_one("#project-tabs").active == "tab-dossier"
 
         tree = app.query_one("#project-tree", Tree)
         node = org_node(app)
@@ -135,7 +135,7 @@ async def test_a_facet_tab_reads_the_org_when_the_org_is_selected(session):
         tree.cursor_line = node.line
         await pilot.press("enter")
         await pilot.pause()
-        app._load_tab_data("tab-languages")
+        app._load_tab_data("tab-dossier")
         await pilot.pause()
         table = app.query_one("#languages-table", DataTable)
         assert table.row_count == 2, "both repositories' languages, not one's"

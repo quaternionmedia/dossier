@@ -92,10 +92,12 @@ def test_the_components_pane_moved_rather_than_went():
     """
     text = APP.read_text(encoding="utf-8")
     dossier_tab = text[text.index('tab == "tab-dossier"'):
-                       text.index('tab == "tab-languages"')]
+                       text.index('tab == "tab-docs"')]
     for needed in ('id="components-table"', 'id="btn-add-component"',
                    'id="btn-link-parent"', 'id="btn-remove-component"',
-                   "IntersectionsPanel", 'id="component-tree"'):
+                   "IntersectionsPanel", 'id="component-tree"',
+                   # Details and Languages folded into the Dossier tab.
+                   'id="project-detail"', 'id="languages-table"'):
         assert needed in dossier_tab, f"{needed} did not move with the tab"
 
 

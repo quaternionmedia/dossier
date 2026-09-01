@@ -193,7 +193,7 @@ def test_a_repository_tab_is_planned_normally(session):
     """The repository-shaped tabs are all filled by the same sync, so none of
     them is special and none of them is inapplicable."""
     add(session, "org/one", synced=NOW - timedelta(days=90))
-    plan = plan_for(session, tab="tab-languages", owner="org", now=NOW)
+    plan = plan_for(session, tab="tab-dossier", owner="org", now=NOW)
     assert plan.inapplicable is None
     assert len(plan.subjects) == 1
 

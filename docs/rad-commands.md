@@ -36,14 +36,12 @@ same cell.
 | `8.6.8` | `m` `8` `6` `8` | &nbsp;&nbsp;&nbsp;&nbsp;On deck | `view.deltas` | yes |
 | `8.6.6` | `m` `8` `6` `6` | &nbsp;&nbsp;&nbsp;&nbsp;Sweep | `view.sweep` | yes |
 | `8.2` | `m` `8` `2` | &nbsp;&nbsp;Explore | *opens a submenu* | yes |
-| `8.2.8` | `m` `8` `2` `8` | &nbsp;&nbsp;&nbsp;&nbsp;Details | `view.details` | yes |
-| `8.2.6` | `m` `8` `2` `6` | &nbsp;&nbsp;&nbsp;&nbsp;Dossier | `view.dossier` | yes |
-| `8.2.2` | `m` `8` `2` `2` | &nbsp;&nbsp;&nbsp;&nbsp;Languages | `view.languages` | yes |
-| `8.2.4` | `m` `8` `2` `4` | &nbsp;&nbsp;&nbsp;&nbsp;Documentation | `view.docs` | yes |
-| `8.2.9` | `m` `8` `2` `9` | &nbsp;&nbsp;&nbsp;&nbsp;Branches | `view.branches` | yes |
-| `8.2.3` | `m` `8` `2` `3` | &nbsp;&nbsp;&nbsp;&nbsp;Dependencies | `view.dependencies` | yes |
-| `8.2.1` | `m` `8` `2` `1` | &nbsp;&nbsp;&nbsp;&nbsp;Contributors | `view.contributors` | yes |
-| `8.2.7` | `m` `8` `2` `7` | &nbsp;&nbsp;&nbsp;&nbsp;Releases | `view.releases` | yes |
+| `8.2.8` | `m` `8` `2` `8` | &nbsp;&nbsp;&nbsp;&nbsp;Dossier | `view.dossier` | yes |
+| `8.2.6` | `m` `8` `2` `6` | &nbsp;&nbsp;&nbsp;&nbsp;Documentation | `view.docs` | yes |
+| `8.2.2` | `m` `8` `2` `2` | &nbsp;&nbsp;&nbsp;&nbsp;Branches | `view.branches` | yes |
+| `8.2.4` | `m` `8` `2` `4` | &nbsp;&nbsp;&nbsp;&nbsp;Dependencies | `view.dependencies` | yes |
+| `8.2.9` | `m` `8` `2` `9` | &nbsp;&nbsp;&nbsp;&nbsp;Contributors | `view.contributors` | yes |
+| `8.2.3` | `m` `8` `2` `3` | &nbsp;&nbsp;&nbsp;&nbsp;Releases | `view.releases` | yes |
 | `8.4` | `m` `8` `4` | &nbsp;&nbsp;Health | *opens a submenu* | yes |
 | `8.4.8` | `m` `8` `4` `8` | &nbsp;&nbsp;&nbsp;&nbsp;Governance | `view.governance` | yes |
 | `8.9` | `m` `8` `9` | &nbsp;&nbsp;Seams | *opens a submenu* | yes |

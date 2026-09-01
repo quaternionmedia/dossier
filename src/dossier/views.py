@@ -185,19 +185,14 @@ VIEWS: tuple[View, ...] = (
          "sweeps, one that spans the estate and one that spans the disk.",
          "dossier sweep"),
 
-    # Explore -- understand what exists: one repository's facts, and the code,
-    # people and releases across them.
-    View("tab-details", "Details", "Explore",
-         "One repository's own facts: description, owner, when it last synced.",
-         "dossier projects show",
-         needs=_of_one_repository("these facts")),
+    # Explore -- understand what exists: one repository in one reading, then the
+    # code, people and releases across them.
     View("tab-dossier", "Dossier", "Explore",
-         "The repository as a document, and the projects it is composed of.",
+         "One repository in one reading: its own facts, the document and parts "
+         "it is composed of, and the languages it is written in -- the "
+         "consistent overview of a repository dossier holds.",
          "dossier export show",
-         needs=_of_one_repository("the document and its parts")),
-    View("tab-languages", "Languages", "Explore",
-         "What the repository is written in, by share of its bytes.",
-         needs=_of_one_repository("the byte shares")),
+         needs=_of_one_repository("this repository's reading")),
     View("tab-docs", "Documentation", "Explore",
          "Every documentation section parsed out of the repository.",
          "dossier query",

@@ -917,8 +917,10 @@ FACETS: tuple[Facet, ...] = (
           "tab-issues", "issues-table", issues_org, issues_project),
     Facet("branches", "Branches in flight", "Branches",
           "tab-branches", "branches-table", branches_org, branches_project),
+    # On the Dossier tab, part of a repository's one-shot reading, not a tab of
+    # its own: the language mix is one of the facts that overview describes.
     Facet("languages", "Language mix", "Languages",
-          "tab-languages", "languages-table", languages_org, languages_project),
+          "tab-dossier", "languages-table", languages_org, languages_project),
     Facet("dependencies", "Shared dependencies", "Dependencies",
           "tab-dependencies", "dependencies-table",
           dependencies_org, dependencies_project),

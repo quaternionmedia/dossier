@@ -136,7 +136,7 @@ async def test_a_selected_repository_narrows_the_sync_to_it(session, monkeypatch
         await pilot.pause()
         recorder = Recorder()
         monkeypatch.setattr(app, "run_sync_batch", recorder)
-        app.query_one("#project-tabs").active = "tab-languages"
+        app.query_one("#project-tabs").active = "tab-dossier"
         app._current_project = chosen
         await pilot.pause()
 

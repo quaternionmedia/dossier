@@ -354,10 +354,6 @@ class DossierApp(App):
         padding: 1;
     }
 
-    #tab-details {
-        padding: 0;
-    }
-    
     #dossier-layout {
         height: 1fr;
     }
@@ -575,27 +571,32 @@ class DossierApp(App):
                 yield DataTable(id="disk-volumes-table")
                 yield Static("", id="disk-delta-age")
                 yield DataTable(id="disk-targets-table")
-        elif tab == "tab-details":
-            yield ProjectDetailPanel(id="project-detail")
         elif tab == "tab-dossier":
-            with Horizontal(id="dossier-layout"):
-                yield VerticalScroll(Markdown("", id="dossier-view"), id="dossier-scroll")
-                yield DraggableSplitter("dossier-scroll", "dossier-components", id="dossier-splitter")
-                # The components pane, moved here whole: the tree keeps the
-                # hierarchy, the table is the flat editable reading, and the
-                # buttons are the only route to create or remove a link, which
-                # is why the row stays even after the ring ran out of cells.
-                with Vertical(id="dossier-components"):
-                    yield Tree("Components", id="component-tree")
-                    yield IntersectionsPanel(self.session_factory,
-                                             id="intersections")
-                    yield DataTable(id="components-table")
-                    with Horizontal(id="component-buttons"):
-                        yield Button("Add Component", id="btn-add-component", variant="primary")
-                        yield Button("Link as Parent", id="btn-link-parent", variant="default")
-                        yield Button("Remove", id="btn-remove-component", variant="error")
-        elif tab == "tab-languages":
-            yield DataTable(id="languages-table")
+            # One repository in one reading: its own facts (the detail panel),
+            # the document and the parts it is composed of, and the languages it
+            # is written in -- the consistent overview Dossier folded Details and
+            # Languages into.
+            with Vertical():
+                yield ProjectDetailPanel(id="project-detail")
+                with Horizontal(id="dossier-layout"):
+                    with VerticalScroll(id="dossier-scroll"):
+                        yield Markdown("", id="dossier-view")
+                        yield Static("Languages -- by share of bytes",
+                                     id="languages-heading")
+                        yield DataTable(id="languages-table")
+                    yield DraggableSplitter("dossier-scroll", "dossier-components", id="dossier-splitter")
+                    # The components pane: the tree keeps the hierarchy, the
+                    # table is the flat editable reading, and the buttons are the
+                    # only route to create or remove a link.
+                    with Vertical(id="dossier-components"):
+                        yield Tree("Components", id="component-tree")
+                        yield IntersectionsPanel(self.session_factory,
+                                                 id="intersections")
+                        yield DataTable(id="components-table")
+                        with Horizontal(id="component-buttons"):
+                            yield Button("Add Component", id="btn-add-component", variant="primary")
+                            yield Button("Link as Parent", id="btn-link-parent", variant="default")
+                            yield Button("Remove", id="btn-remove-component", variant="error")
         elif tab == "tab-docs":
             yield Tree("📄 Documentation", id="docs-tree")
         elif tab == "tab-branches":
@@ -2061,7 +2062,7 @@ class DossierApp(App):
                 if not project_langs:
                     return
                 langs_folder = parent_node.add(f"💻 Languages ({len(project_langs)})", expand=False)
-                langs_folder.data = {"type": "section", "section": "tab-languages"}
+                langs_folder.data = {"type": "section", "section": "tab-dossier"}
                 for lang in project_langs[:10]:  # Limit to 10
                     bar_width = int(lang.percentage / 10) if lang.percentage else 0
                     bar = "█" * bar_width
@@ -2074,7 +2075,7 @@ class DossierApp(App):
                     }
                 if len(project_langs) > 10:
                     more = langs_folder.add_leaf(f"... {len(project_langs) - 10} more")
-                    more.data = {"type": "section", "section": "tab-languages"}
+                    more.data = {"type": "section", "section": "tab-dossier"}
             
             def add_deps_to_node(parent_node, project):
                 """Add dependencies as children of a project node."""
@@ -3007,18 +3008,13 @@ class DossierApp(App):
             main_tabs.active = tab_id
 
     def _get_active_tab_id(self) -> Optional[str]:
-        """Return the active tab id across main and project tabs."""
+        """Return the active tab id. One `TabbedContent`, so this is its active
+        pane -- the two-step lookup that stood here was the last of the
+        abandoned nested-tab design, and it queried the same widget twice."""
         try:
-            main_tabs = self.query_one("#project-tabs", TabbedContent)
+            return self.query_one("#project-tabs", TabbedContent).active
         except Exception:
             return None
-        if main_tabs.active == "tab-details":
-            try:
-                project_tabs = self.query_one("#project-tabs", TabbedContent)
-                return project_tabs.active
-            except Exception:
-                return "tab-details"
-        return main_tabs.active
 
     def show_project_details(self, project: Project) -> None:
         """Show details for the selected project.
@@ -3050,9 +3046,11 @@ class DossierApp(App):
         with self.session_factory() as session:
             detail_panel.governance = gov.governance_for_project(session, project)
         
-        # Load dossier view (always needed as default tab)
-        self.load_dossier_view(project)
-        
+        # Load the Dossier tab -- the repository's one-shot reading: the
+        # document, and the languages it folded in. The detail panel above was
+        # just filled; the markdown and language table are the rest of it.
+        self._load_dossier_tab(project)
+
         # Mark tabs as needing refresh
         self._tabs_loaded = {"tab-dossier"}
         
@@ -3066,10 +3064,7 @@ class DossierApp(App):
         """Lazy load tab data when a main tab is activated."""
         if not hasattr(self, "_current_project_id"):
             return
-        if event.pane.id == "tab-details":
-            project_tabs = self.query_one("#project-tabs", TabbedContent)
-            self._load_tab_data(project_tabs.active)
-        elif event.pane.id == "tab-deltas":
+        if event.pane.id == "tab-deltas":
             self._load_tab_data("tab-deltas")
     
     @on(TabbedContent.TabActivated, "#project-tabs")
@@ -3159,7 +3154,7 @@ class DossierApp(App):
         # Map tab IDs to loader methods
         loaders = {
             "tab-docs": self._load_docs_tab,
-            "tab-languages": self._load_languages_tab,
+            "tab-dossier": self._load_dossier_tab,
             "tab-branches": self._load_branches_tab,
             "tab-dependencies": self._load_dependencies_tab,
             "tab-contributors": self._load_contributors_tab,
@@ -3332,14 +3327,22 @@ class DossierApp(App):
                             "doc_index": doc_index,
                         }
     
+    def _load_dossier_tab(self, project: Project) -> None:
+        """The Dossier tab is a repository's one-shot reading: its document
+        (the markdown) and the languages it is written in. The detail panel at
+        the top is filled separately, on selection."""
+        self.load_dossier_view(project)
+        self._load_languages_tab(project)
+
     def _load_languages_tab(self, project: Project) -> None:
-        """Render the `languages` facet for one repository.
+        """Render the `languages` facet for one repository, part of the Dossier
+        tab's reading.
 
         The query lives in `dossier.facets`, which the overview reads
         too. Two queries over one table drift into two vocabularies for
         the same column, and nothing fails when they do.
         """
-        self._render_facet_for_project(only_on("tab-languages"), project)
+        self._render_facet_for_project(FACET_BY_KEY["languages"], project)
 
     def _load_branches_tab(self, project: Project) -> None:
         """Render the `branches` facet for one repository.
@@ -5053,7 +5056,7 @@ class DossierApp(App):
                     }
                 if has_more:
                     more_leaf = lang_node.add_leaf(f"... see Languages tab for all")
-                    more_leaf.data = {"type": "section", "section": "tab-languages"}
+                    more_leaf.data = {"type": "section", "section": "tab-dossier"}
             
             # === DEPENDENCIES - Linkable entities ===
             if dependencies:
@@ -5297,7 +5300,7 @@ class DossierApp(App):
             # Switch to the corresponding tab for section headers
             section = nav_data.get("section")
             tab_map = {
-                "languages": "tab-languages",
+                "languages": "tab-dossier",
                 "dependencies": "tab-dependencies", 
                 "contributors": "tab-contributors",
                 "docs": "tab-docs",
@@ -5306,7 +5309,11 @@ class DossierApp(App):
                 "issues": "tab-issues",
                 "prs": "tab-deltas",
             }
+            # A section value is either a short name in the map or a tab id
+            # itself (some trees carry the id directly). Either resolves here.
             tab_id = tab_map.get(section)
+            if tab_id is None and section and section.startswith("tab-"):
+                tab_id = section
             if tab_id:
                 self._activate_tab(tab_id)
         
@@ -6722,7 +6729,7 @@ class DossierApp(App):
 
         Args:
             name: The project name to select
-            target_tab: Optional tab to switch to after selection (e.g., 'tab-languages')
+            target_tab: Optional tab to switch to after selection (e.g., 'tab-dossier')
         """
         # Skip if already on this project
         if self.selected_project and self.selected_project.name == name:

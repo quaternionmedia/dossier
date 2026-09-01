@@ -114,7 +114,7 @@ def _tour(*pairs: tuple[str, str]) -> tuple[Step, ...]:
 #                              port -- which is very often not running. An
 #                              empty panel there is the honest state of this
 #                              machine rather than a defect;
-#   tab-details, tab-docs      fill from a project selection, which a tour
+#   tab-dossier, tab-docs      fill from a project selection, which a tour
 #                              that sets `tabs.active` never makes;
 #   tab-waiting                fills from the overview's reading and stays
 #                              empty when the tab is switched to directly.

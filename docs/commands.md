@@ -33,28 +33,22 @@ depth -- so it is never an item and no number contains it. Arrows and
       What one dependency change would touch and where it needs a person, and what a cleanup of this workstation would get back -- the two sweeps, one that spans the estate and one that spans the disk.
       `dossier sweep`
   - **`8.2`  Explore**
-    - `8.2.8`  Details -- `m` `8` `2` `8`
-      One repository's own facts: description, owner, when it last synced.
-      `dossier projects show`
-    - `8.2.6`  Dossier -- `m` `8` `2` `6`
-      The repository as a document, and the projects it is composed of.
+    - `8.2.8`  Dossier -- `m` `8` `2` `8`
+      One repository in one reading: its own facts, the document and parts it is composed of, and the languages it is written in -- the consistent overview of a repository dossier holds.
       `dossier export show`
-    - `8.2.2`  Languages -- `m` `8` `2` `2`
-      What the repository is written in, by share of its bytes.
-      `dossier show languages`
-    - `8.2.4`  Documentation -- `m` `8` `2` `4`
+    - `8.2.6`  Documentation -- `m` `8` `2` `6`
       Every documentation section parsed out of the repository.
       `dossier query`
-    - `8.2.9`  Branches -- `m` `8` `2` `9`
+    - `8.2.2`  Branches -- `m` `8` `2` `2`
       Branches from the sync, and what only the clones on this machine hold.
       `dossier show branches`
-    - `8.2.3`  Dependencies -- `m` `8` `2` `3`
+    - `8.2.4`  Dependencies -- `m` `8` `2` `4`
       What every repository declares, and what they share.
       `dossier show dependencies`
-    - `8.2.1`  Contributors -- `m` `8` `2` `1`
+    - `8.2.9`  Contributors -- `m` `8` `2` `9`
       Who has committed where, by how many repositories they reach.
       `dossier show contributors`
-    - `8.2.7`  Releases -- `m` `8` `2` `7`
+    - `8.2.3`  Releases -- `m` `8` `2` `3`
       Tags that were cut, newest first. The one human gate a project has.
       `dossier show releases`
   - **`8.4`  Health**
@@ -102,7 +96,7 @@ depth -- so it is never an item and no number contains it. Arrows and
 
 ## Outside the ring
 
-`dossier --help` reaches **82** leaf commands; **21**
+`dossier --help` reaches **82** leaf commands; **19**
 of them are named above beside the view they belong to. The rest are
 not menu items and are not meant to be: the ring is for what somebody
 does repeatedly, and a cell spent on a once-a-quarter migration is a
@@ -171,6 +165,7 @@ cell taken from something else.
   dossier projects list
   dossier projects purge
   dossier projects rename
+  dossier projects show
   dossier serve
   dossier show
   dossier test
