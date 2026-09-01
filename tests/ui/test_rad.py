@@ -1094,3 +1094,43 @@ async def test_the_ring_context_is_seams_on_a_seams_screen():
         # both harness acts dispatch to a wired handler
         assert "harness.run" in app.RAD_HANDLED
         assert "harness.review" in app.RAD_HANDLED
+
+
+@pytest.mark.asyncio
+async def test_the_harness_runner_is_a_rad_ring_not_a_list():
+    """The harness runner follows rad's protocol: choosing a tool is a ring -- a
+    numpad of options, one metered press each, at most eight -- not an unbounded
+    list. Selecting a tool in that ring runs it.
+
+    Mutation: push a bespoke picker instead and this fails, because the screen
+    is not a RingScreen and the metered selection is gone.
+    """
+    from dossier.human import Tool, ToolListing
+
+    app = _mount_app()
+    ran: list[str] = []
+    app._run_harness_tool_worker = lambda name: ran.append(name)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._show_tool_ring(ToolListing(tools=(Tool("planner"), Tool("executor"))))
+        await pilot.pause()
+        await pilot.pause()
+        assert type(app.screen).__name__ == "RingScreen", "the runner is not a rad ring"
+        await pilot.press("enter")   # commit the first wedge
+        await pilot.pause()
+    assert ran == ["planner"], "selecting a tool in the ring did not run it"
+
+
+@pytest.mark.asyncio
+async def test_an_unreachable_harness_says_so_and_opens_no_ring():
+    """No ring for nothing: an unreachable harness or one with no tools is a
+    notification, not an empty ring a person has to escape from."""
+    from dossier.human import ToolListing
+
+    app = _mount_app()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        base = len(app.screen_stack)
+        app._show_tool_ring(ToolListing(reachable=False, problem="nothing answering"))
+        await pilot.pause()
+        assert len(app.screen_stack) == base, "opened a ring for an unreachable harness"

@@ -817,17 +817,40 @@ class DossierApp(App):
     def _fetch_harness_tools(self) -> None:
         from dossier import human
         listing = human.tools()
-        self.call_from_thread(self._show_tool_picker, listing)
+        self.call_from_thread(self._show_tool_ring, listing)
 
-    def _show_tool_picker(self, listing) -> None:
-        from dossier.tui.harness_run import ToolPickerScreen
+    def _show_tool_ring(self, listing) -> None:
+        """Choose the tool through a rad ring, following rad's protocol like
+        every other act here: a numpad of options, one metered press each, and
+        the eight-cell limit that says a resolver offering more than eight
+        should have grouped them. Not a bespoke list -- a list is unmetered and
+        unbounded, which is the shape rad exists to replace.
+        """
+        if not listing.reachable:
+            self.notify(f"harness: {listing.problem}", severity="warning", timeout=6)
+            return
+        if not listing.tools:
+            self.notify("harness: no tools to run", severity="warning", timeout=4)
+            return
 
-        def picked(name):
-            if name:
-                self.notify(f"harness: starting {name}…", timeout=3)
-                self._run_harness_tool_worker(name)
+        from dossier.rad.ring import RingScreen
+        from dossier.rad.session import RadSession, Wedge
 
-        self.push_screen(ToolPickerScreen(listing), picked)
+        shown = listing.tools[:8]  # rad's numpad holds eight around a centre
+        wedges = tuple(Wedge(id=f"harness-tool.{tool.name}", label=tool.name,
+                             action=tool.name) for tool in shown)
+        session = RadSession(resolve=lambda ctx: wedges)
+
+        def chosen(intent):
+            # The wedge's action is the tool name; a metered press selected it.
+            if intent is not None:
+                self.notify(f"harness: starting {intent.action}…", timeout=3)
+                self._run_harness_tool_worker(intent.action)
+
+        if len(listing.tools) > 8:
+            self.notify(f"{len(listing.tools)} tools; the ring shows eight. "
+                        "Fewer, grouped, is the rad answer to more.", timeout=5)
+        self.push_screen(RingScreen(session), chosen)
 
     @work(thread=True, exclusive=True, group="harness-run")
     def _run_harness_tool_worker(self, name: str) -> None:
