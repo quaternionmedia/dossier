@@ -207,9 +207,16 @@ REGISTRY: tuple[Action, ...] = (
                 "no button of its own; the ring is where it is asked for"),
 
     # --- Show: what to include -------------------------------------------
-    Action("filter.all", "All", key="f", button="btn-filter-all"),
-    Action("filter.synced", "Synced only", button="btn-filter-synced",),
-    Action("filter.drifting", "Drifting", button="btn-filter-unsynced",),
+    # The status filter is folded into the tree now: a node that cycles All ->
+    # Synced -> Unsynced when selected. `f` cycles it too; the individual states
+    # have no button of their own any more and are reached from the ring here.
+    Action("filter.all", "All", key="f"),
+    Action("filter.synced", "Synced only",
+           only="the status filter is a tree node that cycles the states now; "
+                "the ring, `f` and the `filter` command reach it"),
+    Action("filter.drifting", "Drifting",
+           only="the status filter is a tree node that cycles the states now; "
+                "the ring and the `filter` command reach it"),
 
     # --- Reach: across the seam ------------------------------------------
     Action("reach.qmcp", "Open in qmcp", only="not applied yet; the ring says so rather than hiding it"),

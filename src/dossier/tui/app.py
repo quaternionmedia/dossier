@@ -255,16 +255,6 @@ class DossierApp(App):
         width: 1fr;
     }
 
-    #filter-bar {
-        height: auto;
-        width: 100%;
-        margin: 0;
-    }
-
-    #filter-bar Button {
-        margin: 0 1 0 0;
-        min-width: 6;
-    }
     
     SyncStatusWidget {
         dock: bottom;
@@ -670,11 +660,6 @@ class DossierApp(App):
                             id="select-sort",
                             allow_blank=False,
                         )
-                    with Horizontal(id="filter-bar"):
-                        yield Button("All", id="btn-filter-all", variant="primary")
-                        yield Button("Synced", id="btn-filter-synced", variant="default")
-                        yield Button("Unsynced", id="btn-filter-unsynced", variant="default")
-                        yield Button("Star", id="btn-filter-starred", variant="default")
 
             with Vertical(id="main-content"):
                 # Two layers, mirroring the ring: an outer strip of the job
@@ -1717,6 +1702,16 @@ class DossierApp(App):
         project_tree = self.query_one("#project-tree", Tree)
         project_tree.clear()
         project_tree.root.expand()
+
+        # The status filter, folded in from the old button row: a node that
+        # shows its state and cycles All -> Synced -> Unsynced when selected.
+        _status = {None: "All", True: "Synced", False: "Unsynced"}[self.filter_synced]
+        if self.filter_starred is True:
+            _status += " · Starred"
+        elif self.filter_starred is False:
+            _status += " · Unstarred"
+        project_tree.root.add_leaf(f"🔎 Filter: {_status}",
+                                   data={"type": "filter-cycle"})
 
         # The tree mirrors the ring: a node per job group, in the ring's order.
         # Every group but Explore holds its views as leaves that open the tab;
@@ -2923,6 +2918,11 @@ class DossierApp(App):
             # A group node is a heading you expand; selecting Explore does
             # nothing on its own, and the others opened their leaves already.
             node.toggle()
+
+        elif nav_type == "filter-cycle":
+            # The status filter, folded into the tree: cycle it and the rebuild
+            # relabels this node. `f` and the `filter` command reach it too.
+            self.action_cycle_filter()
 
         elif nav_type == "project":
             project = nav_data.get("project")
@@ -6947,42 +6947,12 @@ class DossierApp(App):
     def _show_drifting_projects(self) -> None:
         self._apply_project_filter(False)
 
-    @on(Button.Pressed, "#btn-filter-all")
-    def on_filter_all_pressed(self) -> None:
-        """Show all projects (clear sync filter)."""
-        self._show_all_projects()
-
-    @on(Button.Pressed, "#btn-filter-synced")
-    def on_filter_synced_pressed(self) -> None:
-        """Show only synced projects."""
-        self._show_synced_projects()
-
-    @on(Button.Pressed, "#btn-filter-unsynced")
-    def on_filter_unsynced_pressed(self) -> None:
-        """Show only drifting projects -- declared and never synced."""
-        self._show_drifting_projects()
-
-    
-    @on(Button.Pressed, "#btn-filter-starred")
-    def on_filter_starred_pressed(self) -> None:
-        """Toggle starred filter: None -> True (starred) -> False (no stars) -> None."""
-        if self.filter_starred is None:
-            self.filter_starred = True
-        elif self.filter_starred is True:
-            self.filter_starred = False
-        else:
-            self.filter_starred = None
-        self._update_filter_buttons()
-        search_input = self.query_one("#search-input", Input)
-        self.load_projects(search=search_input.value)
-        
-        status = "starred only" if self.filter_starred is True else "no stars" if self.filter_starred is False else "all"
-        self.notify(f"Filter: {status}")
-    
-    # Sorting is a Select (`#select-sort`), not buttons. Three
-    # `@on(Button.Pressed, "#btn-sort-*")` handlers outlived the buttons they
-    # were written for and are gone: a handler for a widget that does not exist
-    # reads like a feature to anybody grepping for one.
+    # The status filter is folded into the tree now -- a node under its own
+    # heading that cycles All -> Synced -> Unsynced when selected, and `f` and
+    # the `filter`/`starred` commands still reach it. The four
+    # `@on(Button.Pressed, "#btn-filter-*")` handlers are gone with the buttons
+    # they answered, like the sort-button handlers before them: a handler for a
+    # widget that does not exist reads like a feature to anybody grepping.
 
     @on(Select.Changed, "#select-language")
     def on_language_changed(self, event: Select.Changed) -> None:
@@ -7000,28 +6970,10 @@ class DossierApp(App):
         self.load_projects(search=search_input.value)
     
     def _update_filter_buttons(self) -> None:
-        """Update filter button variants to show active state."""
-        btn_all = self.query_one("#btn-filter-all", Button)
-        btn_synced = self.query_one("#btn-filter-synced", Button)
-        btn_unsynced = self.query_one("#btn-filter-unsynced", Button)
-        btn_starred = self.query_one("#btn-filter-starred", Button)
-
-        # Update sync filter buttons
-        btn_all.variant = "primary" if self.filter_synced is None else "default"
-        btn_synced.variant = "primary" if self.filter_synced is True else "default"
-        btn_unsynced.variant = "primary" if self.filter_synced is False else "default"
-
-        # Update starred filter button (cycles through states)
-        if self.filter_starred is None:
-            btn_starred.variant = "default"
-            btn_starred.label = "Star"
-        elif self.filter_starred is True:
-            btn_starred.variant = "primary"
-            btn_starred.label = "Starred"
-        else:
-            btn_starred.variant = "warning"
-            btn_starred.label = "Unstarred"
-
+        """No-op: the status filter is shown in the tree now (a node
+        rebuilt by `load_projects`), so there are no buttons to restyle.
+        Kept because several filter paths still call it."""
+        return
     def _update_filter_ui(self) -> None:
         """Update all filter UI elements to match current filter state."""
         self._update_filter_buttons()
