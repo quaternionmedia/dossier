@@ -55,3 +55,9 @@ def _no_live_harness(monkeypatch):
     from dossier.tui.app import DossierApp
     monkeypatch.setattr(DossierApp, "_refresh_harness_live",
                         lambda self: None, raising=False)
+    # The Dossier tab is the default, so its harness-topology pane fires on
+    # every selection; stub that worker for the same reason -- a live fetch
+    # against a dev harness slows unrelated captures. The delta-link pane
+    # beside it is dossier's own data and still draws.
+    monkeypatch.setattr(DossierApp, "_run_dossier_topology",
+                        lambda self, subject: None, raising=False)

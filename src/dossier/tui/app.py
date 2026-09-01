@@ -345,9 +345,44 @@ class DossierApp(App):
     }
 
     #dossier-layout {
+        height: 2fr;
+    }
+
+    /* In flight: the deltas census and the two graph windows, sharing the
+       lower third of the tab with the overview above. */
+    #inflight-heading {
+        padding: 1 1 0 1;
+        text-style: bold;
+    }
+
+    #dossier-deltas-table {
+        height: 8;
+    }
+
+    #dossier-graphs {
         height: 1fr;
     }
-    
+
+    #dossier-delta-graph-pane, #dossier-topology-pane {
+        width: 1fr;
+        height: 1fr;
+    }
+
+    #dossier-delta-graph-heading, #dossier-topology-heading {
+        padding: 0 1;
+        text-style: bold;
+        color: $text-muted;
+    }
+
+    #dossier-delta-graph, #dossier-topology-drawing {
+        padding: 0 1;
+    }
+
+    #dossier-delta-graph-note, #dossier-topology-note {
+        padding: 0 1;
+        color: $text-muted;
+    }
+
     #dossier-scroll {
         width: 2fr;
         height: 1fr;
@@ -610,6 +645,29 @@ class DossierApp(App):
                             yield Button("Add Component", id="btn-add-component", variant="primary")
                             yield Button("Link as Parent", id="btn-link-parent", variant="default")
                             yield Button("Remove", id="btn-remove-component", variant="error")
+                # In flight: this repository's deltas as a census, then the two
+                # windows on how they connect -- dossier's own delta-link graph,
+                # which is always here, and the harness topology, when qmcp is
+                # up. Both drawn as the same boxes and arrows so a reader moves
+                # between them without re-learning the notation.
+                yield Static("This repository's deltas -- every phase -- and "
+                             "the graph they form", id="inflight-heading")
+                yield DataTable(id="dossier-deltas-table")
+                with Horizontal(id="dossier-graphs"):
+                    with Vertical(id="dossier-delta-graph-pane"):
+                        yield Static("Deltas & links -- recorded here, no "
+                                     "harness needed",
+                                     id="dossier-delta-graph-heading")
+                        with VerticalScroll():
+                            yield Static("", id="dossier-delta-graph")
+                        yield Static("", id="dossier-delta-graph-note")
+                    with Vertical(id="dossier-topology-pane"):
+                        yield Static("Harness topology -- the same repository, "
+                                     "when qmcp is up",
+                                     id="dossier-topology-heading")
+                        with VerticalScroll():
+                            yield Static("", id="dossier-topology-drawing")
+                        yield Static("", id="dossier-topology-note")
         elif tab == "tab-docs":
             yield Tree("📄 Documentation", id="docs-tree")
         elif tab == "tab-branches":
@@ -3581,10 +3639,111 @@ class DossierApp(App):
     
     def _load_dossier_tab(self, project: Project) -> None:
         """The Dossier tab is a repository's one-shot reading: its document
-        (the markdown) and the languages it is written in. The detail panel at
-        the top is filled separately, on selection."""
+        (the markdown), the languages it is written in, and the work in flight
+        -- its deltas and the graph they form. The detail panel at the top is
+        filled separately, on selection."""
         self.load_dossier_view(project)
         self._load_languages_tab(project)
+        self._load_dossier_inflight(project)
+
+    def _load_dossier_inflight(self, project: Project) -> None:
+        """The lower region: the deltas census, then the two windows on how
+        they connect. The delta-link graph is dossier's own data and is drawn
+        here and now; the harness topology crosses the seam, so it goes to a
+        worker and the pane fills when qmcp answers.
+        """
+        self._render_facet_for_project(FACET_BY_KEY["deltas"], project,
+                                       table_id="dossier-deltas-table")
+        self._draw_delta_graph(project)
+        self._run_dossier_topology(project.full_name or project.name)
+
+    def _draw_delta_graph(self, project: Project) -> None:
+        """dossier's own reading of how this repository's deltas connect.
+
+        No seam and no worker: every fact is a row this database holds, so a
+        harness being down leaves this pane full while the one beside it says
+        why it is empty. That difference is the reason both panes exist.
+        """
+        from dossier import delta_graph, topology
+
+        drawing = self.query_one("#dossier-delta-graph", Static)
+        note = self.query_one("#dossier-delta-graph-note", Static)
+        if not getattr(self, "_delta_tables_exist", True):
+            drawing.update("No deltas recorded here yet.")
+            note.update("")
+            return
+        try:
+            with self.session_factory() as session:
+                deltas = session.exec(
+                    select(ProjectDelta)
+                    .where(ProjectDelta.project_id == project.id)
+                    .order_by(ProjectDelta.updated_at.desc())
+                ).all()
+                ids = [d.id for d in deltas if d.id is not None]
+                links = []
+                if ids:
+                    for link in session.exec(
+                        select(DeltaLink).where(DeltaLink.delta_id.in_(ids))
+                    ).all():
+                        links.append((link.delta_id, link))
+                for delta in deltas:
+                    session.expunge(delta)
+                graph = delta_graph.build(deltas, links,
+                                          name=project.name)
+        except Exception as exc:                   # noqa: BLE001
+            drawing.update(f"The deltas could not be read: {exc}")
+            note.update("")
+            return
+
+        if not deltas:
+            drawing.update("No deltas recorded for this repository yet.")
+            note.update("")
+            return
+        drawing.update(topology.draw(graph.payload, width=48).text())
+        if graph.standalone:
+            # Named rather than dropped: `draw` is one line per edge, so an
+            # unlinked delta is not in the drawing. It is in the table above.
+            note.update(f"{len(graph.standalone)} delta(s) with no recorded "
+                        "link appear only in the table above.")
+        else:
+            note.update("")
+
+    @work(thread=True, exclusive=True, group="dossier-topology")
+    def _run_dossier_topology(self, subject: str) -> None:
+        """The harness's own reading of this repository, drawn beside dossier's.
+
+        The Topology tab draws the organisation's shape; this is the same
+        drawing narrowed to one repository, so the two panes on the Dossier tab
+        are one repository's connections from the two sides that can see them. A
+        harness that is not running is the ordinary case, and the pane says so
+        rather than drawing an empty shape that would read as "nothing here".
+        """
+        from dossier import threads, topology as drawing
+
+        answer = threads.topology(subject=subject)
+        if not answer.reachable:
+            self.call_from_thread(self._dossier_topology_failed,
+                                  answer.problem, answer.remedy, answer.where)
+            return
+        drawn = drawing.draw_flow(answer.payload, width=48)
+        self.call_from_thread(self._dossier_topology_drawn, drawn)
+
+    def _dossier_topology_drawn(self, drawn) -> None:
+        try:
+            self.query_one("#dossier-topology-drawing", Static).update(
+                drawn.text())
+            self.query_one("#dossier-topology-note", Static).update("")
+        except Exception:                          # noqa: BLE001
+            pass
+
+    def _dossier_topology_failed(self, problem: str, remedy: str,
+                                 where: str) -> None:
+        try:
+            self.query_one("#dossier-topology-drawing", Static).update(problem)
+            note = f"{remedy}  (tried {where})" if remedy else f"tried {where}"
+            self.query_one("#dossier-topology-note", Static).update(note)
+        except Exception:                          # noqa: BLE001
+            pass
 
     def _load_languages_tab(self, project: Project) -> None:
         """Render the `languages` facet for one repository, part of the Dossier
@@ -7377,11 +7536,16 @@ class DossierApp(App):
     # failure this corpus keeps naming.
     TAB_ROWS = 500
 
-    def _render_facet_for_project(self, facet, project, limit=None) -> None:
+    def _render_facet_for_project(self, facet, project, limit=None,
+                                  table_id=None) -> None:
+        # `table_id` overrides the facet's own table for the one case where a
+        # facet is shown twice: the deltas facet has its home on the On-deck
+        # tab and a second reading on the Dossier tab, and two tables cannot
+        # share an id.
         with self.session_factory() as session:
             section = facet.at(session, project=project,
                                limit=self.TAB_ROWS if limit is None else limit)
-        self._render_section(facet.table, section)
+        self._render_section(table_id or facet.table, section)
 
     def show_org_overview(self, owner: str) -> None:
         """Select the organisation itself, and show it.
