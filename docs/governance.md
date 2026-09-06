@@ -146,7 +146,7 @@ The join is visible in both directions:
 |---|---|---|
 | project → org | **Details** tab, per project | that project's phase, drift, evidence, slot and propagation, or that the corpus does not govern it |
 | org → project | **IN DOSSIER** column, `governance show` and the Governance tab | whether this store has synced that repository at all |
-| thread → PR | PR column in the threads table | dimmed when the store has not synced that pull request |
+| governance thread → PR | PR column in the governance-thread table | dimmed when the store has not synced that pull request |
 
 Matching is ranked, strongest first, and a weak match says so:
 
@@ -241,7 +241,7 @@ opposite things, so one is never rendered as the other.
 | `skip refresh - ... nothing here to run` | That checkout has no `ci/`, so there are no generators to run. Expected for a project's vendored copy; the load still happens. |
 | `no such column: governance_repository.…` | A database built by an older version of this feature. `dossier db stamp head` does not add columns — delete the local `dossier.db` and re-sync, or add the column by hand. |
 | `Nothing stored. Run: dossier governance load` | `show` before `load`. |
-| `harness-status.json has never been read` | Only one of the two documents loaded. This is distinct from "no threads in flight", and the message says which. |
+| `harness-status.json has never been read` | Only one of the two documents loaded. This is distinct from "no governance threads in flight", and the message says which. |
 | `UnicodeEncodeError` | Prep step 3. |
 | A figure disagrees with the corpus | Compare against `ci/harness_dashboard.py --format md` in the corpus. The documents are the shared input, so a genuine disagreement is a bug in one reader — report which figure and which document `generated_at`. |
 

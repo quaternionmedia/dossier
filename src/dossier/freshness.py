@@ -56,7 +56,7 @@ STALE_AFTER_HOURS = STALE_AFTER_DAYS * 24
 # A refresh plan for one of these is not empty -- it is inapplicable, and those
 # read the same way on screen unless one of them says so.
 NOT_FROM_SYNC: dict[str, str] = {
-    "tab-deltas": "deltas arrive by ingest, not by sync -- see Reach > Ingest deltas",
+    "tab-deltas": "deltas arrive by ingest, not by sync -- see Reach > Ingest conversations",
     "tab-harness": "the harness reports about itself; dossier does not fetch it",
     "tab-threads": "the thread archive is the harness's, reached over HTTP",
     "tab-waiting": "questions are raised by a harness run, not fetched",

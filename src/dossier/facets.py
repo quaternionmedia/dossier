@@ -789,10 +789,12 @@ def threads_org(session: Any, ids, limit: int) -> Section:
     if not archive.reachable or not archive.indexed:
         # An empty table would say the archive is empty. Nobody answered, or
         # nobody has indexed -- different facts, and neither is zero threads.
-        return Section("Thread archive", THREADS_COLUMNS, (), note=archive.note)
+        return Section("Conversation archive", THREADS_COLUMNS, (),
+                       note=archive.note)
 
     return Section(
-        "Thread archive", THREADS_COLUMNS, _threads_rows(archive)[:limit],
+        "Conversation archive", THREADS_COLUMNS,
+        _threads_rows(archive)[:limit],
         note=(archive.note + " Every thread enters at `brainstorm` and stays "
               "there: nothing automatic can establish that a conversation was "
               "read and acted on, so advancing one is a person's act. The "
@@ -897,6 +899,42 @@ def hygiene_project(session: Any, project: Any, limit: int) -> Section:
                    note=_hygiene_note(surveys))
 
 
+# --- setup -------------------------------------------------------------------
+
+
+def setup_org(session: Any, ids, limit: int) -> Section:
+    """Whether this installation is set up, and what to press where it is not.
+
+    **UNSCOPED, AND NOT BECAUSE NOBODY GOT ROUND TO IT.** Every other facet
+    answers a question about repositories; this one answers a question about
+    the installation reading them, and scoping it to a selection would be
+    scoping "is this working" to one row.
+
+    `ids` and `limit` are accepted and ignored for the same reason: the
+    checklist is six steps and truncating it would hide the one somebody
+    needs.
+    """
+    del ids, limit
+    from dossier import onboarding
+
+    found = onboarding.run(session)
+    return Section(
+        "Setup", onboarding.COLUMNS, onboarding.rows(found),
+        note=(f"{found.summary()}. Every step that is not done names the keys "
+              f"that do it, and those keys are read from the menu rather than "
+              f"written here -- so a route that moves cannot leave this page "
+              f"telling somebody to press the wrong thing. `--` is a step that "
+              f"is optional and absent, which is an ordinary state and not a "
+              f"fault; `??` is one that could not be established, which is "
+              f"neither a pass nor a failure."),
+    )
+
+
+def setup_project(session: Any, project: Any, limit: int) -> Section:
+    """The checklist is about the installation, not about one repository."""
+    return setup_org(session, None, limit)
+
+
 FACETS: tuple[Facet, ...] = (
     Facet("deltas", "On deck", "Deltas", "tab-deltas", "deltas-table",
           deltas_org, deltas_project),
@@ -918,7 +956,7 @@ FACETS: tuple[Facet, ...] = (
           "tab-harness", "harness-table", harness_org, harness_project),
     Facet("waiting", "Outstanding", "Outstanding",
           "tab-waiting", "waiting-table", waiting_org, waiting_project),
-    Facet("threads", "Thread archive", "Threads",
+    Facet("threads", "Conversation archive", "Conversations",
           "tab-threads", "threads-table", threads_org, threads_project,
           beyond_the_database="asks the harness over HTTP"),
     # Its own tab, not `tab-branches`. `BY_TAB` is keyed by tab, so a second
@@ -930,6 +968,13 @@ FACETS: tuple[Facet, ...] = (
     Facet("hygiene", "Branch hygiene", "Branch hygiene",
           "tab-branches", "hygiene-table", hygiene_org, hygiene_project,
           beyond_the_database="runs git in every clone on this machine"),
+    # **BEYOND THE DATABASE, AND IT MATTERS HERE.** The checklist asks the
+    # harness over HTTP and walks the disk looking for clones, which is
+    # exactly the cost the overview refuses to pay on the startup path. So it
+    # is a pane somebody opens, not a section the overview draws.
+    Facet("setup", "Setup", "Setup",
+          "tab-setup", "setup-table", setup_org, setup_project,
+          beyond_the_database="asks the harness and walks the disk"),
 )
 
 BY_KEY = {facet.key: facet for facet in FACETS}

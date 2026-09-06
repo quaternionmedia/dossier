@@ -170,8 +170,18 @@ async def test_the_keys_it_names_are_the_ones_that_run_the_review(engine):
         await pilot.pause()
 
         said = str(app.query_one("#sweep-summary", Static).render())
-        for key in keystroke("sweep.review").split():
-            assert key in said, (said, keystroke("sweep.review"))
+
+    # **GUARDED, BECAUSE THIS TEST WAS VACUOUS.** `keystroke` returns the
+    # empty string for an action the ring cannot reach, so a `sweep.review`
+    # that left the palette made this loop run zero times and the test pass
+    # while asserting nothing -- the exact failure `test_no_typed_routes.py`
+    # exists to prevent, in the test that guards it. Proved by forcing
+    # `keystroke` to return "" and watching it stay green.
+    keys = keystroke("sweep.review").split()
+    assert keys, "the ring cannot reach sweep.review, so this checks nothing"
+
+    for key in keys:
+        assert key in said, (said, keystroke("sweep.review"))
 
 
 def test_the_interaction_layer_is_handed_its_routes(engine=None):

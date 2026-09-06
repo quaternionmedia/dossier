@@ -203,6 +203,12 @@ REGISTRY: tuple[Action, ...] = (
     Action("delta.note", "Add note",
            only="its button was one of eleven consolidated onto the row on the keypad's middle rank; the ring is where it is asked for now, and the ring takes the pointer"),
     Action("project.sync", "Sync project", key="s"),
+    Action("project.restart", "Archive and start over",
+           only="it copies the database, writes an export per project and "
+                "then drops every table; a button one misclick from emptying "
+                "the dossier is exactly the affordance this act must not "
+                "have, and it states what it would remove before it removes "
+                "it"),
     Action("sweep.review", "Sweep a dependency", only="a sweep is proposed from the Dependencies selection and has "
                 "no button of its own; the ring is where it is asked for"),
 
@@ -221,7 +227,17 @@ REGISTRY: tuple[Action, ...] = (
                 "them over the network, so it is asked for deliberately; a "
                 "button sitting on a panel is one misclick from eighty-two "
                 "of them"),
-    Action("reach.ingest", "Ingest deltas", button="btn-ingest-threads",),
+    Action("reach.download", "Download an owner",
+           only="a download is tens of repositories and hundreds of API "
+                "calls against a budget that runs out, so it is asked for "
+                "deliberately -- the same reason `reach.clone` has no button, "
+                "and it lists what it would fetch before it fetches it"),
+    # **"Ingest deltas" named the output, not the input**, on the one
+    # route whose two neighbours are both called threads. What it takes
+    # is a conversation export; deltas are what the harness makes of it.
+    # `vocabulary.py` is why the label says the input.
+    Action("reach.ingest", "Ingest conversations",
+           button="btn-ingest-threads",),
     # No key. The direct route is selecting the row -- `DataTable.RowSelected`
     # fires on a click and on Enter alike -- and a tab-local act does not earn a
     # global letter. `r` is Refresh, and taking it would be the fourth-universe

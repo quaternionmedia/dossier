@@ -36,11 +36,23 @@ git clone https://github.com/quaternionmedia/dossier.git && cd dossier && uv syn
 # Set GitHub token (get one at https://github.com/settings/tokens)
 export GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 
-# Sync your repos and launch
-uv run dossier github sync-user YOUR_USERNAME && uv run dossier dashboard
+# Pull down an owner -- user or organisation, worked out for you -- and launch
+uv run dossier github download YOUR_USERNAME && uv run dossier dashboard
 ```
 
 **That's it!** Navigate with arrow keys, `Tab` between panels, `s` to sync, `q` to quit.
+
+**If a pane is empty, ask why rather than guessing.** Six causes look identical
+from the outside -- no database, an unmigrated one, no rows in it, no GitHub
+token, no harness, no clones -- and the checklist tells them apart and names the
+keys that fix each one:
+
+```bash
+uv run dossier selfcheck
+```
+
+It is the **Setup** pane in the dashboard too, and an empty dossier points you
+at it on startup, so you do not have to already know it is there.
 
 ---
 

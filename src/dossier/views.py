@@ -227,9 +227,28 @@ VIEWS: tuple[View, ...] = (
                      "these are the harness's invocations, and it is a "
                      "separate process on a separate port",
                      "uv run qmcp serve"),)),
-    View("tab-threads", "Threads", "Machine",
-         "Every line of work in flight, most idle first.",
-         "dossier governance threads"),
+    # **THIS ENTRY DESCRIBED THE OTHER KIND OF THREAD.** It read "Every line
+    # of work in flight, most idle first" and named `dossier governance
+    # threads` -- both of which belong to `GovernanceThread`, which is on the
+    # Governance pane. This pane shows the harness's archived *conversations*,
+    # sorted disagreements-first. The registry feeds the ring, the settings
+    # list, the command sheet and `docs/commands.md`, so all four published a
+    # description of a pane that does not exist. See `dossier/vocabulary.py`.
+    #
+    # **AND IT NOW NAMES NO COMMAND, WHICH IS THE HONEST VALUE.** There is no
+    # named route to the conversation archive; the derived `dossier show
+    # threads` reaches it, and this field is for named routes only. The old
+    # entry named a command that exists and reads the other entity, which is
+    # worse than naming none.
+    View("tab-threads", "Conversations", "Machine",
+         "Every conversation the harness has archived, disagreements first."),
+    # **FIRST IN THE GROUP WOULD RENUMBER EVERY MACHINE VIEW**, and those
+    # numbers are written down, so it goes last. Somebody who needs it is
+    # told where it is by the panel itself -- an empty dossier says so on
+    # startup -- rather than having to already know.
+    View("tab-setup", "Setup", "Machine",
+         "Whether this installation is set up, and what to press where it is "
+         "not.", "dossier selfcheck"),
 )
 
 BY_TAB = {view.tab: view for view in VIEWS}

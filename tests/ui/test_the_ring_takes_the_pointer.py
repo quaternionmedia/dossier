@@ -21,6 +21,8 @@ person did not press is the one failure a menu must not have.
 from __future__ import annotations
 
 import pytest
+from textual.app import App, ComposeResult
+from textual.widgets import Static
 
 from dossier.rad import numpad
 from dossier.rad.palette import resolve
@@ -183,6 +185,148 @@ class _Click:
         pass
 
 
+class _At:
+    """A click at a place on the screen."""
+
+    button = 1
+
+    def __init__(self, x: int, y: int) -> None:
+        self.screen_x, self.screen_y = x, y
+
+    def stop(self) -> None:
+        pass
+
+
+# --- the click lands where the box is drawn ----------------------------------
+#
+# **EVERY TEST ABOVE MONKEYPATCHES `_cell_under`, WHICH IS WHY THE POINTER WAS
+# BROKEN WITH ALL OF THEM GREEN.** They prove a cell reaches `press_cell`; they
+# say nothing about which cell a person's click resolves to, because the one
+# step that converts a screen position into a cell was replaced by a constant.
+#
+# So these run a real screen and use the geometry the ring actually drew.
+# Measured before the fix: of the four corners of each of the nine boxes,
+# twenty-seven landed on the wrong cell or on nothing, and a click on the
+# middle of a box did nothing at all.
+
+
+class _Host(App):
+    """Something for the ring to float over, so the screen has a real size."""
+
+    def compose(self) -> ComposeResult:
+        yield Static("a dashboard would be here")
+
+
+async def _open_ring(pilot, app):
+    session = RadSession(resolve=resolve)
+    screen = RingScreen(session)
+    app.push_screen(screen)
+    await pilot.pause()
+    return screen, session
+
+
+@pytest.mark.asyncio
+async def test_every_box_resolves_to_its_own_cell_where_it_is_drawn():
+    """THE ONE THIS FILE WAS MISSING.
+
+    Not the top-left corner -- the whole box. The bug that shipped resolved the
+    top-left corner of each box correctly and everything else wrongly, so a
+    test that probed one point per cell would have passed throughout.
+
+    Mutation: translate by `region` instead of `content_region` in
+    `_cell_under` and this fails on twenty-seven of the thirty-six corners.
+    """
+    app = _Host()
+    async with app.run_test(size=(120, 40)) as pilot:
+        screen, _ = await _open_ring(pilot, app)
+        ring = screen._ring
+        width, columns, rows = ring.last_geometry
+        content = ring.content_region
+
+        wrong = []
+        for cell, (column, row) in numpad.POSITION.items():
+            left, top = content.x + columns[column], content.y + rows[row]
+            for x in (left, left + width // 2, left + width - 1):
+                for y in (top, top + 1, top + Ring.CELL_ROWS - 1):
+                    found = screen._cell_under(_At(x, y))
+                    if found != cell:
+                        wrong.append((cell, (x, y), found))
+
+    assert not wrong, (
+        f"{len(wrong)} of 81 points inside a box resolved elsewhere: "
+        f"{wrong[:6]}")
+
+
+@pytest.mark.asyncio
+async def test_the_middle_of_a_box_is_where_a_person_clicks():
+    """**THE FAILURE AS SOMEBODY MET IT.** Not a corner case: the centre of the
+    box, which is where a pointer goes. It resolved to nothing, so the menu
+    opened and could not be used.
+
+    Mutation: translate by `region` and this returns None.
+    """
+    app = _Host()
+    async with app.run_test(size=(120, 40)) as pilot:
+        screen, session = await _open_ring(pilot, app)
+        ring = screen._ring
+        width, columns, rows = ring.last_geometry
+        content = ring.content_region
+        column, row = numpad.POSITION[6]
+
+        await pilot.click(offset=(content.x + columns[column] + width // 2,
+                                  content.y + rows[row] + 1))
+        await pilot.pause()
+
+        assert session.is_open, "the click closed the ring"
+        opened = [wedge.label for wedge in session.view.wedges]
+
+    assert "Sync project" in opened, (
+        f"clicking the middle of `6 Do` did not open Do; it showed {opened}")
+
+
+@pytest.mark.asyncio
+async def test_the_gaps_between_the_boxes_still_belong_to_no_cell():
+    """The fix moves the hit boxes; it must not widen them. A click in the gap
+    acting on the nearest cell is the one failure a menu must not have.
+
+    Mutation: clamp in `cell_at` and this fails.
+    """
+    app = _Host()
+    async with app.run_test(size=(120, 40)) as pilot:
+        screen, _ = await _open_ring(pilot, app)
+        ring = screen._ring
+        width, columns, rows = ring.last_geometry
+        content = ring.content_region
+
+        # One column past the first box, and one row past the first box: both
+        # are inside the ring and inside no cell.
+        assert screen._cell_under(
+            _At(content.x + columns[0] + width, content.y + rows[0] + 1)) is None
+        assert screen._cell_under(
+            _At(content.x + columns[0] + 1,
+                content.y + rows[0] + Ring.CELL_ROWS)) is None
+
+
+@pytest.mark.asyncio
+async def test_the_border_and_padding_are_what_the_translation_has_to_cross():
+    """**THE REASON, ASSERTED RATHER THAN DESCRIBED.** `region` and
+    `content_region` differ here by a border and `padding: 1 3 0 3`. If they
+    ever stop differing, the test above stops proving anything and this says
+    so -- the two origins would be interchangeable and the bug unreachable.
+
+    Mutation: drop the padding from `RingScreen.DEFAULT_CSS` and this fails,
+    which is the signal that the regression tests have gone vacuous.
+    """
+    app = _Host()
+    async with app.run_test(size=(120, 40)) as pilot:
+        screen, _ = await _open_ring(pilot, app)
+        region, content = screen._ring.region, screen._ring.content_region
+
+    assert (content.x, content.y) != (region.x, region.y), (
+        "the ring's content now starts where its region does, so translating "
+        "by either works and these tests no longer catch the difference")
+
+
 # --- and the mouse can open it -----------------------------------------------
 
 
@@ -212,3 +356,54 @@ def test_a_left_click_does_not_open_the_ring():
 
     source = inspect.getsource(DossierApp.on_mouse_down)
     assert "!= 3" in source, "it does not distinguish which button was pressed"
+
+# --- and the whole way to an act, with the mouse alone ------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_pointer_can_reach_an_act_without_touching_the_keyboard():
+    """**THE CLAIM THIS FILE MAKES, END TO END.** Click the row on the keypad's
+    middle rank, then click a wedge, and the act opens. Every other test here
+    checks one link of that chain; this is the chain.
+
+    It was broken in the middle. The row opened the ring correctly and the ring
+    resolved every click to the wrong cell, so the two halves each passed their
+    own tests and the route did not exist.
+
+    Mutation: translate by `region` in `_cell_under` and this fails.
+    """
+    from sqlmodel import Session, SQLModel, create_engine
+    from textual.widgets import Input
+
+    from dossier.tui import DossierApp
+
+    engine = create_engine("sqlite://")
+    SQLModel.metadata.create_all(engine)
+    app = DossierApp(session_factory=lambda: Session(engine))
+
+    async with app.run_test(size=(140, 45)) as pilot:
+        await pilot.pause()
+
+        await pilot.click("#btn-rank-4")
+        await pilot.pause()
+        assert isinstance(app.screen, RingScreen), (
+            "clicking the row did not open the ring")
+
+        ring = app.screen._ring
+        width, columns, rows = ring.last_geometry
+        content = ring.content_region
+        cell = next(c for c, label in
+                    ((c, w.label) for c, w in
+                     ((app.screen._session.view.placement.by_index[i], w)
+                      for i, w in enumerate(app.screen._session.view.wedges)))
+                    if label == "Download an owner")
+        column, row = numpad.POSITION[cell]
+
+        await pilot.click(offset=(content.x + columns[column] + width // 2,
+                                  content.y + rows[row] + 1))
+        await pilot.pause()
+        await pilot.pause()
+
+        field = app.screen.query_one("#download-owner", Input)
+        assert app.screen.focused is field, (
+            "the act opened but the cursor is not where the name goes")

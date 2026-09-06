@@ -244,3 +244,76 @@ def test_the_executable_walkthrough_is_reachable_from_the_docs_front_door():
 
     assert "walkthrough/" in index, (
         "the docs front door does not offer the executable walkthrough")
+
+# --- the same rule, for the source -------------------------------------------
+#
+# **THE PAGES WERE CHECKED AND THE CODE WAS NOT.** `dossier/diagnostics.py`
+# opened with `dossier selfcheck` on its second line, carried eight checks and
+# its own test file, and no such command was ever registered. Five hundred
+# lines that answered a real question and could not be asked it -- the same
+# failure this repository already wrote down about `dossier.topology`: "a
+# renderer nobody could run, which reads exactly like a finished feature".
+#
+# The scan above reads `docs/` and `README.md`. This reads the docstrings,
+# where the promise actually lived.
+
+SRC = ROOT / "src" / "dossier"
+
+# A command in a docstring is written in backticks, or set on its own indented
+# line as a runnable example. Prose is excluded by construction: "dossier keeps
+# its state" is a sentence about the product, not a claim about a command, and
+# reading every `dossier <word>` as one produced forty false findings and two
+# real ones.
+IN_BACKTICKS = re.compile(
+    r"`(?:uv run )?dossier ([a-z][a-z-]*(?:\s+[a-z][a-z-]*)*)[^`]*`")
+ON_ITS_OWN_LINE = re.compile(
+    r"^\s{4,}(?:uv run )?dossier ([a-z][a-z-]*(?:\s+[a-z][a-z-]*)*)\s*$",
+    re.MULTILINE)
+
+
+def docstring_claims() -> list[tuple[Path, str, str]]:
+    """(file, where, claim) for every command a docstring names."""
+    import ast
+
+    found = []
+    for path in sorted(SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                                     ast.AsyncFunctionDef)):
+                continue
+            doc = ast.get_docstring(node)
+            if not doc:
+                continue
+            where = getattr(node, "name", "<module>")
+            for pattern in (IN_BACKTICKS, ON_ITS_OWN_LINE):
+                for match in pattern.finditer(doc):
+                    claim = " ".join(match.group(1).split()[:2])
+                    found.append((path, where, claim))
+    return found
+
+
+def test_the_docstring_scan_finds_something():
+    """A scan that matched nothing would pass the test below it.
+
+    Mutation: break the pattern and this fails.
+    """
+    found = docstring_claims()
+    assert len(found) > 20, found
+
+
+def test_every_command_a_docstring_names_is_one_this_cli_has():
+    """**THE ONE THIS SECTION EXISTS FOR.**
+
+    Mutation, quoted as it printed before `selfcheck` was registered:
+
+        AssertionError: src/dossier/diagnostics.py [<module>] names
+        `dossier selfcheck`, and `selfcheck` is not a command
+    """
+    missing = [
+        f"{path.relative_to(ROOT).as_posix()} [{where}] names "
+        f"`dossier {claim}`, and {resolves(claim)}"
+        for path, where, claim in docstring_claims()
+        if resolves(claim) and claim.split()[0] not in NOT_OURS
+    ]
+    assert not missing, chr(10).join(missing)

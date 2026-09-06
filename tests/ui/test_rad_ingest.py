@@ -43,7 +43,7 @@ def test_four_six_is_the_ingest_command():
     reorder that moved it must be loud rather than silent."""
     found = by_number()["4.6"]
     assert found.action == "reach.ingest"
-    assert found.path == ("Reach", "Ingest deltas")
+    assert found.path == ("Reach", "Ingest conversations")
     assert found.keys == ("m", "4", "6")
 
 

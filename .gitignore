@@ -60,6 +60,12 @@ site/
 
 # Database
 *.db
+
+# `dossier export dossier` and `dossier init` default to writing into the
+# current directory, so running either from a checkout leaves an export in the
+# repository root. `dossier.dossier` sat there untracked for a week. A project
+# that wants to commit its own dossier can force-add it.
+*.dossier
 *.sqlite
 *.sqlite3
 

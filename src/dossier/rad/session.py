@@ -142,6 +142,13 @@ class RingView:
 
         Geometry is rad's to own, so it lives here rather than in the widget --
         a renderer that computed its own angles would be a second geometry.
+
+        **NO TERMINAL RENDERER CALLS THIS, AND THAT IS NOT AN OVERSIGHT.**
+        `ring.py` draws a keypad, not a circle, and takes its placement from
+        `numpad.POSITION`. This stays because this module is the half meant to
+        be extracted and shared, and the web ring *is* polar -- deleting it
+        would make the extraction a rewrite. Said here so nobody goes looking
+        for the caller.
         """
         count = max(len(self.wedges), 1)
         return -math.pi / 2 + (2 * math.pi * index / count)

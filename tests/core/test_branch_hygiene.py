@@ -304,12 +304,20 @@ def test_the_note_says_how_many_clones_it_could_read():
 
 
 def test_a_facet_that_crosses_a_boundary_says_so():
-    """The two that do are declared, so the rule is checkable rather than
-    remembered."""
+    """The three that do are declared, so the rule is checkable rather than
+    remembered.
+
+    **PINNED AS A SET, WHICH IS WHY A THIRD HAD TO BE ADDED HERE
+    DELIBERATELY.** `setup` reads the onboarding checklist, which dials the
+    harness *and* walks the disk looking for clones -- both of the two costs
+    this section exists to keep off the startup path. Declaring it is what
+    keeps it out of the overview, and this is where somebody notices a facet
+    that started crossing without saying so.
+    """
     from dossier import facets
 
     crossing = {f.key for f in facets.FACETS if f.beyond_the_database}
-    assert crossing == {"threads", "hygiene"}, crossing
+    assert crossing == {"threads", "hygiene", "setup"}, crossing
     for facet in facets.FACETS:
         if facet.beyond_the_database:
             assert len(facet.beyond_the_database) > 12, (

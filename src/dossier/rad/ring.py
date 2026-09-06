@@ -1,11 +1,17 @@
 """The ring, drawn in a terminal. One, centered, pop-over.
 
-WHAT THIS OWNS AND WHAT IT DOES NOT. Rendering only. Geometry comes from
-`RingView.angle_of`, the state machine from `RadSession`, and colour from
-`tokens.roles` — a widget that computed its own angles would be a second
+WHAT THIS OWNS AND WHAT IT DOES NOT. Rendering only. Placement comes from
+`numpad.POSITION`, the state machine from `RadSession`, and colour from
+`tokens.roles` — a widget that computed its own layout would be a second
 geometry, and one that named a colour would paint outside the token layer that
 `rad/adr/DRAFT-rad-theme-tokens.md` §1 says nothing paints outside. Content is
 the host's, supplied through `resolve`.
+
+**THE ONE THING THIS FILE DOES OWN IS WHERE THE BOXES LANDED**, in
+`Ring.last_geometry`, because the box width depends on the longest label at
+that level and nothing else knows it. That is what a click is resolved against,
+and it is in the widget's **content** coordinates — see `_cell_under`, which
+got that wrong and broke the pointer entirely.
 
 WHY A MODAL SCREEN. rad's terminal form is one centered pop-over rather than a
 menu per node: a terminal has no pointer to open a ring *under*, and several
@@ -13,18 +19,19 @@ rings at once would need a focus model the platform does not give us. A modal
 screen also makes the key handling honest — the ring holds focus while open, so
 a keystroke is unambiguously an input to the menu.
 
-LAYOUT, AND THE TWO THINGS A TERMINAL FORCES.
+LAYOUT: A KEYPAD, NOT A CIRCLE. This drew a polar ring once — labels at their
+angles, horizontal distance doubled because a cell is twice as tall as it is
+wide, right-hand labels pushed outward so they did not run back through the
+hub. All of it is gone, and `numpad.py`'s docstring says why: eight items
+around a centre laid out the way a keypad already is means a direction and a
+digit name the same cell, and the fastest path to any item is one keystroke
+rather than a walk around a ring.
 
-  * A cell is about twice as tall as it is wide, so a ring drawn on equal steps
-    reads as a vertical slit. Horizontal distance is doubled.
-  * A label centred on its own point runs back through the hub at the 3 and 9
-    o'clock positions — exactly where the label is widest and the ring is
-    narrowest. So labels are pushed *outward* from their angle: right-hand
-    labels start at the point, left-hand labels end at it, and only the top and
-    bottom are centred on it.
-
-The hub carries where you are, with a rule under it, so the middle reads as a
-hub rather than as another label that happens to be central.
+**The nine boxes are on a fixed grid**, three columns by three rows, each box
+`width` wide and `CELL_ROWS` tall with a gap between them that belongs to no
+cell. The hub is the centre box and backs out at every depth, with one rule
+per level under it so how deep you are is read from the one part that never
+moves.
 
 WHAT IT CANNOT DO. Look like the web ring. There are no arcs, no fills and no
 sub-cell positions, so wedge *shape* is not expressible — position, weight and
@@ -35,8 +42,6 @@ the token layer are the contract; the shape is not.
 from __future__ import annotations
 
 import time
-
-import math
 from typing import Any
 
 from textual.app import ComposeResult
@@ -48,10 +53,10 @@ from dossier.rad import numpad
 from dossier.rad.session import RadSession, RingView
 from dossier.rad.tokens import DEFAULT_THEME, Roles, roles
 
-# A cell is roughly twice as tall as it is wide.
-ASPECT = 2.6
-RADIUS_ROWS = 4
-GRID_ROWS = RADIUS_ROWS * 2 + 5
+# The largest a drawn ring may get, asserted by `test_rad.py` for every menu
+# size. Not used to lay anything out -- the grid sizes itself to the longest
+# label -- so these are a bound rather than a parameter.
+GRID_ROWS = 13
 GRID_COLS = 58
 
 # A node is a bordered box, three rows tall, drawn in ASCII because box-drawing
@@ -111,7 +116,6 @@ def _depth_marks(depth: int, width: int) -> list[str]:
 # UnicodeEncodeError is not a prettier ring. U+203A and U+00B7 are in cp1252;
 # U+276F and the arrow glyphs are not.
 SUBMENU = "›"
-SELECT_L, SELECT_R = "[", "]"
 
 
 def _place_in(grid: list[list[str]], row: int, col: int, text: str,
@@ -125,18 +129,8 @@ def _place_in(grid: list[list[str]], row: int, col: int, text: str,
             grid[row][start + offset] = character
 
 
-def _place(grid: list[list[str]], row: int, col: int, text: str) -> None:
-    """Write text into the grid, clipped rather than wrapped or raising."""
-    if not 0 <= row < len(grid):
-        return
-    start = max(0, min(col, GRID_COLS - len(text)))
-    for offset, char in enumerate(text):
-        if 0 <= start + offset < GRID_COLS:
-            grid[row][start + offset] = char
-
-
 class Ring(Static):
-    """The ring: labels at their angles, one selected, colour by role token.
+    """The nine boxes, one selected, each coloured by its role token.
 
     `last_render` keeps the plain text most recently drawn. Textual's accessor
     for a `Static`'s content has changed across versions, and a test reaching
@@ -438,19 +432,36 @@ class RingScreen(ModalScreen):
         self._redraw(view)
 
     def _cell_under(self, event) -> int | None:
-        """The cell a click landed on, in the ring widget's coordinates.
+        """The cell a click landed on, in the ring widget's own coordinates.
 
         The event arrives in screen coordinates and the geometry is the
-        widget's, so the offset between them has to come off. Reading the
-        widget's region rather than assuming it sits at the origin: it is
-        centred, so those differ by half the terminal.
+        widget's, so the offset between them has to come off.
+
+        **`content_region`, NOT `region`, AND THE DIFFERENCE WAS THE WHOLE
+        POINTER.** `region` is where the widget starts; `render_view` writes
+        its grid into the *content* box, which this ring pushes four columns
+        right and two rows down of that -- a border set in `on_mount` and the
+        `padding: 1 3 0 3` above. Subtracting the wrong origin displaced every
+        hit by exactly that much, and because a box is 3 rows in a 4-row step,
+        the displacement was larger than the gaps it had to fall in.
+
+        What that cost, measured: of the four corners of each of the nine
+        boxes, twenty-seven resolved to the wrong cell or to nothing. Only the
+        top-left corner of each box worked, and it worked by accident -- the
+        offset happened to stay inside the same box from there. A click on the
+        middle of a box hit nothing at all; a click low in one committed the
+        cell beneath it. The one failure `cell_at` refuses to have -- acting on
+        a cell the person did not press -- the translation was having for it.
+
+        So the geometry and the origin have to be read from the same box, and
+        `content_region` is that box.
         """
         try:
-            region = self._ring.region
+            content = self._ring.content_region
         except Exception:                          # noqa: BLE001
             return None
-        x = event.screen_x - region.x
-        y = event.screen_y - region.y
+        x = event.screen_x - content.x
+        y = event.screen_y - content.y
         if x < 0 or y < 0:
             return None
         return self._ring.cell_at(x, y)

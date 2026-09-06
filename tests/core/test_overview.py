@@ -184,12 +184,23 @@ def test_ages_are_injectable_so_they_can_be_asserted(session):
 
 
 # Sections an empty database cannot empty. `Deltas by phase` is a fixed board
-# with a row per phase and no rows of its own; `Thread archive` belongs to the
-# harness and is read over HTTP, so it is populated exactly when the harness is
-# running -- which made this test pass or fail depending on whether something
-# was listening on another port. That is the suite measuring its own
+# with a row per phase and no rows of its own; the conversation archive belongs
+# to the harness and is read over HTTP, so it is populated exactly when the
+# harness is running -- which made this test pass or fail depending on whether
+# something was listening on another port. That is the suite measuring its own
 # surroundings rather than the code.
-NOT_THE_DATABASE_S = {"Deltas by phase", "Thread archive"}
+#
+# **THE ARCHIVE'S TITLE IS READ FROM THE FACET, NOT TYPED HERE.** It was typed,
+# and renaming the pane from `Threads` to `Conversations` -- which
+# `dossier/vocabulary.py` exists to explain -- broke this test and nothing
+# else, because this was a fourth place the name lived.
+def _archive_title() -> str:
+    from dossier.facets import BY_TAB
+
+    return BY_TAB["tab-threads"][0].title
+
+
+NOT_THE_DATABASE_S = {"Deltas by phase", _archive_title()}
 
 
 def test_an_empty_dossier_says_so_rather_than_showing_zeroes():

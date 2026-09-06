@@ -49,7 +49,8 @@ same cell.
 | `8.4.6` | `m` `8` `4` `6` | &nbsp;&nbsp;&nbsp;&nbsp;Disk | `view.disk` | yes |
 | `8.4.2` | `m` `8` `4` `2` | &nbsp;&nbsp;&nbsp;&nbsp;Topology | `view.topology` | yes |
 | `8.4.4` | `m` `8` `4` `4` | &nbsp;&nbsp;&nbsp;&nbsp;Harness | `view.harness` | yes |
-| `8.4.9` | `m` `8` `4` `9` | &nbsp;&nbsp;&nbsp;&nbsp;Threads | `view.threads` | yes |
+| `8.4.9` | `m` `8` `4` `9` | &nbsp;&nbsp;&nbsp;&nbsp;Conversations | `view.threads` | yes |
+| `8.4.3` | `m` `8` `4` `3` | &nbsp;&nbsp;&nbsp;&nbsp;Setup | `view.setup` | yes |
 | `6` | `m` `6` | Do | *opens a submenu* | yes |
 | `6.8` | `m` `6` `8` | &nbsp;&nbsp;Advance phase | `delta.advance` | yes |
 | `6.6` | `m` `6` `6` | &nbsp;&nbsp;Add note | `delta.note` | yes |
@@ -57,16 +58,18 @@ same cell.
 | `6.4` | `m` `6` `4` | &nbsp;&nbsp;Sweep a dependency | `sweep.review` | yes |
 | `6.9` | `m` `6` `9` | &nbsp;&nbsp;Add a project | `project.add` | yes |
 | `6.3` | `m` `6` `3` | &nbsp;&nbsp;Remove a project | `project.remove` | yes |
+| `6.1` | `m` `6` `1` | &nbsp;&nbsp;Archive and start over | `project.restart` | yes |
 | `2` | `m` `2` | Show | *opens a submenu* | yes |
 | `2.8` | `m` `2` `8` | &nbsp;&nbsp;All | `filter.all` | yes |
 | `2.6` | `m` `2` `6` | &nbsp;&nbsp;Synced only | `filter.synced` | yes |
 | `2.2` | `m` `2` `2` | &nbsp;&nbsp;Drifting | `filter.drifting` | yes |
 | `4` | `m` `4` | Reach | *opens a submenu* | yes |
 | `4.8` | `m` `4` `8` | &nbsp;&nbsp;Open in qmcp | `reach.qmcp` | **not yet** |
-| `4.6` | `m` `4` `6` | &nbsp;&nbsp;Ingest deltas | `reach.ingest` | yes |
+| `4.6` | `m` `4` `6` | &nbsp;&nbsp;Ingest conversations | `reach.ingest` | yes |
 | `4.2` | `m` `4` `2` | &nbsp;&nbsp;Reconcile | `reach.reconcile` | yes |
 | `4.4` | `m` `4` `4` | &nbsp;&nbsp;Read conversation | `reach.read` | yes |
 | `4.9` | `m` `4` `9` | &nbsp;&nbsp;Clone what is absent | `reach.clone` | yes |
+| `4.3` | `m` `4` `3` | &nbsp;&nbsp;Download an owner | `reach.download` | yes |
 
 ## `6.2` -- making the view current
 
@@ -92,7 +95,7 @@ the common case stays three keys.
 **Some views a sync cannot help**, and it says which rather than
 reporting nothing to do:
 
-- `tab-deltas` -- deltas arrive by ingest, not by sync -- see Reach > Ingest deltas
+- `tab-deltas` -- deltas arrive by ingest, not by sync -- see Reach > Ingest conversations
 - `tab-disk` -- read from disk at the moment you look
 - `tab-docs` -- documents are read from disk
 - `tab-harness` -- the harness reports about itself; dossier does not fetch it

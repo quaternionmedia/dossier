@@ -1950,333 +1950,185 @@ def _sync_repos_batch(
     delay_between_batches: float = 2.0,
     force: bool = False,
 ) -> tuple[int, int, int, bool]:
-    """Sync repositories in intelligent batches with rate limit handling.
-    
-    Returns:
-        Tuple of (synced_count, failed_count, skipped_count, was_rate_limited)
+    """Fetch repositories in batches, one coloured line each.
+
+    **THE ENGINE MOVED AND THE RENDERING STAYED.** This was 340 lines that both
+    fetched and printed, and it was the only correct one of four
+    implementations of the same write -- the dashboard had two more and its
+    add-a-project worker had a fourth. `dossier.download` is now the one that
+    knows which column takes which key, and what is left here is what a
+    terminal wants to see: a line per repository, coloured by what happened.
+
+    `owner_name` is no longer used to build the project name. It was, and it
+    disagreed with the repository's own owner for anything reached through a
+    fork or a rename -- `repo.full_name` is the name GitHub gives it.
+
+    Returns the same tuple it always did, so its two callers are unchanged.
     """
-    from dossier.parsers import GitHubClient
-    from dossier.parsers.github import BatchResult
-    from dossier.models import utcnow
-    import time
-    
-    synced = 0
-    failed = 0
-    skipped = 0
-    rate_limited = False
-    
+    from dossier import download as fetching
+    from dossier.parsers import GitHubClient, GitHubParser
+
+    del owner_name  # see the docstring: the repository carries its own owner
+
     total = len(repos)
-    
+    said = {
+        fetching.FETCHED: lambda one: click.style(" OK", fg="green"),
+        fetching.SKIPPED: lambda one: click.style(
+            " skipped (recently synced)", fg="cyan"),
+        fetching.FAILED: lambda one: click.style(
+            f" failed: {one.detail[:60]}", fg="red"),
+        fetching.RATE_LIMITED: lambda one: click.style(
+            " rate limited", fg="yellow"),
+    }
+
+    def landed(one) -> None:
+        click.echo(f"  [{one.index}/{total}] {one.repo}...", nl=False)
+        click.echo(said[one.outcome](one))
+
     with GitHubClient(token, respect_rate_limit=True) as client:
-        # Check rate limit before starting
         try:
-            rate_info = client.check_rate_limit()
-            click.echo(f"📊 Rate limit: {rate_info.remaining}/{rate_info.limit} remaining")
-            if rate_info.remaining < 10:
+            rate = client.check_rate_limit()
+            click.echo(f"Rate limit: {rate.remaining}/{rate.limit} remaining")
+            if rate.remaining < 10:
                 click.echo(click.style(
-                    f"⚠️  Low rate limit! Consider using --token for higher limits.",
-                    fg="yellow"
-                ))
+                    "Low rate limit. Consider --token for a higher one.",
+                    fg="yellow"))
         except Exception:
-            pass  # Continue without rate info
-        
-        from dossier.parsers import GitHubParser
+            pass  # a rate-limit reading is a courtesy, not a precondition
 
         with GitHubParser(token) as parser:
-            # Process in batches
-            for batch_start in range(0, total, batch_size):
-                batch_end = min(batch_start + batch_size, total)
-                batch_repos = repos[batch_start:batch_end]
-                batch_num = (batch_start // batch_size) + 1
-                total_batches = (total + batch_size - 1) // batch_size
-                
-                click.echo(f"\n📦 Batch {batch_num}/{total_batches} ({len(batch_repos)} repos)")
-                
-                for i, repo in enumerate(batch_repos):
-                    repo_num = batch_start + i + 1
-                    click.echo(f"  [{repo_num}/{total}] {repo.full_name}...", nl=False)
-                    
-                    # Check if already synced recently (within last hour)
-                    project_name = f"{owner_name}/{repo.name}"
-                    existing = session.exec(
-                        select(Project).where(Project.name == project_name)
-                    ).first()
-                    
-                    if existing and existing.last_synced_at and not force:
-                        from datetime import timedelta, timezone
-                        # Handle timezone-naive datetimes from SQLite
-                        last_synced = existing.last_synced_at
-                        if last_synced.tzinfo is None:
-                            last_synced = last_synced.replace(tzinfo=timezone.utc)
-                        age = utcnow() - last_synced
-                        if age < timedelta(hours=1):
-                            click.echo(click.style(" ⏭ skipped (recently synced)", fg="cyan"))
-                            skipped += 1
-                            continue
-                    
-                    try:
-                        _, sections = parser.parse_repo(
-                            repo.owner,
-                            repo.name,
-                            include_docs_folder=not no_docs,
-                        )
-                        
-                        if existing:
-                            existing.description = repo.description
-                            existing.repository_url = repo.html_url
-                            existing.github_owner = repo.owner
-                            existing.github_repo = repo.name
-                            existing.github_stars = repo.stars
-                            existing.is_fork = repo.is_fork
-                            existing.is_archived = repo.is_archived
-                            existing.github_language = repo.language
-                            existing.last_synced_at = utcnow()
-                            existing.updated_at = utcnow()
-                            project = existing
-                            
-                            # Remove old sections
-                            old_sections = session.exec(
-                                select(DocumentSection).where(
-                                    DocumentSection.project_id == existing.id
-                                )
-                            ).all()
-                            for old in old_sections:
-                                session.delete(old)
-                        else:
-                            project = Project(
-                                name=project_name,
-                                full_name=f"{repo.owner}/{repo.name}",
-                                description=repo.description,
-                                repository_url=repo.html_url,
-                                github_owner=repo.owner,
-                                github_repo=repo.name,
-                                github_stars=repo.stars,
-                                is_fork=repo.is_fork,
-                                is_archived=repo.is_archived,
-                                github_language=repo.language,
-                                last_synced_at=utcnow(),
-                            )
-                            session.add(project)
-                            session.flush()
-                        
-                        # Add sections
-                        for section in sections:
-                            section.project_id = project.id
-                            session.add(section)
-                        
-                        # Fetch and store extended data
-                        try:
-                            # Languages
-                            languages = client.get_languages(repo.owner, repo.name)
-                            old_langs = session.exec(
-                                select(ProjectLanguage).where(
-                                    ProjectLanguage.project_id == project.id
-                                )
-                            ).all()
-                            for old in old_langs:
-                                session.delete(old)
-                            for lang in languages:
-                                session.add(ProjectLanguage(
-                                    project_id=project.id,
-                                    language=lang["language"],
-                                    bytes_count=lang.get("bytes_count", 0),
-                                    percentage=lang.get("percentage", 0.0),
-                                    file_extensions=lang.get("file_extensions"),
-                                    encoding=lang.get("encoding"),
-                                ))
-                            
-                            # Dependencies
-                            dependencies = client.get_dependencies(repo.owner, repo.name)
-                            old_deps = session.exec(
-                                select(ProjectDependency).where(
-                                    ProjectDependency.project_id == project.id
-                                )
-                            ).all()
-                            for old in old_deps:
-                                session.delete(old)
-                            for dep in dependencies:
-                                session.add(ProjectDependency(
-                                    project_id=project.id,
-                                    name=dep["name"],
-                                    version_spec=dep.get("version_spec"),
-                                    dep_type=dep.get("dep_type", "runtime"),
-                                    source=dep.get("source", "unknown"),
-                                ))
-                            
-                            # Contributors (limit to top 10 for batch)
-                            contributors = client.get_contributors(
-                                repo.owner, repo.name, max_contributors=10
-                            )
-                            old_contribs = session.exec(
-                                select(ProjectContributor).where(
-                                    ProjectContributor.project_id == project.id
-                                )
-                            ).all()
-                            for old in old_contribs:
-                                session.delete(old)
-                            for contrib in contributors:
-                                session.add(ProjectContributor(
-                                    project_id=project.id,
-                                    username=contrib["username"],
-                                    avatar_url=contrib.get("avatar_url"),
-                                    contributions=contrib.get("contributions", 0),
-                                    profile_url=contrib.get("profile_url"),
-                                ))
-                            
-                            # Issues (limit to 20 for batch)
-                            issues = client.get_issues(
-                                repo.owner, repo.name, state="all", max_issues=20
-                            )
-                            old_issues = session.exec(
-                                select(ProjectIssue).where(
-                                    ProjectIssue.project_id == project.id
-                                )
-                            ).all()
-                            for old in old_issues:
-                                session.delete(old)
-                            for issue in issues:
-                                session.add(ProjectIssue(
-                                    project_id=project.id,
-                                    issue_number=issue["issue_number"],
-                                    title=issue["title"],
-                                    state=issue.get("state", "open"),
-                                    author=issue.get("author"),
-                                    labels=issue.get("labels"),
-                                ))
-                            
-                            # Branches (limit to 20 for batch)
-                            branches = client.get_branches(
-                                repo.owner, repo.name, max_branches=20
-                            )
-                            old_branches = session.exec(
-                                select(ProjectBranch).where(
-                                    ProjectBranch.project_id == project.id
-                                )
-                            ).all()
-                            for old in old_branches:
-                                session.delete(old)
-                            for branch in branches:
-                                session.add(ProjectBranch(
-                                    project_id=project.id,
-                                    name=branch["name"],
-                                    is_default=branch.get("is_default", False),
-                                    is_protected=branch.get("is_protected", False),
-                                    commit_sha=branch.get("commit_sha"),
-                                    commit_message=branch.get("commit_message"),
-                                    commit_author=branch.get("commit_author"),
-                                    commit_date=branch.get("commit_date"),
-                                ))
-                            
-                            # Pull Requests (limit to 20 for batch)
-                            pull_requests = client.get_pull_requests(
-                                repo.owner, repo.name, state="all", max_prs=20
-                            )
-                            old_prs = session.exec(
-                                select(ProjectPullRequest).where(
-                                    ProjectPullRequest.project_id == project.id
-                                )
-                            ).all()
-                            for old in old_prs:
-                                session.delete(old)
-                            for pr in pull_requests:
-                                session.add(ProjectPullRequest(
-                                    project_id=project.id,
-                                    pr_number=pr["pr_number"],
-                                    title=pr["title"],
-                                    state=pr.get("state", "open"),
-                                    author=pr.get("author"),
-                                    base_branch=pr.get("base_branch"),
-                                    head_branch=pr.get("head_branch"),
-                                    is_draft=pr.get("is_draft", False),
-                                    is_merged=pr.get("is_merged", False),
-                                    additions=pr.get("additions", 0),
-                                    deletions=pr.get("deletions", 0),
-                                    labels=pr.get("labels"),
-                                    pr_created_at=pr.get("pr_created_at"),
-                                    pr_updated_at=pr.get("pr_updated_at"),
-                                    pr_merged_at=pr.get("pr_merged_at"),
-                                ))
-                            
-                            # Releases (limit to 10 for batch)
-                            releases = client.get_releases(
-                                repo.owner, repo.name, max_releases=10
-                            )
-                            old_releases = session.exec(
-                                select(ProjectRelease).where(
-                                    ProjectRelease.project_id == project.id
-                                )
-                            ).all()
-                            for old in old_releases:
-                                session.delete(old)
-                            for release in releases:
-                                session.add(ProjectRelease(
-                                    project_id=project.id,
-                                    tag_name=release["tag_name"],
-                                    name=release.get("name"),
-                                    body=release.get("body"),
-                                    is_prerelease=release.get("is_prerelease", False),
-                                    is_draft=release.get("is_draft", False),
-                                    author=release.get("author"),
-                                    target_commitish=release.get("target_commitish"),
-                                    release_created_at=release.get("release_created_at"),
-                                    release_published_at=release.get("release_published_at"),
-                                ))
-                        except Exception:
-                            pass  # Extended data is optional
-                        
-                        # Add as subcomponent if parent specified
-                        if parent_project and project.id != parent_project.id:
-                            existing_link = session.exec(
-                                select(ProjectComponent).where(
-                                    ProjectComponent.parent_id == parent_project.id,
-                                    ProjectComponent.child_id == project.id,
-                                )
-                            ).first()
-                            
-                            if not existing_link:
-                                link = ProjectComponent(
-                                    parent_id=parent_project.id,
-                                    child_id=project.id,
-                                    relationship_type="component",
-                                    order=repo_num,
-                                )
-                                session.add(link)
-                        
-                        session.commit()
-                        click.echo(click.style(f" OK ({len(sections)} sections)", fg="green"))
-                        synced += 1
-                        
-                    except Exception as e:
-                        error_msg = str(e)
-                        if "rate limit" in error_msg.lower():
-                            click.echo(click.style(f" ⏸ rate limited", fg="yellow"))
-                            rate_limited = True
-                            # Save progress and stop
-                            session.commit()
-                            click.echo(click.style(
-                                f"\n⚠️  Rate limit hit. Run again to continue from where you left off.",
-                                fg="yellow"
-                            ))
-                            return synced, failed, skipped, rate_limited
-                        else:
-                            click.echo(click.style(f" ✗ {error_msg[:50]}", fg="red"))
-                            failed += 1
-                            session.rollback()
-                
-                # Commit batch and pause between batches (except last)
-                session.commit()
-                if batch_end < total:
-                    # Check remaining rate limit
-                    remaining = client.rate_limit.remaining
-                    if remaining < 20:
-                        wait_time = min(client.rate_limit.seconds_until_reset, 60)
-                        if wait_time > 0:
-                            click.echo(f"  ⏳ Pausing {wait_time:.0f}s (rate limit: {remaining} remaining)")
-                            time.sleep(wait_time)
-                    else:
-                        time.sleep(delay_between_batches)
-    
-    return synced, failed, skipped, rate_limited
+            report = fetching.download(
+                session, parser, client, repos,
+                on_each=landed,
+                include_docs=not no_docs,
+                parent=parent_project,
+                force=force,
+                batch_size=batch_size,
+                delay_between_batches=delay_between_batches,
+            )
+
+    if report.rate_limited:
+        click.echo(click.style(
+            "\nRate limit hit. What was fetched is saved; run it again to "
+            "continue from where it stopped.", fg="yellow"))
+
+    return report.fetched, report.failed, report.skipped, report.rate_limited
+
+
+@github.command("download")
+@click.argument("owner")
+@click.option("--token", "-t", envvar="GITHUB_TOKEN", help="GitHub personal access token")
+@click.option("--limit", "-l", default=0, help="Max repos to fetch (0 = all)")
+@click.option("--skip-forks", is_flag=True, help="Skip forked repositories")
+@click.option("--language", help="Filter by programming language")
+@click.option("--no-docs", is_flag=True, help="Skip parsing docs/ folder")
+@click.option("--batch-size", "-b", default=5, help="Repos per batch (default: 5)")
+@click.option("--force", "-f", is_flag=True, help="Fetch even what was synced within the hour")
+@click.option("--dry-run", is_flag=True, help="List what would be fetched, and stop")
+@click.option("--no-deltas", is_flag=True,
+              help="Do not derive a delta per open pull request afterwards")
+def github_download(
+    owner: str,
+    token: Optional[str],
+    limit: int,
+    skip_forks: bool,
+    language: Optional[str],
+    no_docs: bool,
+    batch_size: int,
+    force: bool,
+    dry_run: bool,
+    no_deltas: bool,
+) -> None:
+    """Fetch everything a GitHub user or organisation has, and read it.
+
+    OWNER: a GitHub login, or the profile URL you had in your hand.
+
+    You do not have to know which kind of account it is. sync-user and
+    sync-org each need you to know already, and picking the wrong one does not
+    fail: asking for an organisation as a user returns an empty list, which
+    reads as a fact about the org rather than a wrong endpoint. This asks
+    GitHub which it is, in one call, then lists the right one. Both older
+    commands still work and are unchanged.
+
+    It lists before it fetches: what it found, how much of it this database
+    already holds, and only then the work. The same order `dossier clone`
+    uses, and for the same reason -- this is roughly eight API calls per
+    repository against a budget that runs out.
+
+    Then it derives a delta from every open pull request it just fetched,
+    so the board carries the organisation's work in flight rather than
+    being empty until you find a second command. `--no-deltas` skips it.
+
+    This is the command behind the dashboard ring's `m 4 3`.
+
+    
+    Examples:
+        dossier github download quaternionmedia
+        dossier github download octocat --skip-forks --dry-run
+    """
+    from dossier import download as fetching
+    from dossier.parsers import GitHubClient, GitHubParser
+
+    with get_session() as session:
+        with GitHubClient(token, respect_rate_limit=True) as client:
+            try:
+                found = fetching.inventory(session, client, owner)
+            except Exception as exc:
+                click.echo(f"Could not read {owner}: {exc}", err=True)
+                raise SystemExit(1)
+
+            click.echo(found.summary())
+            wanted = fetching.narrow(found.repos, skip_forks=skip_forks,
+                                     language=language, limit=limit)
+            if len(wanted) != len(found.repos):
+                click.echo(f"{len(wanted)} of them after the filters")
+            if not wanted:
+                click.echo("Nothing to fetch.")
+                return
+            if dry_run:
+                for repo in wanted:
+                    held = " (held)" if repo.full_name in found.held else ""
+                    click.echo(f"  {repo.full_name}{held}")
+                click.echo(f"\nDry run: {len(wanted)} would be fetched.")
+                return
+
+            total = len(wanted)
+
+            def landed(one) -> None:
+                mark = {
+                    fetching.FETCHED: click.style("OK", fg="green"),
+                    fetching.SKIPPED: click.style("skipped", fg="cyan"),
+                    fetching.FAILED: click.style(
+                        f"failed: {one.detail[:60]}", fg="red"),
+                    fetching.RATE_LIMITED: click.style(
+                        "rate limited", fg="yellow"),
+                }[one.outcome]
+                click.echo(f"  [{one.index}/{total}] {one.repo}... {mark}")
+
+            with GitHubParser(token) as parser:
+                report = fetching.download(
+                    session, parser, client, wanted,
+                    on_each=landed, include_docs=not no_docs,
+                    force=force, batch_size=batch_size)
+
+        click.echo("")
+        click.echo(report.summary())
+
+        # **FETCHING AN ORGANISATION LEAVES A BOARD WITH NOTHING ON IT.**
+        # The repositories land and their open pull requests land with
+        # them, and the Deltas pane stays empty until somebody runs a
+        # second command they have no reason to know exists.
+        if not no_deltas:
+            from dossier.maintenance import deltas_from_pull_requests
+
+            names = deltas_from_pull_requests(session, apply=True)
+            click.echo(f"{len(names)} delta(s) from open pull requests"
+                       if names else
+                       "No open pull requests, so there is no work in "
+                       "flight to put on the board")
+
+    if report.rate_limited:
+        raise SystemExit(1)
 
 
 @github.command("sync-user")
@@ -2315,6 +2167,7 @@ def github_sync_user(
         dossier github sync-user astral-sh --batch-size 3
         dossier github sync-user myuser --language python --force
     """
+    from dossier.download import narrow
     from dossier.parsers import GitHubClient
     
     with get_session() as session:
@@ -2344,14 +2197,14 @@ def github_sync_user(
                 click.echo(f"Error fetching repositories: {e}", err=True)
                 raise SystemExit(1)
         
-        # Apply filters
+        # **THE FILTERS ARE `dossier.download.narrow`, AND `--skip-forks`
+        # WAS BROKEN.** It tested whether the repository's *name* ended in
+        # `-fork`, which is not what a fork is and matched almost nothing;
+        # `narrow` reads the repository's own `is_fork` flag, which is what
+        # GitHub reports and what the org command's aggregates already use.
         original_count = len(repos)
-        if skip_forks:
-            repos = [r for r in repos if not r.name.endswith("-fork")]
-        if language:
-            repos = [r for r in repos if r.language and r.language.lower() == language.lower()]
-        if limit > 0:
-            repos = repos[:limit]
+        repos = list(narrow(repos, skip_forks=skip_forks, language=language,
+                            limit=limit))
         
         click.echo(f"📋 Found {len(repos)} repositories", nl=False)
         if len(repos) != original_count:
@@ -2416,6 +2269,7 @@ def github_sync_org(
         dossier github sync-org astral-sh --batch-size 3
         dossier github sync-org myorg --language python --force
     """
+    from dossier.download import narrow
     from dossier.parsers import GitHubClient
     
     with get_session() as session:
@@ -2445,12 +2299,9 @@ def github_sync_org(
                 click.echo(f"Error fetching repositories: {e}", err=True)
                 raise SystemExit(1)
         
-        # Apply filters
+        # The same filters as `sync-user`, from the same place.
         original_count = len(repos)
-        if language:
-            repos = [r for r in repos if r.language and r.language.lower() == language.lower()]
-        if limit > 0:
-            repos = repos[:limit]
+        repos = list(narrow(repos, language=language, limit=limit))
         
         click.echo(f"📋 Found {len(repos)} repositories", nl=False)
         if len(repos) != original_count:
@@ -2635,6 +2486,54 @@ def list_components(project_name: str, recursive: bool) -> None:
 # =============================================================================
 # Dev Commands - Development and iteration helpers
 # =============================================================================
+
+
+@cli.command("selfcheck")
+@click.option("--inward", is_flag=True,
+              help="Also run the repository's own diagnostics")
+def selfcheck(inward: bool) -> None:
+    """Is this installation set up, and what to do where it is not.
+
+    Six causes look identical from outside -- no database, an unmigrated one,
+    no rows in it, no GitHub token, no harness, no clones -- and every pane in
+    the dashboard renders all six as the same empty table. This tells them
+    apart, and every step that is not done names the keys that do it.
+
+    Those keys are read from the menu rather than written here, so a route that
+    moves cannot leave this telling you to press the wrong thing.
+
+    --inward runs `dossier.diagnostics` as well: the repository inspecting
+    itself for the defects a green test run does not see. That is a different
+    question -- it is about this checkout, not about your setup -- and it is
+    the one this command's own module docstring has promised since it was
+    written, without a command to run it.
+
+    Exit code is 1 when a required step is outstanding, so this can gate a
+    script.
+
+    \b
+    Examples:
+        dossier selfcheck
+        dossier selfcheck --inward
+    """
+    from dossier import onboarding
+
+    with get_session() as session:
+        found = onboarding.run(session)
+    click.echo(onboarding.render(found))
+
+    ok = found.is_ready
+    if inward:
+        from dossier import diagnostics
+
+        click.echo("")
+        click.echo("--- this checkout, inspecting itself ---")
+        report = diagnostics.run()
+        click.echo(report.render())
+        ok = ok and report.is_clean
+
+    if not ok:
+        raise SystemExit(1)
 
 
 @cli.group()
@@ -5085,6 +4984,84 @@ def db_backup(destination: Optional[Path]) -> None:
     target = Path(destination) if destination else timestamped_name(source)
     backup(source, target)
     click.echo(f"Backed up {source} -> {target} ({target.stat().st_size:,} bytes)")
+
+
+@db.command("restart")
+@click.option("--into", type=click.Path(path_type=Path), default=None,
+              help="Where the exports go (default: a timestamped directory "
+                   "beside the database)")
+@click.option("--apply", is_flag=True,
+              help="Actually archive and empty. Without this nothing changes.")
+@click.option("--yes", "-y", is_flag=True, help="Skip the confirmation")
+def db_restart(into: Optional[Path], apply: bool, yes: bool) -> None:
+    """Archive this dossier, then empty it.
+
+    The way back to a first run. `dossier dev reset` drops every table with no
+    backup at all, and its entire safety net is a sentence in a help text; this
+    copies everything twice before it drops anything.
+
+    Two archives, because they fail differently and you need both. The database
+    copy goes through SQLite's own online backup API and is faithful -- every
+    row, every id, every join -- and stops being restorable the moment the
+    schema moves. The exports are one `.dossier` per project, survive a
+    migration, and drop whatever the format has no field for.
+
+    It counts before it deletes, and the count is what gets deleted. Without
+    --apply it prints the plan and changes nothing.
+
+    Examples:
+        dossier db restart
+        dossier db restart --apply
+    """
+    from dossier import restart as starting
+    from dossier.health import candidate_databases
+
+    # **RESOLVED THE WAY `db upgrade` RESOLVES IT, NOT BY NAMING A FILE.**
+    # `DOSSIER_DATABASE_URL` moves which database the session opens, and a
+    # hardcoded name here would archive whichever file happened to be under the
+    # working directory and then empty the one that is actually in use. That is
+    # the two-databases failure `health.py` was written for, and in a command
+    # that drops every table it is data loss rather than a wrong diagnostic.
+    found = [path for path in candidate_databases() if path.exists()]
+    database = found[0] if found else None
+
+    with get_session() as session:
+        was = starting.holding(session, database)
+        click.echo(was.summary())
+        if was.is_empty:
+            click.echo("Nothing to archive and nothing to drop.")
+            return
+
+        for name, count in sorted(was.counts.items()):
+            if count:
+                click.echo(f"  {name:24} {count:>7,}")
+
+        if not apply:
+            click.echo("")
+            click.echo("Dry run. Re-run with --apply to archive and empty.")
+            return
+        if not yes:
+            click.confirm(f"Archive all of it and drop {was.total:,} rows?",
+                          abort=True)
+
+        try:
+            _, put_away = starting.start_over(
+                session, session.get_bind(), database, into=into,
+                on_each=lambda said: click.echo(f"  {said}"))
+        except RuntimeError as exc:
+            # The refusal is the feature: nothing was emptied.
+            click.echo(str(exc), err=True)
+            raise SystemExit(1)
+
+    click.echo("")
+    click.echo(put_away.summary())
+    for project, why in put_away.failures:
+        click.echo(f"  could not export {project}: {why}")
+    click.echo(f"Dropped {was.total:,} row(s).")
+    click.echo("")
+    click.echo("Untouched, because they are not this database's:")
+    for what, whose in sorted(starting.NOT_OURS_TO_EMPTY.items()):
+        click.echo(f"  {what} -- {whose}")
 
 
 @projects.command("purge")

@@ -151,6 +151,7 @@ dossier
 │   └── remove
 ├── github          # GitHub sync
 │   ├── sync
+│   ├── download     # user or org, worked out rather than asked
 │   ├── sync-user
 │   ├── sync-org
 │   ├── info
@@ -422,36 +423,42 @@ def get_session():
 
 ### Intelligent Batching
 
-For bulk operations (sync-user, sync-org):
+For bulk operations (`download`, `sync-user`, `sync-org`):
 
 ```python
 @dataclass
-class BatchResult:
-    total: int
-    synced: int
-    skipped: int
-    failed: int
-    errors: list[str]
+class Report:            # dossier.download
+    outcomes: list[Fetched]   # one per repository, as it landed
+    rate_limited: bool
 ```
+
+(`dossier.parsers.github.BatchResult` predates this and is now referenced by
+nothing but its own tests.)
 
 Configuration:
 - `--batch-size` - Repos per batch (default: 5)
-- `--batch-delay` - Seconds between batches (default: 2)
-- `--force` - Ignore "recently synced" check
+- `--force` - Fetch even what was synced within the hour
+- `--dry-run` - (on `download`) list what it would fetch, and stop
+
+The engine is `dossier.download`, and it is the **only** place that writes a
+fetched repository into the database. It was implemented four times before —
+once on the command line and three times in the dashboard — and the three
+copies in the panel disagreed with the client about four column names, so the
+panel silently stored nulls for every branch commit date and every pull request
+timestamp, and its batch sync failed outright on every project.
+
+`download()` commits per repository and reports each one through a callback, so
+the command line can paint a coloured line and the panel can move a progress
+bar without either of them owning the write:
 
 ```python
-async def _sync_repos_batch(repos, batch_size, batch_delay, force):
-    """Process repos in batches with rate limit respect."""
-    for i in range(0, len(repos), batch_size):
-        batch = repos[i:i+batch_size]
-        for repo in batch:
-            if not force and recently_synced(repo):
-                result.skipped += 1
-                continue
-            sync_repo(repo)
-            result.synced += 1
-        time.sleep(batch_delay)
+report = download(session, parser, client, repos, on_each=render)
+# -> Report(fetched=, skipped=, failed=, rate_limited=)
 ```
+
+A rate limit stops the run and says so. Everything already fetched stays
+committed, which is what makes "run it again to continue" true rather than a
+hope.
 
 ## Error Handling
 

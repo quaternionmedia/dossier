@@ -66,6 +66,17 @@ def resolve(context: Any = None) -> tuple[Wedge, ...]:
             # no button is an act only the keyboard can reach.
             Wedge("do.add", "Add a project", action="project.add"),
             Wedge("do.remove", "Remove a project", action="project.remove"),
+            # **SEVENTH, AND IT COSTS A KEYSTROKE.** rad's budget is
+            # 1 + ceil(N/2) + 1: six children cost 5 and seven cost 6. Paid
+            # because the only route back to an empty dossier was
+            # `dossier dev reset`, which drops every table with no backup and
+            # whose entire safety net is the words "Use with caution in
+            # production!" in a help text. An act that destructive reachable
+            # only by somebody who already knows the command is not a
+            # first-run story; it is a trap for the person most likely to
+            # need it.
+            Wedge("do.restart", "Archive and start over",
+                  action="project.restart"),
         )),
         Wedge(SHOW, "Show", children=(
             Wedge("show.all", "All", action="filter.all"),
@@ -74,7 +85,8 @@ def resolve(context: Any = None) -> tuple[Wedge, ...]:
         )),
         Wedge(REACH, "Reach", children=(
             Wedge("reach.qmcp", "Open in qmcp", action="reach.qmcp"),
-            Wedge("reach.ingest", "Ingest deltas", action="reach.ingest"),
+            Wedge("reach.ingest", "Ingest conversations",
+                  action="reach.ingest"),
             Wedge("reach.reconcile", "Reconcile", action="reach.reconcile"),
             # Fourth in this group, so `PLACEMENT` gives it 4 -- route 4.4.
             # The number is not chosen here; it is what the ring assigns, and
@@ -87,5 +99,19 @@ def resolve(context: Any = None) -> tuple[Wedge, ...]:
             # clone here and closing that gap meant typing `git clone`
             # eighty-two times.
             Wedge("reach.clone", "Clone what is absent", action="reach.clone"),
+            # **SIXTH, AND IT COSTS NOTHING.** rad's budget is
+            # 1 + ceil(N/2) + 1, which is 5 for five children and 5 for six --
+            # so this one is free where the fifth was not. Placed beside the
+            # clone deliberately: the two are the same act on different halves
+            # of a repository. The clone brings the *code* for what this
+            # database already indexes; this brings the *index* for what GitHub
+            # has and nobody here has asked about yet.
+            #
+            # Before it, downloading an owner was `dossier github sync-user`
+            # or `sync-org` -- and which of the two was the right one was
+            # something you had to already know. The panel could add one
+            # repository at a time and no more.
+            Wedge("reach.download", "Download an owner",
+                  action="reach.download"),
         )),
     )

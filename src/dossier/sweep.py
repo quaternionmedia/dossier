@@ -179,8 +179,8 @@ def find(session: Any, package: str) -> Sweep:
 
     Reads what is declared. A repository that depends on something transitively
     is not here, and that is a limit of the data rather than a claim that it is
-    unaffected -- `dossier sync` records declared dependencies, so that is what
-    can be swept.
+    unaffected -- `dossier github sync` records declared dependencies, so that
+    is what can be swept.
     """
     rows = session.exec(
         select(Project, ProjectDependency)

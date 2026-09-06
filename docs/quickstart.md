@@ -17,10 +17,14 @@ uv sync
 # 2. Set GitHub token (get one at https://github.com/settings/tokens)
 export GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 
-# 3. Sync your repos
-uv run dossier github sync-user YOUR_GITHUB_USERNAME
+# 3. Pull down everything an owner has, and read it
+#    (user or organisation -- it asks GitHub which, so you need not know)
+uv run dossier github download YOUR_GITHUB_USERNAME
 
-# 4. Launch dashboard
+# 4. Check the setup, and see what is still to do
+uv run dossier selfcheck
+
+# 5. Launch dashboard
 uv run dossier dashboard
 ```
 
@@ -29,6 +33,24 @@ uv run dossier dashboard
 ![What the dashboard shows when it opens](screenshots/first-run.gif)
 
 Read on for details.
+
+---
+
+## If something looks empty
+
+An empty pane has six possible causes and they look identical: no database, an
+unmigrated one, no rows in it, no `GITHUB_TOKEN`, no harness, no clones on this
+disk. `dossier selfcheck` tells them apart, and every step it lists as
+outstanding names the keys that complete it:
+
+```bash
+uv run dossier selfcheck            # this installation
+uv run dossier selfcheck --inward   # and this checkout, inspecting itself
+```
+
+The same checklist is the **Setup** pane in the dashboard (`m` `8` `4` `3`), and
+a dossier with nothing in it points you at it when it starts. The exit code is
+`1` while a required step is outstanding, so it can gate a script.
 
 ---
 

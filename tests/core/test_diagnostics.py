@@ -165,8 +165,19 @@ def test_every_check_names_the_failure_it_exists_because_of():
     retire.
 
     Mutation: add a check with an empty `found_because` and this fails.
+
+    **GUARDED, BECAUSE THIS TEST WAS VACUOUS.** With `CHECKS` empty the loop
+    ran zero times and this passed -- and `diagnostics.py`'s own docstring
+    says a suite that quietly degrades to nothing is the exact thing it exists
+    to catch. Proved by forcing `run()` to return an empty `Report` and
+    watching it stay green.
     """
-    for result in run().results:
+    results = run().results
+    assert len(results) >= len(CHECKS), (
+        f"{len(results)} results from {len(CHECKS)} checks; this asserts "
+        f"nothing about checks that did not run")
+
+    for result in results:
         assert result.found_because.strip(), f"{result.name} says why it exists"
         assert len(result.found_because) > 40, (
             f"{result.name}: `found_because` is a sentence about a real "

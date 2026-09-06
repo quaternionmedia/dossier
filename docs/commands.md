@@ -70,9 +70,12 @@ depth -- so it is never an item and no number contains it. Arrows and
     - `8.4.4`  Harness -- `m` `8` `4` `4`
       What the harness ran, when, and whether it finished.
       `dossier harness ingest`
-    - `8.4.9`  Threads -- `m` `8` `4` `9`
-      Every line of work in flight, most idle first.
-      `dossier governance threads`
+    - `8.4.9`  Conversations -- `m` `8` `4` `9`
+      Every conversation the harness has archived, disagreements first.
+      `dossier show threads`
+    - `8.4.3`  Setup -- `m` `8` `4` `3`
+      Whether this installation is set up, and what to press where it is not.
+      `dossier selfcheck`
 - **`6`  Do**
   - `6.8`  Advance phase -- `m` `6` `8`
     *in the application only*
@@ -86,6 +89,8 @@ depth -- so it is never an item and no number contains it. Arrows and
     `dossier projects add`
   - `6.3`  Remove a project -- `m` `6` `3`
     `dossier projects remove`
+  - `6.1`  Archive and start over -- `m` `6` `1`
+    `dossier db restart`
 - **`2`  Show**
   - `2.8`  All -- `m` `2` `8`
     *in the application only*
@@ -96,7 +101,7 @@ depth -- so it is never an item and no number contains it. Arrows and
 - **`4`  Reach**
   - `4.8`  Open in qmcp -- `m` `4` `8`  *(not applied yet)*
     *in the application only*
-  - `4.6`  Ingest deltas -- `m` `4` `6`
+  - `4.6`  Ingest conversations -- `m` `4` `6`
     `dossier deltas ingest`
   - `4.2`  Reconcile -- `m` `4` `2`
     *in the application only*
@@ -104,10 +109,12 @@ depth -- so it is never an item and no number contains it. Arrows and
     *in the application only*
   - `4.9`  Clone what is absent -- `m` `4` `9`
     `dossier clone`
+  - `4.3`  Download an owner -- `m` `4` `3`
+    `dossier github download`
 
 ## Outside the ring
 
-`dossier --help` reaches **81** leaf commands; **23**
+`dossier --help` reaches **84** leaf commands; **26**
 of them are named above beside the view they belong to. The rest are
 not menu items and are not meant to be: the ring is for what somebody
 does repeatedly, and a cell spent on a once-a-quarter migration is a
@@ -163,6 +170,7 @@ cell taken from something else.
   dossier github sync-user
   dossier governance dashboard
   dossier governance load
+  dossier governance threads
   dossier graph build
   dossier graph build-all
   dossier graph stats

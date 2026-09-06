@@ -643,6 +643,17 @@ class DossierApp(App):
                     # a queue nobody empties.
                     with TabPane("Waiting", id="tab-waiting"):
                         yield DataTable(id="waiting-table")
+                    # **THE PANE SOMEBODY OPENS WHEN NOTHING ELSE HAS
+                    # ANYTHING IN IT.** Six causes look identical from
+                    # outside -- no database, an unmigrated one, no rows, no
+                    # token, no harness, no clones -- and every other pane
+                    # renders all six as the same empty table. This is the
+                    # one that tells them apart, and every row that is not
+                    # done names the keys that do it.
+                    with TabPane("Setup", id="tab-setup"):
+                        with Vertical():
+                            yield Static("", id="setup-note")
+                            yield DataTable(id="setup-table")
                     # The harness's thread archive, read over the seam. This is
                     # the only human surface for it: a second one would be a
                     # second definition of what a figure means, and the CLI
@@ -674,7 +685,12 @@ class DossierApp(App):
                                 yield Button("Mermaid", id="btn-topology-mermaid")
                             yield Static("", id="topology-drawing")
                             yield Static("", id="topology-note")
-                    with TabPane("Threads", id="tab-threads"):
+                    # "Conversations", not "Threads": the Governance pane
+                    # next door has a governance-thread table, and one reader
+                    # saw both words for two different things. `vocabulary.py`
+                    # is the list. The id stays -- it is the identity, and it
+                    # is written into routes and tests.
+                    with TabPane("Conversations", id="tab-threads"):
                         yield DataTable(id="threads-table")
                         with Horizontal(id="thread-buttons"):
                             yield Input(placeholder="path to an export "
@@ -843,6 +859,8 @@ class DossierApp(App):
         "sweep.review": "_begin_sweep_review",
         "reach.reconcile": "_begin_reconcile",
         "reach.clone": "_begin_clone",
+        "reach.download": "_begin_owner_download",
+        "project.restart": "_begin_restart",
         "delta.advance": "action_advance_delta_phase",
         "delta.note": "action_add_delta_note",
         "filter.all": "_show_all_projects",
@@ -1102,6 +1120,370 @@ class DossierApp(App):
             self._begin_hygiene_reading(getattr(self, "_current_project", None))
         except Exception:                          # noqa: BLE001
             pass
+
+    # How many repositories `4.3` will fetch without a second press of the
+    # commit button. The same shape as `SYNC_WITHOUT_CONFIRMING` and
+    # `CLONE_WITHOUT_CONFIRMING`, and low for the same reason: a download is
+    # roughly eight API calls per repository against a budget that runs out,
+    # so a hundred of them is a thing somebody should have meant.
+    DOWNLOAD_WITHOUT_CONFIRMING = 5
+
+    def _begin_restart(self) -> None:
+        """`6.1`. Archive this dossier, then empty it.
+
+        **THE ONLY ROUTE BACK TO AN EMPTY DOSSIER WAS `dossier dev reset`**,
+        which drops every table with no backup and whose entire safety net is
+        the words "Use with caution in production!" in a help text. Somebody
+        who has synced the wrong owner, or followed a tutorial, or filled this
+        with a hundred forks, is exactly the person least likely to know that
+        command exists and most likely to need it.
+
+        **IT SHOWS THE ROWS BEFORE IT DROPS THEM.** `restart.holding` counts
+        the same tables `restart.reinit` empties, so the plan is the deletion.
+        The count is on screen before the reader touches anything and the
+        button carries the number, so what is confirmed is a figure rather
+        than a word -- and the focus starts on Cancel, so the reflex Enter
+        after `m` `6` `1` abandons the dialog rather than emptying a dossier.
+
+        Nothing is dropped that was not copied first -- twice, faithfully and
+        portably, because the two archives fail differently and a person needs
+        both. `restart.start_over` refuses rather than emptying a database
+        whose copy did not happen.
+        """
+        from textual.containers import Horizontal, Vertical
+        from textual.widgets import Button, Label, Static
+
+        class RestartModal(ModalScreen[bool]):
+            """What is here, where it would go, and only then the button."""
+
+            CSS = """
+            RestartModal { align: center middle; }
+            #restart-dialog {
+                width: 78; height: auto; padding: 1 2;
+                background: $surface; border: solid $error;
+            }
+            #restart-holding { height: auto; margin: 1 0; }
+            #restart-dialog Horizontal { margin-top: 1; align: right middle; }
+            #restart-dialog Button { margin-left: 1; }
+            """
+
+            BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+            def __init__(self, host) -> None:
+                super().__init__()
+                self._host = host
+                # True once the count has been read and shown. It is set on
+                # mount, so the ordinary path arrives with the plan already
+                # on screen. It stays False when the count itself failed --
+                # and then the button retries the count rather than acting,
+                # because a dossier nobody could measure is not one to empty.
+                self._read = False
+
+            def compose(self) -> ComposeResult:
+                with Vertical(id="restart-dialog"):
+                    yield Label("Archive and start over", classes="title")
+                    yield Static(
+                        "Two archives are taken before anything is emptied: a "
+                        "faithful copy of the database, which stops being "
+                        "restorable if the schema moves, and one portable "
+                        "export per project, which survives a migration and "
+                        "drops whatever the format has no field for. Neither "
+                        "is a backup on its own.",
+                        id="restart-why")
+                    yield Static("", id="restart-holding")
+                    with Horizontal():
+                        yield Button("Cancel", id="cancel-btn")
+                        yield Button("What is here?", id="delete-btn",
+                                     variant="error")
+
+            def on_mount(self) -> None:
+                self._count()
+
+            def _count(self) -> None:
+                from dossier import restart as starting
+
+                try:
+                    with self._host.session_factory() as session:
+                        was = starting.holding(session,
+                                               self._host.database_path())
+                except Exception as exc:           # noqa: BLE001
+                    self.query_one("#restart-holding", Static).update(
+                        f"[red]could not read this dossier: {exc}[/]")
+                    return
+
+                said = self.query_one("#restart-holding", Static)
+                button = self.query_one("#delete-btn", Button)
+                if was.is_empty:
+                    said.update(f"{was.summary()} There is nothing to archive "
+                                f"and nothing to drop.")
+                    button.disabled = True
+                    return
+
+                rows = "\n".join(
+                    f"  {name:24} {count:>7,}"
+                    for name, count in sorted(was.counts.items())
+                    if count)
+                self._read = True
+                said.update(f"{was.summary()}\n\n{rows}\n\n"
+                            f"Press again to archive all of it and empty the "
+                            f"database.")
+                button.label = (f"Archive and drop {was.total:,} "
+                                f"row{'' if was.total == 1 else 's'}")
+
+            @on(Button.Pressed, "#delete-btn")
+            def on_commit(self, event: Button.Pressed) -> None:
+                event.stop()
+                if not self._read:
+                    self._count()
+                    return
+                self.dismiss(True)
+
+            @on(Button.Pressed, "#cancel-btn")
+            def on_cancel(self, event: Button.Pressed) -> None:
+                event.stop()
+                self.dismiss(False)
+
+            def action_cancel(self) -> None:
+                self.dismiss(False)
+
+        def chosen(go: Optional[bool]) -> None:
+            if go:
+                self._run_restart()
+
+        self.push_screen(RestartModal(self), chosen)
+
+    def database_path(self):
+        """Where this dossier's file is, or None when it has none.
+
+        **NONE IS A REAL ANSWER.** The tests run on an in-memory engine, and a
+        restart there is a real restart with no file to copy -- reporting a
+        path that does not exist would make the archive look taken.
+        """
+        from pathlib import Path
+
+        try:
+            url = str(self.session_factory().get_bind().url)
+        except Exception:                          # noqa: BLE001
+            url = ""
+        if "sqlite" not in url or ":memory:" in url or url.endswith("sqlite://"):
+            return None
+        found = Path(url.split("sqlite:///")[-1])
+        return found if found.exists() else None
+
+    @work(thread=True, exclusive=True, group="restart")
+    def _run_restart(self) -> None:
+        """Archive, then empty. Off the loop: it copies a file and writes N."""
+        from dossier import restart as starting
+
+        self.call_from_thread(self._progress_start, "archiving this dossier")
+
+        def stage(said: str) -> None:
+            self.call_from_thread(self._progress_advance, 0, 0, said)
+
+        try:
+            with self.session_factory() as session:
+                engine = session.get_bind()
+                was, put_away = starting.start_over(
+                    session, engine, self.database_path(), on_each=stage)
+        except Exception as exc:                   # noqa: BLE001
+            # **THE REFUSAL IS THE FEATURE.** `start_over` raises rather than
+            # emptying a database it could not copy, so this path is the one
+            # where nothing was dropped -- and it has to say so, or a person
+            # reads "failed" and assumes the worst.
+            self.call_from_thread(self._progress_finish, f"nothing emptied: {exc}")
+            self.call_from_thread(
+                self.notify, f"Nothing was emptied. {exc}",
+                severity="error", title="Archive and start over", timeout=12)
+            return
+
+        untouched = ", ".join(sorted(starting.NOT_OURS_TO_EMPTY))
+        said = (f"{put_away.summary()}. Dropped {was.total:,} row(s). "
+                f"Untouched: {untouched}.")
+        self.call_from_thread(self._progress_finish, said)
+        self.call_from_thread(self.notify, said,
+                              title="Archive and start over", timeout=15)
+        self.call_from_thread(self.load_projects)
+
+    def _begin_owner_download(self) -> None:
+        """`4.3`. Fetch every repository a GitHub user or organisation has.
+
+        **THE RING CANNOT ASK FOR FREE TEXT**, and an owner is free text. rad
+        commits and closes -- that is what makes a keystroke count mean
+        anything -- so the wedge opens a dialog and the dialog is where the
+        name is typed. The same division `4.6` uses for an export path.
+
+        **AND IT LISTS BEFORE IT ACTS.** The first commit looks the owner up:
+        one call, which says whether they are a person or an organisation, how
+        many repositories they have and how many this database already holds.
+        The second commit fetches. A download that started on the keystroke
+        that named it would spend hundreds of API calls on a typo.
+        """
+        from textual.containers import Horizontal, Vertical
+        from textual.widgets import Button, Input, Label, Static
+
+        opening_on = self._scope_owner or ""
+
+        class DownloadOwnerModal(ModalScreen[Optional[str]]):
+            """Name an owner, read what they have, then fetch it."""
+
+            CSS = """
+            DownloadOwnerModal { align: center middle; }
+            #download-dialog {
+                width: 74; height: auto; padding: 1 2;
+                background: $surface; border: solid $primary;
+            }
+            #download-dialog Input { margin: 1 0; }
+            #download-found { height: auto; margin-bottom: 1; }
+            #download-dialog Horizontal { margin-top: 1; align: right middle; }
+            #download-dialog Button { margin-left: 1; }
+            """
+
+            BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+            def __init__(self, host, prefill: str) -> None:
+                super().__init__()
+                self._host = host
+                self._prefill = prefill
+                # The owner the look-up reported on. Kept so a name edited
+                # after a look-up cannot be downloaded on the strength of the
+                # previous one's count.
+                self._looked_up: str | None = None
+
+            def compose(self) -> ComposeResult:
+                with Vertical(id="download-dialog"):
+                    yield Label("Download an owner", classes="title")
+                    yield Static(
+                        "A GitHub user or organisation. Everything they have "
+                        "that this token can read is fetched into the "
+                        "dossier -- which is which is worked out here, so "
+                        "you do not have to know.",
+                        id="download-help")
+                    yield Input(
+                        value=self._prefill,
+                        placeholder="a GitHub user or organisation, or their "
+                                    "profile URL",
+                        id="download-owner")
+                    yield Static("", id="download-found")
+                    with Horizontal():
+                        yield Button("Cancel", id="cancel-btn")
+                        yield Button("Look up", id="add-btn",
+                                     variant="primary")
+
+            def on_mount(self) -> None:
+                # The cursor starts in the field, so nobody has to find it --
+                # `4.6` states the same rule about the same thing.
+                self.query_one("#download-owner", Input).focus()
+
+            @on(Button.Pressed, "#add-btn")
+            def on_commit(self, event: Button.Pressed) -> None:
+                event.stop()
+                # Surrounding quotes stripped for the same reason the export
+                # path strips them: a pasted value is somebody's clipboard.
+                typed = self.query_one(
+                    "#download-owner", Input).value.strip().strip('"')
+                if not typed:
+                    self.notify("Name an owner first.", severity="warning")
+                    return
+                if typed == self._looked_up:
+                    self.dismiss(typed)
+                    return
+                self._looked_up = None
+                self._look_up(typed)
+
+            @work(thread=True)
+            def _look_up(self, login: str) -> None:
+                """One call, off the loop, so the dialog does not freeze."""
+                from dossier import download as fetching
+                from dossier.parsers import GitHubClient
+                import os
+
+                try:
+                    with GitHubClient(os.environ.get("GITHUB_TOKEN")) as client:
+                        with self._host.session_factory() as session:
+                            found = fetching.inventory(session, client, login)
+                except Exception as exc:           # noqa: BLE001
+                    self.app.call_from_thread(
+                        self._looked, login, None, f"{type(exc).__name__}: {exc}")
+                    return
+                self.app.call_from_thread(self._looked, login, found, "")
+
+            def _looked(self, login: str, found, failed: str) -> None:
+                said = self.query_one("#download-found", Static)
+                button = self.query_one("#add-btn", Button)
+                if failed:
+                    # In the words the API used. A repository that is not
+                    # there, a token that cannot read it and a network that is
+                    # down all fail, and only the API can say which.
+                    said.update(f"[red]{failed}[/]")
+                    button.label = "Look up"
+                    return
+                if not found.repos:
+                    said.update(found.summary())
+                    button.label = "Look up"
+                    return
+                self._looked_up = login
+                said.update(f"{found.summary()}.\nPress again to fetch "
+                            f"{len(found.repos)}.")
+                button.label = f"Download {len(found.repos)}"
+
+            @on(Button.Pressed, "#cancel-btn")
+            def on_cancel(self, event: Button.Pressed) -> None:
+                event.stop()
+                self.dismiss(None)
+
+            def action_cancel(self) -> None:
+                self.dismiss(None)
+
+        def chosen(login: Optional[str]) -> None:
+            if login:
+                self._run_owner_download(login)
+
+        self.push_screen(DownloadOwnerModal(self, opening_on), chosen)
+
+    @work(thread=True, exclusive=True, group="download-owner")
+    def _run_owner_download(self, login: str) -> None:
+        """Fetch the owner, off the loop, reporting each repository as it lands."""
+        from dossier import download as fetching
+        from dossier.parsers import GitHubClient, GitHubParser
+        import os
+
+        token = os.environ.get("GITHUB_TOKEN")
+        self.call_from_thread(self._progress_start,
+                              f"reading what {login} has")
+
+        def landed(one) -> None:
+            self.call_from_thread(
+                self._progress_advance, one.index, one.total,
+                f"{one.outcome} {one.index} of {one.total}: {one.repo}")
+
+        def stage(said: str) -> None:
+            self.call_from_thread(self._progress_advance, 0, 0, said)
+
+        try:
+            with GitHubParser(token) as parser, GitHubClient(token) as client:
+                with self.session_factory() as session:
+                    done = fetching.onboard(session, parser, client, login,
+                                            on_each=landed, on_stage=stage)
+        except Exception as exc:                   # noqa: BLE001
+            self.call_from_thread(self._progress_finish,
+                                  f"{login}: {type(exc).__name__}: {exc}")
+            self.call_from_thread(
+                self.notify, f"{login}: {exc}", severity="error",
+                title="Download", timeout=10)
+            return
+
+        # **EVERY STAGE SAYS ITS OWN NUMBER.** A download of thirty
+        # repositories that derived no work has done something worth seeing,
+        # and one combined figure would hide which half did it.
+        said = done.summary()
+        self.call_from_thread(self._progress_finish, said)
+        self.call_from_thread(
+            self.notify, said, title="Download", timeout=15,
+            severity="warning" if done.report.failed else "information")
+        self.call_from_thread(self.load_projects)
+        # The board has rows on it now, and it is the reason to look.
+        if done.deltas:
+            self.call_from_thread(self.reload_tab, "tab-deltas")
 
     def _begin_sweep_review(self) -> None:
         """`sweep.review`. Review a shared dependency across the organisation.
@@ -1594,6 +1976,49 @@ class DossierApp(App):
             tabs = self.query_one("#project-tabs", TabbedContent)
             tabs.active = self._initial_tab
             self._load_tab_data(self._initial_tab)
+        else:
+            self.call_after_refresh(self._point_at_setup_if_empty)
+
+    def _point_at_setup_if_empty(self) -> None:
+        """A dossier with nothing in it says what to do, once, on startup.
+
+        **AN EMPTY PANEL IS SIX DIFFERENT PROBLEMS WEARING ONE FACE** -- no
+        database, an unmigrated one, no rows, no token, no harness, no clones.
+        Every pane renders all six identically, so a first run showed somebody
+        an empty screen and no reason.
+
+        It names the next step and the keys, both read from the checklist
+        rather than typed here -- so this cannot tell somebody to press a
+        route that has moved.
+
+        **ONLY WHEN THERE IS NOTHING**, and only on startup. A person with a
+        working dossier does not need to be told where the checklist is every
+        time they open the panel, and a notification they learn to dismiss is
+        one they will dismiss on the day it matters.
+        """
+        from dossier import onboarding
+
+        try:
+            with self.session_factory() as session:
+                if session.exec(select(Project)).first() is not None:
+                    return
+                found = onboarding.run(session)
+        except Exception:                          # noqa: BLE001
+            # A panel that cannot read its own database has a louder problem
+            # than an empty one, and `on_mount` is not where it is reported.
+            return
+
+        step = found.next_step()
+        if step is None:
+            return
+
+        from dossier.rad.index import keystroke
+
+        where = keystroke("view.setup")
+        self.notify(
+            f"This dossier is empty. Next: {step.name.lower()} -- "
+            f"{step.remedy()}. The whole checklist is at {where}.",
+            title="Nothing here yet", timeout=20)
 
     def _populate_language_filter(self) -> None:
         """Populate the language filter dropdown with available languages."""
@@ -3151,6 +3576,11 @@ class DossierApp(App):
             "tab-sweep": self._load_sweep_tab,
             "tab-topology": self._load_topology_tab,
             "tab-threads": self._load_threads_tab,
+            # Unscoped for the strongest version of the reason: the checklist
+            # is about the installation reading the repositories, so scoping
+            # it to a selection would scope "is this working" to one row --
+            # and it has to load on a dossier with no rows to select.
+            "tab-setup": self._load_setup_tab,
         }
         if tab_id in unscoped:
             unscoped[tab_id](getattr(self, "_current_project", None))
@@ -4453,6 +4883,26 @@ class DossierApp(App):
         # both scopes see the same rows -- which is the honest answer and not a
         # shortcut.
         self._render_facet_for_project(only_on("tab-threads"), project)
+
+    def _load_setup_tab(self, project=None) -> None:
+        """Fill the checklist from the same facet `dossier show setup` reads.
+
+        One facet, not a second reading. The pane and the command cannot
+        disagree about whether this installation is set up, which is the
+        property every other pane on this screen is built on.
+        """
+        from dossier.facets import only_on
+
+        facet = only_on("tab-setup")
+        self._render_facet_for_project(facet, project)
+        try:
+            with self.session_factory() as session:
+                said = facet.org(session, None, 0).note
+            self.query_one("#setup-note", Static).update(said)
+        except Exception:                          # noqa: BLE001
+            # The table is already drawn; a note that could not be built is
+            # not a reason to blank it.
+            pass
 
     def _load_deltas_tab(self, project: Project) -> None:
         """Load deltas tab."""
@@ -7349,316 +7799,154 @@ class DossierApp(App):
             )
             self.run_sync_batch(projects)
     
+    # **BOTH SYNC PATHS GO THROUGH `dossier.download` NOW, AND BEFORE THIS
+    # NEITHER OF THEM WORKED.** There were three implementations of "fetch a
+    # repository and store it" -- one on the command line and two here -- and
+    # the two here were the wrong ones:
+    #
+    #   * `run_sync_batch` fetched contributors, issues, languages,
+    #     dependencies, branches, pull requests and releases, **discarded all
+    #     seven**, and then called `.get()` on a `GitHubRepo` dataclass. That
+    #     raises `AttributeError`; its own `except Exception` caught it; and
+    #     the dashboard reported "Failed to sync" for every project in every
+    #     batch. `s` and the ring's sync both end here, so neither worked.
+    #   * `run_sync` wrote `ProjectBranch(committed_at=...)` and
+    #     `ProjectPullRequest(created_at=, merged_at=, closed_at=)` -- four
+    #     keys the client does not emit. SQLModel drops keyword arguments it
+    #     does not recognise, so nothing failed and every branch landed with no
+    #     commit date and every pull request with no timestamps.
+    #
+    # Neither is visible from inside the method that has it. Both are obvious
+    # from a list, which is the argument `actions.py` makes about routes and
+    # this is the same argument applied to the write.
     @work(exclusive=True, thread=True)
     def run_sync_batch(self, projects: list) -> None:
-        """Sync multiple projects in sequence."""
-        from dossier.parsers import GitHubParser, GitHubClient
+        """Sync several projects, one at a time, reporting each as it lands."""
+        from dossier import download as fetching
+        from dossier.parsers import GitHubClient, GitHubParser
+        from dossier.parsers.github import GitHubRepo
         import os
-        
+
         token = os.environ.get("GITHUB_TOKEN")
-        success_count = 0
-        
+        wanted = [p for p in projects if p.github_owner and p.github_repo]
+        if not wanted:
+            self.call_from_thread(
+                self.notify,
+                "None of the selected projects records a GitHub owner and "
+                "repository, so there is nothing to fetch.",
+                severity="warning")
+            return
+
         # DETERMINATE HERE, AND ONLY HERE. This one really does know how far
         # along it is -- N repositories, one at a time -- so the bar carries a
         # fraction rather than a pulse. The ingest next door cannot, and does
         # not pretend to.
         self.call_from_thread(self._progress_start,
-                              f"syncing {len(projects)} repositories",
-                              len(projects))
+                              f"syncing {len(wanted)} repositories",
+                              len(wanted))
 
-        for i, project in enumerate(projects):
+        def landed(one) -> None:
             self.call_from_thread(
-                self._progress_advance, i, len(projects),
-                f"syncing {i + 1} of {len(projects)}: {project.name}")
-            
-            if not project.github_owner or not project.github_repo:
-                continue
-            
-            try:
-                with GitHubParser(token) as parser:
-                    repo, sections = parser.parse_repo(
-                        project.github_owner,
-                        project.github_repo,
-                    )
-                
-                with GitHubClient(token) as client:
-                    contributors = client.get_contributors(project.github_owner, project.github_repo)
-                    issues = client.get_issues(project.github_owner, project.github_repo, state="all")
-                    languages = client.get_languages(project.github_owner, project.github_repo)
-                    dependencies = client.get_dependencies(project.github_owner, project.github_repo)
-                    branches = client.get_branches(project.github_owner, project.github_repo)
-                    prs = client.get_pull_requests(project.github_owner, project.github_repo, state="all")
-                    releases = client.get_releases(project.github_owner, project.github_repo)
-                
+                self._progress_advance, one.index, one.total,
+                f"{one.outcome} {one.index} of {one.total}: {one.repo}")
+
+        repos = [GitHubRepo(owner=p.github_owner, name=p.github_repo)
+                 for p in wanted]
+        try:
+            with GitHubParser(token) as parser, GitHubClient(token) as client:
                 with self.session_factory() as session:
-                    from datetime import datetime, timezone
-                    
-                    db_project = session.get(Project, project.id)
-                    if db_project:
-                        db_project.description = repo.get("description") or db_project.description
-                        db_project.github_stars = repo.get("stargazers_count")
-                        db_project.github_language = repo.get("language")
-                        db_project.last_synced_at = datetime.now(timezone.utc)
-                        session.add(db_project)
-                        session.commit()
-                
-                success_count += 1
-                
-            except Exception as e:
-                self.call_from_thread(
-                    self.notify,
-                    f"Failed to sync {project.name}: {e}",
-                    severity="error",
-                )
-        
+                    report = fetching.download(
+                        session, parser, client, repos,
+                        on_each=landed,
+                        # Selected by hand and asked for on purpose: passing
+                        # over what was synced an hour ago would make the key
+                        # look broken.
+                        force=True)
+        except Exception as exc:                   # noqa: BLE001
+            self.call_from_thread(self._progress_finish, f"sync failed: {exc}")
+            self.call_from_thread(self.notify, f"Sync failed: {exc}",
+                                  severity="error", title="Sync")
+            return
+
+        # **THE ONES WITH NO GITHUB OWNER ARE NAMED, NOT DROPPED IN
+        # SILENCE.** A count that quietly shrinks between what was asked for
+        # and what was fetched is how somebody comes to believe a repository
+        # was refreshed when it was never eligible.
+        said = report.summary()
+        without = len(projects) - len(wanted)
+        if without:
+            said += (f". {without} of the {len(projects)} selected record no "
+                     f"GitHub owner, so there was nothing to fetch for them")
+        self.call_from_thread(self._progress_finish, said)
         self.call_from_thread(
-            self._progress_finish,
-            f"synced {success_count} of {len(projects)}")
-        self.call_from_thread(
-            self.notify,
-            f"Synced {success_count}/{len(projects)} projects",
-            title="Batch Sync Complete",
-        )
+            self.notify, said,
+            title="Sync complete",
+            severity="warning" if report.failed else "information")
         self.call_from_thread(self.load_projects)
         self.call_from_thread(self.action_clear_selection)
 
     @work(exclusive=True, thread=True)
     def run_sync(self, project: Project) -> None:
-        """Run sync in background thread."""
-        from dossier.parsers import GitHubParser, GitHubClient
+        """Sync one project. The same writer, for one repository."""
+        from dossier import download as fetching
+        from dossier.parsers import GitHubClient, GitHubParser
+        from dossier.parsers.github import GitHubRepo
         import os
-        
+
         token = os.environ.get("GITHUB_TOKEN")
-        
+
         if not project.github_owner or not project.github_repo:
             self.call_from_thread(
                 self.notify,
-                "Project has no GitHub info",
-                severity="error",
-            )
+                f"{project.name} records no GitHub owner and repository, so "
+                f"there is nothing to fetch.",
+                severity="error")
             return
-        
+
         try:
-            with GitHubParser(token) as parser:
-                repo, sections = parser.parse_repo(
-                    project.github_owner,
-                    project.github_repo,
-                )
-            
-            # Also fetch extended data
-            with GitHubClient(token) as client:
-                contributors = client.get_contributors(
-                    project.github_owner, project.github_repo
-                )
-                issues = client.get_issues(
-                    project.github_owner, project.github_repo, state="all"
-                )
-                languages = client.get_languages(
-                    project.github_owner, project.github_repo
-                )
-                dependencies = client.get_dependencies(
-                    project.github_owner, project.github_repo
-                )
-                branches = client.get_branches(
-                    project.github_owner, project.github_repo
-                )
-                pull_requests = client.get_pull_requests(
-                    project.github_owner, project.github_repo, state="all"
-                )
-                releases = client.get_releases(
-                    project.github_owner, project.github_repo
-                )
-            
-            with self.session_factory() as session:
-                # Update project
-                db_project = session.exec(
-                    select(Project).where(Project.id == project.id)
-                ).first()
-                
-                if db_project:
-                    db_project.github_stars = repo.stars
-                    db_project.github_language = repo.language
-                    db_project.description = repo.description
-                    from dossier.models import utcnow
-                    db_project.last_synced_at = utcnow()
-                    
-                    # Remove old sections
-                    old_sections = session.exec(
-                        select(DocumentSection).where(
-                            DocumentSection.project_id == project.id
-                        )
-                    ).all()
-                    for old in old_sections:
-                        session.delete(old)
-                    
-                    # Add new sections
-                    for section in sections:
-                        section.project_id = project.id
-                        session.add(section)
-                    
-                    # Remove and add contributors
-                    old_contribs = session.exec(
-                        select(ProjectContributor).where(
-                            ProjectContributor.project_id == project.id
-                        )
-                    ).all()
-                    for old in old_contribs:
-                        session.delete(old)
-                    
-                    for contrib in contributors:
-                        session.add(ProjectContributor(
-                            project_id=project.id,
-                            username=contrib["username"],
-                            avatar_url=contrib.get("avatar_url"),
-                            contributions=contrib.get("contributions", 0),
-                            profile_url=contrib.get("profile_url"),
-                        ))
-                    
-                    # Remove and add issues
-                    old_issues = session.exec(
-                        select(ProjectIssue).where(
-                            ProjectIssue.project_id == project.id
-                        )
-                    ).all()
-                    for old in old_issues:
-                        session.delete(old)
-                    
-                    for issue in issues:
-                        session.add(ProjectIssue(
-                            project_id=project.id,
-                            issue_number=issue["issue_number"],
-                            title=issue["title"],
-                            state=issue.get("state", "open"),
-                            author=issue.get("author"),
-                            labels=issue.get("labels"),
-                        ))
-                    
-                    # Remove and add languages
-                    old_langs = session.exec(
-                        select(ProjectLanguage).where(
-                            ProjectLanguage.project_id == project.id
-                        )
-                    ).all()
-                    for old in old_langs:
-                        session.delete(old)
-                    
-                    for lang in languages:
-                        session.add(ProjectLanguage(
-                            project_id=project.id,
-                            language=lang["language"],
-                            bytes_count=lang.get("bytes_count", 0),
-                            percentage=lang.get("percentage", 0.0),
-                        ))
-                    
-                    # Remove and add dependencies
-                    old_deps = session.exec(
-                        select(ProjectDependency).where(
-                            ProjectDependency.project_id == project.id
-                        )
-                    ).all()
-                    for old in old_deps:
-                        session.delete(old)
-                    
-                    for dep in dependencies:
-                        session.add(ProjectDependency(
-                            project_id=project.id,
-                            name=dep["name"],
-                            version_spec=dep.get("version_spec"),
-                            dep_type=dep.get("dep_type", "runtime"),
-                            source=dep.get("source", "unknown"),
-                        ))
-                    
-                    # Remove and add branches
-                    old_branches = session.exec(
-                        select(ProjectBranch).where(
-                            ProjectBranch.project_id == project.id
-                        )
-                    ).all()
-                    for old in old_branches:
-                        session.delete(old)
-                    
-                    for branch in branches:
-                        session.add(ProjectBranch(
-                            project_id=project.id,
-                            name=branch["name"],
-                            is_default=branch.get("is_default", False),
-                            is_protected=branch.get("is_protected", False),
-                            commit_sha=branch.get("commit_sha"),
-                            commit_message=branch.get("commit_message"),
-                            commit_author=branch.get("commit_author"),
-                            committed_at=branch.get("committed_at"),
-                        ))
-                    
-                    # Remove and add pull requests
-                    old_prs = session.exec(
-                        select(ProjectPullRequest).where(
-                            ProjectPullRequest.project_id == project.id
-                        )
-                    ).all()
-                    for old in old_prs:
-                        session.delete(old)
-                    
-                    for pr in pull_requests:
-                        session.add(ProjectPullRequest(
-                            project_id=project.id,
-                            pr_number=pr["pr_number"],
-                            title=pr["title"],
-                            state=pr.get("state", "open"),
-                            author=pr.get("author"),
-                            base_branch=pr.get("base_branch"),
-                            head_branch=pr.get("head_branch"),
-                            is_draft=pr.get("is_draft", False),
-                            is_merged=pr.get("is_merged", False),
-                            additions=pr.get("additions", 0),
-                            deletions=pr.get("deletions", 0),
-                            labels=pr.get("labels"),
-                            created_at=pr.get("created_at"),
-                            merged_at=pr.get("merged_at"),
-                            closed_at=pr.get("closed_at"),
-                        ))
-                    
-                    # Remove and add releases
-                    old_releases = session.exec(
-                        select(ProjectRelease).where(
-                            ProjectRelease.project_id == project.id
-                        )
-                    ).all()
-                    for old in old_releases:
-                        session.delete(old)
-                    
-                    for release in releases:
-                        session.add(ProjectRelease(
-                            project_id=project.id,
-                            tag_name=release["tag_name"],
-                            name=release.get("name"),
-                            body=release.get("body"),
-                            is_prerelease=release.get("is_prerelease", False),
-                            is_draft=release.get("is_draft", False),
-                            author=release.get("author"),
-                            target_commitish=release.get("target_commitish"),
-                            release_created_at=release.get("release_created_at"),
-                            release_published_at=release.get("release_published_at"),
-                        ))
-                    
+            with GitHubParser(token) as parser, GitHubClient(token) as client:
+                with self.session_factory() as session:
+                    stored = fetching.absorb(
+                        session, parser, client,
+                        GitHubRepo(owner=project.github_owner,
+                                   name=project.github_repo))
                     session.commit()
-                    
-                    # Auto-link languages, dependencies, and contributors as component projects
-                    self._auto_link_components(session, project.id, languages, dependencies, contributors)
-            
-            stats = f"{len(sections)} docs, {len(languages)} langs, {len(dependencies)} deps, {len(contributors)} contribs, {len(issues)} issues, {len(pull_requests)} PRs, {len(releases)} releases"
-            self.call_from_thread(
-                self.notify,
-                f"Synced {project.name}: {stats}",
-                title="Sync Complete",
-            )
-            self.call_from_thread(self.action_refresh)
-            
-        except Exception as e:
-            self.call_from_thread(
-                self.notify,
-                f"Sync failed: {e}",
-                severity="error",
-            )
+                    # **KEPT, AND IT IS THE PANEL'S ALONE.** The command line
+                    # has never auto-linked; folding it into `absorb` would
+                    # give every `dossier github sync` a graph of `lang/*` and
+                    # `pkg/*` projects nobody asked it for.
+                    self._auto_link_stored(session, stored.id)
+                    session.commit()
+        except Exception as exc:                   # noqa: BLE001
+            self.call_from_thread(self.notify, f"Sync failed: {exc}",
+                                  severity="error")
+            return
+
+        self.call_from_thread(self.notify, f"Synced {project.name}",
+                              title="Sync complete")
+        self.call_from_thread(self.action_refresh)
+
+    def _auto_link_stored(self, session, project_id: int) -> None:
+        """Link what was just stored as component projects.
+
+        **READ BACK FROM THE DATABASE, NOT FROM THE FETCH.** `absorb` is the
+        one writer, and threading its seven intermediate lists back out to a
+        caller would make it a writer *and* a reporter -- which is how the old
+        batch sync came to hold seven lists it never stored. The rows are in
+        the database a line above this, so reading them is one query and
+        cannot disagree with what landed.
+        """
+        languages = [{"language": row.language} for row in session.exec(
+            select(ProjectLanguage).where(
+                ProjectLanguage.project_id == project_id)).all()]
+        dependencies = [{"name": row.name} for row in session.exec(
+            select(ProjectDependency).where(
+                ProjectDependency.project_id == project_id)).all()]
+        contributors = [{"username": row.username} for row in session.exec(
+            select(ProjectContributor).where(
+                ProjectContributor.project_id == project_id)).all()]
+        self._auto_link_components(session, project_id, languages,
+                                   dependencies, contributors)
     
     def _auto_link_components(
         self, 
@@ -7887,170 +8175,62 @@ class DossierApp(App):
     
     @work(exclusive=True, thread=True)
     def add_from_github(self, url: str) -> None:
-        """Add a project from GitHub URL."""
-        from dossier.parsers import GitHubParser, GitHubClient
+        """Add one project from a GitHub URL, or `owner/repo`.
+
+        **THE FOURTH COPY OF THE WRITE, AND IT IS THE SAME WRITE.** This built
+        its own `Project` and its own eight tables from the same client as the
+        two sync paths did, which is how four descriptions of one act came to
+        disagree about four column names. `dossier.download.absorb` is the one
+        that knows; this decides only *which* repository and what to say.
+        """
+        from dossier import download as fetching
+        from dossier.parsers import GitHubClient, GitHubParser
         from dossier.parsers.github import GitHubRepo
         import os
-        
+
         token = os.environ.get("GITHUB_TOKEN")
-        
+
         try:
-            # Parse URL to get owner/repo
-            if "github.com" not in url:
-                # Assume owner/repo format
-                parts = url.split("/")
-                if len(parts) == 2:
-                    url = f"https://github.com/{url}"
-            
-            with GitHubParser(token) as parser:
-                repo, sections = parser.parse_repo_url(url)
-            
-            # Also fetch extended data
-            with GitHubClient(token) as client:
-                contributors = client.get_contributors(repo.owner, repo.name)
-                issues = client.get_issues(repo.owner, repo.name, state="all")
-                languages = client.get_languages(repo.owner, repo.name)
-                dependencies = client.get_dependencies(repo.owner, repo.name)
-                branches = client.get_branches(repo.owner, repo.name)
-                pull_requests = client.get_pull_requests(repo.owner, repo.name, state="all")
-                releases = client.get_releases(repo.owner, repo.name)
-            
-            project_name = f"{repo.owner}/{repo.name}"
-            
+            wanted = (GitHubRepo.from_url(url) if "github.com" in url
+                      else GitHubRepo.from_url(f"https://github.com/{url}"))
+        except ValueError:
+            self.call_from_thread(
+                self.notify,
+                f"{url!r} is not a repository. Give a GitHub URL or "
+                f"`owner/repo`.",
+                severity="error")
+            return
+
+        try:
             with self.session_factory() as session:
-                existing = session.exec(
-                    select(Project).where(Project.name == project_name)
-                ).first()
-                
-                if existing:
+                held = session.exec(select(Project).where(
+                    Project.name == wanted.full_name)).first()
+                if held:
                     self.call_from_thread(
                         self.notify,
-                        f"Project '{project_name}' already exists",
-                        severity="warning",
-                    )
+                        f"{wanted.full_name} is already here. Sync it to make "
+                        f"it current.",
+                        severity="warning")
                     return
-                
-                from dossier.models import utcnow
-                project = Project(
-                    name=project_name,
-                    description=repo.description,
-                    repository_url=repo.html_url,
-                    github_owner=repo.owner,
-                    github_repo=repo.name,
-                    github_stars=repo.stars,
-                    github_language=repo.language,
-                    last_synced_at=utcnow(),
-                )
-                session.add(project)
-                session.flush()
-                
-                for section in sections:
-                    section.project_id = project.id
-                    session.add(section)
-                
-                # Add contributors
-                for contrib in contributors:
-                    session.add(ProjectContributor(
-                        project_id=project.id,
-                        username=contrib["username"],
-                        avatar_url=contrib.get("avatar_url"),
-                        contributions=contrib.get("contributions", 0),
-                        profile_url=contrib.get("profile_url"),
-                    ))
-                
-                # Add issues
-                for issue in issues:
-                    session.add(ProjectIssue(
-                        project_id=project.id,
-                        issue_number=issue["issue_number"],
-                        title=issue["title"],
-                        state=issue.get("state", "open"),
-                        author=issue.get("author"),
-                        labels=issue.get("labels"),
-                    ))
-                
-                # Add languages
-                for lang in languages:
-                    session.add(ProjectLanguage(
-                        project_id=project.id,
-                        language=lang["language"],
-                        bytes_count=lang.get("bytes_count", 0),
-                        percentage=lang.get("percentage", 0.0),
-                    ))
-                
-                # Add dependencies
-                for dep in dependencies:
-                    session.add(ProjectDependency(
-                        project_id=project.id,
-                        name=dep["name"],
-                        version_spec=dep.get("version_spec"),
-                        dep_type=dep.get("dep_type", "runtime"),
-                        source=dep.get("source", "unknown"),
-                    ))
-                
-                # Add branches
-                for branch in branches:
-                    session.add(ProjectBranch(
-                        project_id=project.id,
-                        name=branch["name"],
-                        is_default=branch.get("is_default", False),
-                        is_protected=branch.get("is_protected", False),
-                        commit_sha=branch.get("commit_sha"),
-                        commit_message=branch.get("commit_message"),
-                        commit_author=branch.get("commit_author"),
-                        committed_at=branch.get("committed_at"),
-                    ))
-                
-                # Add pull requests
-                for pr in pull_requests:
-                    session.add(ProjectPullRequest(
-                        project_id=project.id,
-                        pr_number=pr["pr_number"],
-                        title=pr["title"],
-                        state=pr.get("state", "open"),
-                        author=pr.get("author"),
-                        base_branch=pr.get("base_branch"),
-                        head_branch=pr.get("head_branch"),
-                        is_draft=pr.get("is_draft", False),
-                        is_merged=pr.get("is_merged", False),
-                        additions=pr.get("additions", 0),
-                        deletions=pr.get("deletions", 0),
-                        labels=pr.get("labels"),
-                        created_at=pr.get("created_at"),
-                        merged_at=pr.get("merged_at"),
-                        closed_at=pr.get("closed_at"),
-                    ))
-                
-                # Add releases
-                for release in releases:
-                    session.add(ProjectRelease(
-                        project_id=project.id,
-                        tag_name=release["tag_name"],
-                        name=release.get("name"),
-                        body=release.get("body"),
-                        is_prerelease=release.get("is_prerelease", False),
-                        is_draft=release.get("is_draft", False),
-                        author=release.get("author"),
-                        target_commitish=release.get("target_commitish"),
-                        release_created_at=release.get("release_created_at"),
-                        release_published_at=release.get("release_published_at"),
-                    ))
-                
-                session.commit()
-            
-            stats = f"{len(sections)} docs, {len(languages)} langs, {len(dependencies)} deps, {len(pull_requests)} PRs, {len(releases)} releases"
-            self.call_from_thread(
-                self.notify,
-                f"Added {project_name}: {stats}",
-            )
-            self.call_from_thread(self.action_refresh)
-            
-        except Exception as e:
-            self.call_from_thread(
-                self.notify,
-                f"Failed to add: {e}",
-                severity="error",
-            )
+
+                with GitHubParser(token) as parser, \
+                        GitHubClient(token) as client:
+                    # **THE REPOSITORY IS READ BACK FROM GITHUB, NOT TAKEN
+                    # FROM THE URL.** The URL gives an owner and a name and
+                    # nothing else -- no description, no default branch, no
+                    # star count -- and a row built from it would look added
+                    # and be empty until the first sync.
+                    fetching.absorb(session, parser, client,
+                                    client.get_repo(wanted.owner, wanted.name))
+                    session.commit()
+        except Exception as exc:                   # noqa: BLE001
+            self.call_from_thread(self.notify, f"Failed to add: {exc}",
+                                  severity="error")
+            return
+
+        self.call_from_thread(self.notify, f"Added {wanted.full_name}",
+                              title="Added")
+        self.call_from_thread(self.action_refresh)
     
     def action_delete(self) -> None:
         """Delete the selected project(s)."""
