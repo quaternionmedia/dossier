@@ -68,3 +68,10 @@ def _no_live_harness(monkeypatch):
     # `tests/core/test_harness_run.py`.
     monkeypatch.setattr(DossierApp, "_send_goal_worker",
                         lambda self, goal, context: None, raising=False)
+    # The thread archive is fetched over the harness's seam, and the Harness tab
+    # it lives on loads on the mount path, so its worker would do real I/O in
+    # every UI test. Stub the whole loader -- not just its worker, which would
+    # leave the table in its loading state -- so the archive table is untouched
+    # and a test that needs a row injects one directly.
+    monkeypatch.setattr(DossierApp, "_load_threads_tab",
+                        lambda self, project=None: None, raising=False)

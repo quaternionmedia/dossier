@@ -30,7 +30,7 @@ def app_for():
 
 
 async def open_threads(pilot, app):
-    app._activate_tab("tab-deltas")
+    app._activate_tab("tab-harness")
     await pilot.pause()
     await pilot.pause()
 

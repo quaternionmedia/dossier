@@ -27,11 +27,14 @@ depth -- so it is never an item and no number contains it. Arrows and
       `dossier show issues`
   - **`8.6`  Plan**
     - `8.6.8`  On deck -- `m` `8` `6` `8`
-      Open deltas, every open pull request no delta claims, and every line of work in flight -- the harness's threads, read over its seam.
-      `dossier governance threads`
+      Open deltas and every open pull request no delta claims -- the units of work on deck. The harness's threads moved to Harness, in Seams, with the rest of what the harness reports.
+      `dossier show deltas`
     - `8.6.6`  Sweep -- `m` `8` `6` `6`
       What one dependency change would touch and where it needs a person, and what a cleanup of this workstation would get back -- the two sweeps, one that spans the estate and one that spans the disk.
       `dossier sweep`
+    - `8.6.2`  Goals -- `m` `8` `6` `2`
+      Send the harness a new goal, and read the plan it drafts.
+      `dossier harness goal`
   - **`8.2`  Explore**
     - `8.2.8`  Dossier -- `m` `8` `2` `8`
       One repository in one reading: its own facts, the document and parts it is composed of, and the languages it is written in -- the consistent overview of a repository dossier holds.
@@ -57,14 +60,11 @@ depth -- so it is never an item and no number contains it. Arrows and
       `dossier governance show`
   - **`8.9`  Seams**
     - `8.9.8`  Harness -- `m` `8` `9` `8`
-      What the harness ran, when, and whether it finished.
+      What the harness ran, when and whether it finished, and the conversations it has archived as deltas.
       `dossier harness ingest`
     - `8.9.6`  Topology -- `m` `8` `9` `6`
       How the harness, its projects and their deltas connect.
       `dossier topology`
-    - `8.9.2`  Goals -- `m` `8` `9` `2`
-      Send the harness a new goal, and read the plan it drafts.
-      `dossier harness goal`
 - **`6`  Do**
   - `6.8`  Advance phase -- `m` `6` `8`
     *in the application only*
@@ -156,6 +156,7 @@ cell taken from something else.
   dossier github sync-user
   dossier governance dashboard
   dossier governance load
+  dossier governance threads
   dossier graph build
   dossier graph build-all
   dossier graph stats

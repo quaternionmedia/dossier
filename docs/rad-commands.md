@@ -35,6 +35,7 @@ same cell.
 | `8.6` | `m` `8` `6` | &nbsp;&nbsp;Plan | *opens a submenu* | yes |
 | `8.6.8` | `m` `8` `6` `8` | &nbsp;&nbsp;&nbsp;&nbsp;On deck | `view.deltas` | yes |
 | `8.6.6` | `m` `8` `6` `6` | &nbsp;&nbsp;&nbsp;&nbsp;Sweep | `view.sweep` | yes |
+| `8.6.2` | `m` `8` `6` `2` | &nbsp;&nbsp;&nbsp;&nbsp;Goals | `view.goals` | yes |
 | `8.2` | `m` `8` `2` | &nbsp;&nbsp;Explore | *opens a submenu* | yes |
 | `8.2.8` | `m` `8` `2` `8` | &nbsp;&nbsp;&nbsp;&nbsp;Dossier | `view.dossier` | yes |
 | `8.2.6` | `m` `8` `2` `6` | &nbsp;&nbsp;&nbsp;&nbsp;Documentation | `view.docs` | yes |
@@ -47,7 +48,6 @@ same cell.
 | `8.9` | `m` `8` `9` | &nbsp;&nbsp;Seams | *opens a submenu* | yes |
 | `8.9.8` | `m` `8` `9` `8` | &nbsp;&nbsp;&nbsp;&nbsp;Harness | `view.harness` | yes |
 | `8.9.6` | `m` `8` `9` `6` | &nbsp;&nbsp;&nbsp;&nbsp;Topology | `view.topology` | yes |
-| `8.9.2` | `m` `8` `9` `2` | &nbsp;&nbsp;&nbsp;&nbsp;Goals | `view.goals` | yes |
 | `6` | `m` `6` | Do | *opens a submenu* | yes |
 | `6.8` | `m` `6` `8` | &nbsp;&nbsp;Advance phase | `delta.advance` | yes |
 | `6.6` | `m` `6` `6` | &nbsp;&nbsp;Add note | `delta.note` | yes |

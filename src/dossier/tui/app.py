@@ -616,24 +616,12 @@ class DossierApp(App):
         elif tab == "tab-issues":
             yield DataTable(id="issues-table")
         elif tab == "tab-deltas":
-            # Deltas are the planned units of work; threads are the lines of
-            # work in flight, read over the harness's seam. One tab, because a
-            # reader should not pick between them before knowing which they need.
+            # The units of work on deck: a repository's open deltas, or the
+            # estate's. The harness's thread archive used to share this tab; a
+            # thread is a delta, but it is the harness's, so it moved to Harness
+            # in Seams with the rest of what the harness reports.
             with Vertical():
                 yield DataTable(id="deltas-table")
-                yield Static("Threads -- lines of work in flight, over the "
-                             "harness's seam", id="threads-heading")
-                yield DataTable(id="threads-table")
-                with Horizontal(id="thread-buttons"):
-                    yield Input(placeholder="path to an export "
-                                            "(conversations.json or the "
-                                            "folder holding it)",
-                                id="thread-export-path")
-                    yield Button("Ingest", id="btn-ingest-threads",
-                                 variant="primary")
-                    yield Button("Read", id="btn-read-thread",
-                                 variant="default")
-                yield WorkProgress(id="thread-progress")
         elif tab == "tab-sweep":
             # Two sweeps in one view: a dependency change across the estate, and
             # a reclaim across this workstation's disk. A review is a thing you
@@ -738,6 +726,22 @@ class DossierApp(App):
                 yield Input(
                     placeholder="answer the harness's question, then Enter",
                     id="harness-answer")
+                # The archive: the conversations the harness has kept, as
+                # deltas. A harness reading like the invocations above, moved
+                # here from On deck so Seams holds what the harness reports.
+                yield Static("Thread archive -- conversations the harness kept, "
+                             "as deltas", id="threads-heading")
+                yield DataTable(id="threads-table")
+                with Horizontal(id="thread-buttons"):
+                    yield Input(placeholder="path to an export "
+                                            "(conversations.json or the "
+                                            "folder holding it)",
+                                id="thread-export-path")
+                    yield Button("Ingest", id="btn-ingest-threads",
+                                 variant="primary")
+                    yield Button("Read", id="btn-read-thread",
+                                 variant="default")
+                yield WorkProgress(id="thread-progress")
         elif tab == "tab-topology":
             with Vertical():
                 yield Static("", id="topology-caveat")
@@ -1095,11 +1099,12 @@ class DossierApp(App):
         it, which is the whole complaint `PRINCIPLES.md` P13 is about.
         """
         try:
-            self._activate_tab("tab-deltas")
+            self._activate_tab("tab-harness")
             # Filled on arrival rather than left to whatever fires on a tab
             # change: a person routed here by `4.6` should see the archive they
-            # are about to add to, not an empty table.
-            self._load_tab_data("tab-deltas")
+            # are about to add to, not an empty table. The archive lives under
+            # Harness now, in Seams, with the rest of what the harness reports.
+            self._load_tab_data("tab-harness")
         except Exception:
             pass
 
@@ -1430,8 +1435,8 @@ class DossierApp(App):
         export somebody might not still have.
         """
         try:
-            self._activate_tab("tab-deltas")
-            self._load_tab_data("tab-deltas")
+            self._activate_tab("tab-harness")
+            self._load_tab_data("tab-harness")
         except Exception:
             pass
         self._progress_start(self.RECONCILE_STAGES[0][1],
@@ -4365,6 +4370,10 @@ class DossierApp(App):
         with self.session_factory() as session:
             section = FACET_BY_KEY["harness"].at(session, ids=None, limit=self.TAB_ROWS)
         self._render_section("harness-table", section)
+        # The archive: the conversations the harness has kept, as deltas. A
+        # harness reading like the invocations, moved here from On deck so Seams
+        # holds what the harness reports and Plan holds what dossier records.
+        self._load_threads_tab()
         # The live half: what the harness is running now and what it is asking,
         # read over the seam in a worker so the loop never stops for it.
         self._refresh_harness_live()
@@ -5113,41 +5122,77 @@ class DossierApp(App):
             "governance/qm/ci/attested-registry.yaml.")
 
     def _load_on_deck_tab(self, project=None) -> None:
-        """The On-deck tab holds two readings: a repository's deltas (units of
-        planned work) and the harness's threads (lines of work in flight, over
-        its seam). The deltas are scoped to a repository and stay blank until
-        one is chosen -- as they did before the fold; the threads are not, and
-        load either way."""
+        """On deck is the units of work, from dossier's own record: a
+        repository's open deltas, or the estate's. The harness's thread archive
+        shared this tab before it moved to Harness in Seams, so nothing here
+        crosses the seam any more -- On deck is Plan's, and Plan is the work
+        dossier decides on.
+
+        It fills at either scope: a repository's deltas when one is selected,
+        and the open deltas across the estate when one is not, so the tab is not
+        blank where the archive used to fill it."""
         if project is not None:
             self._load_deltas_tab(project)
-        self._load_threads_tab(project)
+            return
+        owner = getattr(self, "_scope_owner", None)
+        if owner:
+            self._render_facet_at_org(FACET_BY_KEY["deltas"], owner)
+            return
+        # Nothing selected at all: the open deltas across everything, so the tab
+        # answers rather than sitting blank until a scope is chosen.
+        with self.session_factory() as session:
+            section = FACET_BY_KEY["deltas"].at(session, ids=None,
+                                                limit=self.TAB_ROWS)
+        self._render_section("deltas-table", section)
 
     def _load_threads_tab(self, project=None) -> None:
-        """Fill the archive table from the same facet the overview reads.
+        """Fill the archive table from the harness, off the UI thread.
 
-        **THIS DID NOT EXIST, AND THAT IS WHY NOTHING EVER APPEARED HERE.** The
-        tab was composed, the columns were defined, the facet was written and
-        the overview drew its own section from it -- and `_load_tab_data` had no
-        entry for this tab, so the table was never filled. Ingesting an export
-        reported two hundred and three threads onto an empty screen, which is
-        the shape of failure somebody reported as "I cannot get an export to
-        display in threads".
+        **THE ARCHIVE IS FETCHED OVER THE HARNESS'S SEAM**, which is the facet's
+        `beyond_the_database` cost, and the Harness tab it now lives on is
+        loaded on the mount path (it is a global view). Rendering it inline
+        would block the whole application on an HTTP round trip before the first
+        frame -- so it loads in a worker the way the hygiene survey does, and
+        the invocations beside it, which are a database read, are already drawn.
 
-        One facet, not a second query. `threads_org` is what the overview's
-        section uses, so the tab and the overview cannot disagree about what a
-        row is -- which is the property the two axes of this screen are built
-        on.
+        `threads_org` is what the overview's section uses, so the tab and the
+        overview cannot disagree about what a row is. The archive is not scoped
+        to a repository, so `project` is ignored: both scopes see the same rows.
         """
-        from dossier.facets import BY_TAB
+        try:
+            table = self.query_one("#threads-table", DataTable)
+        except Exception:                          # noqa: BLE001
+            return
+        table.loading = True
+        self._read_threads()
 
-        # THROUGH THE FACET, NOT A SECOND QUERY. `_render_facet_at_org` already
-        # draws this table when an owner is in scope; the gap was only the
-        # project path, and filling it with its own query would give the same
-        # tab two ways of deciding what a row is. `threads_project` delegates to
-        # `threads_org` because an archive is not scoped to a repository, so
-        # both scopes see the same rows -- which is the honest answer and not a
-        # shortcut.
-        self._render_facet_for_project(FACET_BY_KEY["threads"], project)
+    @work(thread=True, exclusive=True, group="threads")
+    def _read_threads(self) -> None:
+        from dossier.facets import BY_KEY
+
+        facet = BY_KEY["threads"]
+        try:
+            with self.session_factory() as session:
+                section = facet.at(session, ids=None, limit=self.TAB_ROWS)
+        except Exception as exc:                    # noqa: BLE001
+            self.call_from_thread(self._threads_failed, f"{exc}")
+            return
+        self.call_from_thread(self._threads_read, facet, section)
+
+    def _threads_read(self, facet, section) -> None:
+        self._render_section(facet.table, section)
+        try:
+            self.query_one(f"#{facet.table}", DataTable).loading = False
+        except Exception:                          # noqa: BLE001
+            pass
+
+    def _threads_failed(self, said: str) -> None:
+        try:
+            self.query_one("#threads-table", DataTable).loading = False
+        except Exception:                          # noqa: BLE001
+            pass
+        self.notify(f"the archive could not be read: {said}",
+                    severity="error", title="Thread archive", timeout=8)
 
     def _load_deltas_tab(self, project: Project) -> None:
         """Load deltas tab."""

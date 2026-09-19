@@ -933,11 +933,13 @@ FACETS: tuple[Facet, ...] = (
           "tab-harness", "harness-table", harness_org, harness_project),
     Facet("waiting", "Outstanding", "Outstanding",
           "tab-waiting", "waiting-table", waiting_org, waiting_project),
-    # On the On-deck tab beside the deltas facet, not a tab of its own: a delta
-    # is a unit of planned work and a thread is a line of work in flight, and a
-    # reader should not have to pick the tab before knowing which they need.
+    # On the Harness tab beside the invocations, not a tab of its own: the
+    # archive is a reading of what the harness holds, fetched over its seam, and
+    # it belongs with the other harness readings rather than beside the deltas
+    # in Plan. A thread is a delta, but it is the harness's delta -- Plan is the
+    # work dossier records, Seams is what the harness reports.
     Facet("threads", "Thread archive", "Threads",
-          "tab-deltas", "threads-table", threads_org, threads_project,
+          "tab-harness", "threads-table", threads_org, threads_project,
           beyond_the_database="asks the harness over HTTP"),
     # Its own tab, not `tab-branches`. `BY_TAB` is keyed by tab, so a second
     # **THE SECOND READING ON THE BRANCHES TAB, NOT A TAB OF ITS OWN.** The

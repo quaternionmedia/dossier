@@ -171,19 +171,31 @@ VIEWS: tuple[View, ...] = (
          "Open issues, most recently updated first.",
          needs=_of_one_repository("issues")),
 
-    # Plan -- the proactive job: what to change next, and what it would touch.
-    # Deltas are the planned units of work and threads are the work in flight;
-    # they belong beside each other, not one filed under "work" and the other
-    # under "machine".
+    # Plan -- the proactive job: what to change next, what it would touch, and
+    # the goal that sets a change in motion. This group is the work a person
+    # decides on, drawn from dossier's own record; what the harness reports back
+    # -- its runs, its topology, the conversations it archives -- is a reading
+    # of a system dossier does not own, and lives in Seams.
     View("tab-deltas", "On deck", "Plan",
-         "Open deltas, every open pull request no delta claims, and every line "
-         "of work in flight -- the harness's threads, read over its seam.",
-         "dossier governance threads"),
+         "Open deltas and every open pull request no delta claims -- the units "
+         "of work on deck. The harness's threads moved to Harness, in Seams, "
+         "with the rest of what the harness reports."),
     View("tab-sweep", "Sweep", "Plan",
          "What one dependency change would touch and where it needs a person, "
          "and what a cleanup of this workstation would get back -- the two "
          "sweeps, one that spans the estate and one that spans the disk.",
          "dossier sweep"),
+    # Originating a change is the most proactive act there is, so Goals sits in
+    # Plan by the job it serves. That it crosses the harness seam to draft the
+    # plan is the mechanism, not the job -- the same reason On deck's deltas are
+    # Plan though the harness reads them too. Nothing is executed here;
+    # approving the plan is the human queue's act (Outstanding).
+    View("tab-goals", "Goals", "Plan",
+         "Send the harness a new goal, and read the plan it drafts.",
+         "dossier harness goal",
+         needs=(Need(HARNESS,
+                     "the goal reaches the harness's planner over its port",
+                     "uv run qmcp serve"),)),
 
     # Explore -- understand what exists: one repository in one reading, then the
     # code, people and releases across them.
@@ -226,11 +238,14 @@ VIEWS: tuple[View, ...] = (
                      "checkout may be pinned before those documents existed",
                      "dossier governance dashboard"),)),
 
-    # Seams -- the boundary where dossier meets systems it does not own. The
-    # harness now; GitHub, the corpus and codecarto's window are the same kind
-    # of thing and would join here.
+    # Seams -- the boundary where dossier meets systems it does not own, read
+    # rather than driven. Every view here reports what the harness did: its
+    # invocations, the conversations it archived, the shape it serves. GitHub,
+    # the corpus and codecarto's window are the same kind of thing and would
+    # join here. Originating work is not a reading and lives in Plan.
     View("tab-harness", "Harness", "Seams",
-         "What the harness ran, when, and whether it finished.",
+         "What the harness ran, when and whether it finished, and the "
+         "conversations it has archived as deltas.",
          "dossier harness ingest",
          needs=(Need(HARNESS,
                      "these are the harness's invocations, and it is a "
@@ -241,16 +256,6 @@ VIEWS: tuple[View, ...] = (
          "dossier topology",
          needs=(Need(HARNESS,
                      "the shapes are the harness's own, served over its port",
-                     "uv run qmcp serve"),)),
-    # The outbound side of the seam: every other Seams view reads what the
-    # harness did, and this one starts something -- a new goal, drafted into a
-    # plan. Nothing is executed here; approving the plan is the human queue's
-    # act (Outstanding), which is where attested approval already lives.
-    View("tab-goals", "Goals", "Seams",
-         "Send the harness a new goal, and read the plan it drafts.",
-         "dossier harness goal",
-         needs=(Need(HARNESS,
-                     "the goal reaches the harness's planner over its port",
                      "uv run qmcp serve"),)),
 )
 

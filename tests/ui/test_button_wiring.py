@@ -145,7 +145,7 @@ async def test_pressing_ingest_actually_reaches_the_ingest_code(monkeypatch):
         monkeypatch.setattr(threads_module, "request_import",
             lambda path, *a, **k: asked.append(path) or {"ok": False, "error": "stub"})
 
-        app._activate_tab("tab-deltas")
+        app._activate_tab("tab-harness")
         await pilot.pause()
         app.query_one("#thread-export-path", Input).value = "some/export/path"
         await pilot.pause()
@@ -189,7 +189,7 @@ async def test_the_ingest_button_is_on_the_screen(size):
 
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
-        app._activate_tab("tab-deltas")
+        app._activate_tab("tab-harness")
         await pilot.pause()
         await pilot.pause()
 
@@ -234,7 +234,7 @@ async def test_enter_in_the_path_field_ingests_without_the_button(monkeypatch):
         monkeypatch.setattr(threads_module, "request_import",
             lambda path, *a, **k: asked.append(path) or {"ok": False, "error": "stub"})
 
-        app._activate_tab("tab-deltas")
+        app._activate_tab("tab-harness")
         await pilot.pause()
         field = app.query_one("#thread-export-path", Input)
         field.focus()
