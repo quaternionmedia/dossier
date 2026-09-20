@@ -65,7 +65,15 @@ class OverviewPanel(VerticalScroll):
         )
         yield Static(self._masthead_markup(), id="overview-masthead")
 
+        current_group = None
         for index, section in enumerate(self.overview.sections):
+            # A banner opens each job-group, so the panel reads in the ring's
+            # order -- Triage, Plan, Explore, Health, Seams -- the same grouping
+            # the report prints and the same one a person navigates.
+            if section.group and section.group != current_group:
+                current_group = section.group
+                yield Static(f"[bold]{section.group.upper()}[/bold]",
+                             classes="overview-group")
             linked = section.title in FACET_BY_TITLE
             suffix = "   [dim](select a row to open it)[/dim]" if linked else ""
             yield Static(f"[bold]{section.title.upper()}[/bold]{suffix}",

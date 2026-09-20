@@ -90,8 +90,21 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _label(project: Any) -> str:
+    """A repository's name, redacted when the repository is private.
+
+    Names are trimmed to a column width downstream, so redaction must happen
+    HERE, before the trim, or a long private name leaks in truncated form.
+    A private repository's name is not this org's to publish; `private/<id>`
+    is the stable reference the overview uses instead.
+    """
+    if getattr(project, "is_private", False):
+        return f"private/{project.id}"
+    return project.full_name or project.name
+
+
 def _repo_names(session: Any) -> dict[int, str]:
-    return {p.id: (p.full_name or p.name) for p in session.exec(select(Project)).all()}
+    return {p.id: _label(p) for p in session.exec(select(Project)).all()}
 
 
 # --- languages ---------------------------------------------------------------
@@ -176,7 +189,7 @@ def branches_org(session: Any, ids, limit: int) -> Section:
 
 def branches_project(session: Any, project: Any, limit: int) -> Section:
     now = _now()
-    repo = project.full_name or project.name
+    repo = _label(project)
     rows = tuple(
         _branch_row(b, repo, now)
         for b in session.exec(
@@ -293,7 +306,7 @@ def issues_org(session: Any, ids, limit: int) -> Section:
 
 def issues_project(session: Any, project: Any, limit: int) -> Section:
     now = _now()
-    repo = project.full_name or project.name
+    repo = _label(project)
     rows = tuple(
         _issue_row(issue, repo, now)
         for issue in session.exec(
@@ -339,7 +352,7 @@ def releases_org(session: Any, ids, limit: int) -> Section:
 
 def releases_project(session: Any, project: Any, limit: int) -> Section:
     now = _now()
-    repo = project.full_name or project.name
+    repo = _label(project)
     rows = tuple(
         _release_row(r, repo, now)
         for r in session.exec(
@@ -456,7 +469,7 @@ def deltas_project(session: Any, project: Any, limit: int) -> Section:
     """
     names = _repo_names(session)
     now = _now()
-    repo = project.full_name or project.name
+    repo = _label(project)
     deltas = session.exec(
         select(ProjectDelta)
         .where(ProjectDelta.project_id == project.id)
@@ -904,8 +917,10 @@ FACETS: tuple[Facet, ...] = (
           "tab-issues", "issues-table", issues_org, issues_project),
     Facet("branches", "Branches in flight", "Branches",
           "tab-branches", "branches-table", branches_org, branches_project),
+    # On the Dossier tab, part of a repository's one-shot reading, not a tab of
+    # its own: the language mix is one of the facts that overview describes.
     Facet("languages", "Language mix", "Languages",
-          "tab-languages", "languages-table", languages_org, languages_project),
+          "tab-dossier", "languages-table", languages_org, languages_project),
     Facet("dependencies", "Shared dependencies", "Dependencies",
           "tab-dependencies", "dependencies-table",
           dependencies_org, dependencies_project),
@@ -918,8 +933,13 @@ FACETS: tuple[Facet, ...] = (
           "tab-harness", "harness-table", harness_org, harness_project),
     Facet("waiting", "Outstanding", "Outstanding",
           "tab-waiting", "waiting-table", waiting_org, waiting_project),
+    # On the Harness tab beside the invocations, not a tab of its own: the
+    # archive is a reading of what the harness holds, fetched over its seam, and
+    # it belongs with the other harness readings rather than beside the deltas
+    # in Plan. A thread is a delta, but it is the harness's delta -- Plan is the
+    # work dossier records, Seams is what the harness reports.
     Facet("threads", "Thread archive", "Threads",
-          "tab-threads", "threads-table", threads_org, threads_project,
+          "tab-harness", "threads-table", threads_org, threads_project,
           beyond_the_database="asks the harness over HTTP"),
     # Its own tab, not `tab-branches`. `BY_TAB` is keyed by tab, so a second
     # **THE SECOND READING ON THE BRANCHES TAB, NOT A TAB OF ITS OWN.** The

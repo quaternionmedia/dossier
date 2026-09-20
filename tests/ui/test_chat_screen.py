@@ -32,6 +32,11 @@ def a_conversation(**over) -> threads.Conversation:
 def with_one_row(app: DossierApp, address: str = "thread-abc") -> None:
     """Put one row in the archive table, as the facet would."""
     table = app.query_one("#threads-table", DataTable)
+    # The facet renders through `_render_section`, which sets a row cursor -- so
+    # `DataTable.RowSelected` fires on Enter rather than `CellSelected`. Set it
+    # here too, because this injects the row directly instead of through the
+    # loader (which the UI tests stub, the archive being a harness fetch).
+    table.cursor_type = "row"
     table.clear(columns=True)
     for column in ("delta", "title", "speaks as", "phase", "turns", "state"):
         table.add_column(column)
@@ -54,7 +59,7 @@ async def test_selecting_a_row_opens_the_conversation(
                         lambda source, ident, **kw: a_conversation())
 
     app = DossierApp(session_factory=lambda: no_close(test_session),
-                     initial_tab="tab-threads")
+                     initial_tab="tab-harness")
     async with app.run_test(size=(160, 50)) as pilot:
         await pilot.pause()
         with_one_row(app)
@@ -93,7 +98,7 @@ async def test_the_button_opens_the_same_thing(
                         lambda source, ident, **kw: a_conversation())
 
     app = DossierApp(session_factory=lambda: no_close(test_session),
-                     initial_tab="tab-threads")
+                     initial_tab="tab-harness")
     async with app.run_test(size=(160, 50)) as pilot:
         await pilot.pause()
         with_one_row(app)
@@ -125,7 +130,7 @@ async def test_an_unreachable_harness_still_opens_and_says_why(
                             remedy="`uv run qm dashboard --start harness`"))
 
     app = DossierApp(session_factory=lambda: no_close(test_session),
-                     initial_tab="tab-threads")
+                     initial_tab="tab-harness")
     async with app.run_test(size=(160, 50)) as pilot:
         await pilot.pause()
         with_one_row(app)
@@ -159,7 +164,7 @@ async def test_a_row_with_no_address_is_refused_with_a_reason(
                         lambda name, **kw: asked.append(name) or None)
 
     app = DossierApp(session_factory=lambda: no_close(test_session),
-                     initial_tab="tab-threads")
+                     initial_tab="tab-harness")
     async with app.run_test(size=(160, 50)) as pilot:
         await pilot.pause()
         with_one_row(app, address="--")
@@ -181,7 +186,7 @@ async def test_an_empty_table_is_refused_before_any_lookup(
                         lambda name, **kw: asked.append(name) or None)
 
     app = DossierApp(session_factory=lambda: no_close(test_session),
-                     initial_tab="tab-threads")
+                     initial_tab="tab-harness")
     async with app.run_test(size=(160, 50)) as pilot:
         await pilot.pause()
         table = app.query_one("#threads-table", DataTable)
@@ -257,3 +262,28 @@ def test_the_screen_offers_no_way_to_save_the_transcript():
         assert word not in code, (
             f"ChatScreen's code mentions {word!r}. Writing a transcript out is "
             f"a decision about publishing personal material, not a convenience.")
+
+
+@pytest.mark.asyncio
+async def test_a_thread_with_markup_like_text_reads_without_crashing():
+    """An archived turn is somebody's text: a `[b]` or a stray `[=32)]` in it is
+    characters they typed, not markup to apply -- and a malformed one crashed
+    the whole read before the transcript was escaped.
+
+    Mutation: render the transcript as markup (drop the escape) and this fails
+    with a MarkupError from Textual's layout.
+    """
+    conversation = a_conversation(
+        title="ports [and sockets]",
+        turns=[{"id": "t1", "role": "user", "at": "09:00",
+                "text": "try [markup=32)] and [b]bold[/b] -- keep it literal"}])
+    drawn = chat.draw(conversation)
+    app = DossierApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app.push_screen(ChatScreen(conversation, drawn))
+        await pilot.pause()
+        await pilot.pause()
+        body = app.screen.query_one("#chat-body", Static)
+        body.get_content_height(app.size, app.size, 100)  # crashed here before
+        assert "[markup=32)]" in str(body.render()), "brackets were not kept literal"

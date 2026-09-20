@@ -419,20 +419,22 @@ async def test_the_ring_does_what_the_filter_buttons_do(
 
 
 @pytest.mark.asyncio
-async def test_a_button_and_the_ring_reach_one_method(session):
-    """One act, one implementation. The routes differ; what they call must not.
+async def test_the_ring_reaches_the_filter_method(session):
+    """One act, one implementation. The status filter's button is folded into
+    the tree now, so the ring is the direct route; what it dispatches to is the
+    same method the tree node and `f` drive.
 
-    Mutation: give the button its own copy of the work and this fails, because
-    the two would no longer be the same object.
+    Mutation: give the ring its own copy of the work and this fails, because it
+    would no longer resolve to the shared method.
     """
     from dossier.tui.app import DossierApp
 
     app = DossierApp(session_factory=lambda: _NoClose(session))
     async with app.run_test(size=(160, 50)) as pilot:
         await pilot.pause()
-        # What the ring dispatches to, and what the button handler calls.
+        # What the ring dispatches to for the folded filter.
         from_ring = getattr(app, app.RAD_ACTIONS["filter.synced"])
-        app.on_filter_synced_pressed()
+        from_ring()
         await pilot.pause()
 
     assert from_ring.__name__ == "_show_synced_projects"

@@ -398,6 +398,18 @@ class TestRingInTheApp:
         app = DossierApp(session_factory=lambda: Session(engine))
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
+            # A repository is selected, so the delta acts under Do have their
+            # context and are live. Without one they grey, and the landing below
+            # would move to the first act that does not need a selection.
+            from dossier.models.schemas import Project
+            with Session(engine) as s:
+                p = Project(name="org/x", full_name="org/x", github_owner="org")
+                s.add(p)
+                s.commit()
+                s.refresh(p)
+                s.expunge(p)
+            app.selected_project = p
+            await pilot.pause()
             await self._open(pilot)
             await pilot.press("right")      # Do
             await pilot.pause()
@@ -426,13 +438,11 @@ class TestRingInTheApp:
             await pilot.press("enter")      # commit
             await pilot.pause()
             assert type(app.screen).__name__ != "RingScreen", "ring did not close"
-            # **`delta.advance`, AND IT USED TO BE `project.sync`.** Entering a
-            # submenu lands on the first wedge this app can act on, and until
-            # the actions were reconciled into one dispatch table that was
-            # Sync -- advance and note were in the ring, greyed, while buttons
-            # did exactly them. All four under Do are wired now, so the
-            # landing moved to the first cell. The behaviour did not change;
-            # what the app can do did.
+            # **`delta.advance`, WITH A REPOSITORY SELECTED.** Entering a submenu
+            # lands on the first wedge this app can act on *now*: `delta.advance`
+            # sits on cell 8, and it is live because a repository is selected. It
+            # greys without one -- a click there would only warn -- and the
+            # landing would then move to the first context-free act, Sync.
             assert app._rad.intents[-1].action == "delta.advance"
 
     @pytest.mark.asyncio
@@ -474,7 +484,7 @@ class TestRingInTheApp:
                 await pilot.press("enter")
                 await pilot.pause()
             expected = DossierApp.RAD_VIEWS[leaf.action]
-            assert app.query_one("#project-tabs").active == expected
+            assert app._get_active_tab_id() == expected
 
     @pytest.mark.asyncio
     async def test_the_cost_ledger_survives_across_actions(self):
@@ -957,3 +967,170 @@ class TestGreyedOutWedges:
         above = lines[centre_row - 1][start:end]
         assert "-" in above, f"expected the ordinary rule, got {above!r}"
         assert "." not in above, f"the centre was drawn dotted: {above!r}"
+
+
+# --- clickability is context-dependent, and the middle rank always stands -----
+
+
+def _mount_app():
+    from sqlmodel import Session, SQLModel, create_engine
+    from dossier.tui import DossierApp
+    engine = create_engine("sqlite://")
+    SQLModel.metadata.create_all(engine)
+    return DossierApp(session_factory=lambda: Session(engine))
+
+
+@pytest.mark.asyncio
+async def test_the_middle_rank_stays_available_with_nothing_selected():
+    """4, 5, 6 -- Reach, Close, Do -- are the ring's navigation and must stay
+    reachable whatever is selected. Each group keeps a context-free child, so
+    gating the acts inside on context never greys the group itself.
+
+    Mutation: make a group's every child context-gated and this fails when
+    nothing is selected.
+    """
+    from dossier.rad import resolve
+    from dossier.rad.session import RadSession
+
+    app = _mount_app()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app.selected_project = None
+        app.selected_dependency = None
+        view = RadSession(resolve=resolve, available=app.rad_can_apply).open_at()
+        avail = {w.label.strip(): view.is_available(i)
+                 for i, w in enumerate(view.wedges)}
+    for group in ("Go", "Do", "Show", "Reach"):
+        assert avail.get(group), f"{group} greyed with nothing selected"
+
+
+@pytest.mark.asyncio
+async def test_an_act_is_greyed_until_its_context_holds():
+    """A verb offered with nothing to act on is a click that ends in a warning,
+    so rad greys it: Remove needs a repository, Sweep a dependency.
+
+    Mutation: drop the context check in `rad_can_apply` and this fails, because
+    the gated acts come back available with nothing selected.
+    """
+    from dossier.rad.session import Wedge
+
+    app = _mount_app()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app.selected_project = None
+        app.selected_dependency = None
+
+        def ok(a):
+            return app.rad_can_apply(Wedge(id=a, label=a, action=a))
+
+        assert ok("project.sync"), "a context-free act was greyed"
+        assert not ok("project.remove"), "Remove was offered with no repository"
+        assert not ok("sweep.review"), "Sweep was offered with no dependency"
+        app.selected_dependency = "pytest"
+        assert ok("sweep.review"), "Sweep stayed greyed with a dependency chosen"
+
+
+@pytest.mark.asyncio
+async def test_a_digit_key_opens_the_ring_like_its_button():
+    """4, 5, 6 are usable beyond the ring: 6 opens it (on Do), and the route is
+    the digit key's, the same `action_rank` the button takes.
+
+    Mutation: drop the `6` binding and this fails -- the key does nothing.
+    """
+    app = _mount_app()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app.screen.set_focus(None)
+        await pilot.press("6")
+        await pilot.pause()
+        await pilot.pause()
+        assert type(app.screen).__name__ == "RingScreen", "6 did not open the ring"
+
+
+# --- the ring is relevant to the Seams screen ---------------------------------
+
+
+def test_the_ring_offers_harness_acts_only_on_the_seams_screen():
+    """On Seams -- where dossier meets the harness -- Do gains 'Run a harness
+    tool' and Reach gains 'Review the harness queue'. Elsewhere the ring holds
+    the estate's verbs and neither appears.
+
+    Mutation: drop the `seams` guard in `resolve` and this fails, because the
+    harness acts leak onto every other screen.
+    """
+    from dossier.rad import resolve
+
+    def actions(context):
+        out = []
+
+        def walk(wedges):
+            for w in wedges:
+                if w.action:
+                    out.append(w.action)
+                walk(w.children)
+
+        walk(resolve(context))
+        return out
+
+    off = actions({"seams": False})
+    on = actions({"seams": True})
+    assert "harness.run" not in off and "harness.review" not in off
+    assert "harness.run" in on and "harness.review" in on
+
+
+@pytest.mark.asyncio
+async def test_the_ring_context_is_seams_on_a_seams_screen():
+    """`_rad_context` reads the active view's group, so the ring opened on
+    Harness or Topology knows it is on Seams and offers the harness acts."""
+    app = _mount_app()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._activate_tab("tab-harness")
+        await pilot.pause()
+        assert app._rad_context() == {"seams": True}
+        app._activate_tab("tab-overview")
+        await pilot.pause()
+        assert app._rad_context() == {"seams": False}
+        # both harness acts dispatch to a wired handler
+        assert "harness.run" in app.RAD_HANDLED
+        assert "harness.review" in app.RAD_HANDLED
+
+
+@pytest.mark.asyncio
+async def test_the_harness_runner_is_a_rad_ring_not_a_list():
+    """The harness runner follows rad's protocol: choosing a tool is a ring -- a
+    numpad of options, one metered press each, at most eight -- not an unbounded
+    list. Selecting a tool in that ring runs it.
+
+    Mutation: push a bespoke picker instead and this fails, because the screen
+    is not a RingScreen and the metered selection is gone.
+    """
+    from dossier.human import Tool, ToolListing
+
+    app = _mount_app()
+    ran: list[str] = []
+    app._run_harness_tool_worker = lambda name: ran.append(name)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._show_tool_ring(ToolListing(tools=(Tool("planner"), Tool("executor"))))
+        await pilot.pause()
+        await pilot.pause()
+        assert type(app.screen).__name__ == "RingScreen", "the runner is not a rad ring"
+        await pilot.press("enter")   # commit the first wedge
+        await pilot.pause()
+    assert ran == ["planner"], "selecting a tool in the ring did not run it"
+
+
+@pytest.mark.asyncio
+async def test_an_unreachable_harness_says_so_and_opens_no_ring():
+    """No ring for nothing: an unreachable harness or one with no tools is a
+    notification, not an empty ring a person has to escape from."""
+    from dossier.human import ToolListing
+
+    app = _mount_app()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        base = len(app.screen_stack)
+        app._show_tool_ring(ToolListing(reachable=False, problem="nothing answering"))
+        await pilot.pause()
+        assert len(app.screen_stack) == base, "opened a ring for an unreachable harness"

@@ -40,3 +40,38 @@ class NoClose:
 def no_close():
     """The wrapper class, for `session_factory=lambda: no_close(session)`."""
     return NoClose
+
+
+@pytest.fixture(autouse=True)
+def _no_live_harness(monkeypatch):
+    """**THE HARNESS TAB POLLS THE HARNESS OVER THE NETWORK, AND A TEST MUST NOT
+    DEPEND ON ONE BEING UP.** Its live half runs in a worker thread; when a dev
+    harness *is* up, that worker does real I/O, and under the parallel suite the
+    thread slows unrelated screenshot captures into an intermittent failure. So
+    it is stubbed for every UI test -- the client is tested against a mock in
+    `tests/core/test_harness_run.py` and the panel update it feeds is driven
+    directly in `test_harness_console.py`, neither of which needs a live worker.
+    """
+    from dossier.tui.app import DossierApp
+    monkeypatch.setattr(DossierApp, "_refresh_harness_live",
+                        lambda self: None, raising=False)
+    # The Dossier tab is the default, so its harness-topology pane fires on
+    # every selection; stub that worker for the same reason -- a live fetch
+    # against a dev harness slows unrelated captures. The delta-link pane
+    # beside it is dossier's own data and still draws.
+    monkeypatch.setattr(DossierApp, "_run_dossier_topology",
+                        lambda self, subject: None, raising=False)
+    # Sending a goal is a WRITE to the harness -- it starts a planner run. A UI
+    # test must never post one to a dev harness that happens to be up, so the
+    # send worker is stubbed; the render it feeds is driven directly in
+    # `test_goals_tab.py`, and the client is tested against a mock in
+    # `tests/core/test_harness_run.py`.
+    monkeypatch.setattr(DossierApp, "_send_goal_worker",
+                        lambda self, goal, context: None, raising=False)
+    # The thread archive is fetched over the harness's seam, and the Harness tab
+    # it lives on loads on the mount path, so its worker would do real I/O in
+    # every UI test. Stub the whole loader -- not just its worker, which would
+    # leave the table in its loading state -- so the archive table is untouched
+    # and a test that needs a row injects one directly.
+    monkeypatch.setattr(DossierApp, "_load_threads_tab",
+                        lambda self, project=None: None, raising=False)

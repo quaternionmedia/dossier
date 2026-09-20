@@ -177,17 +177,22 @@ def test_a_click_on_the_row_costs_what_the_keystrokes_cost():
 
 
 def test_five_does_not_get_a_second_meaning():
-    """The centre is the one cell whose meaning never changes. A button
-    carrying its number that did something else outside the ring would undo
-    exactly that.
+    """The centre is the one cell whose meaning never changes. The key or the
+    button carrying its number closes rather than opening the ring outside it --
+    both routes run through `action_rank`, whose 5-branch notifies and returns
+    before the open.
 
     Mutation: make `5` open the ring and this fails.
     """
     import inspect
 
-    source = inspect.getsource(DossierApp.on_rank_five_pressed)
-    assert "action_rad_menu" not in source
-    assert "Nothing to close" in source
+    rank = inspect.getsource(DossierApp.action_rank)
+    # The 5-branch says so and returns before the `action_rad_menu` open below.
+    assert "Nothing to close" in rank.split("action_rad_menu")[0], (
+        "5 could reach the open")
+    # The 5 button routes through action_rank rather than opening the ring.
+    handler = inspect.getsource(DossierApp.on_rank_five_pressed)
+    assert "action_rad_menu" not in handler
 
 
 def test_the_rows_that_stay_are_the_ones_carrying_a_field():

@@ -228,6 +228,206 @@ def answer(request_id: str, response: str, by: str,
                     answered_by=by, response=response)
 
 
+@dataclass(frozen=True)
+class Tool:
+    """One tool the harness will run, as it named it."""
+
+    name: str
+    description: str = ""
+
+
+@dataclass(frozen=True)
+class ToolListing:
+    """The tools a harness offers, or the reason none could be read."""
+
+    tools: tuple[Tool, ...] = ()
+    reachable: bool = True
+    problem: str = ""
+    remedy: str = ""
+
+
+def tools(base: str | None = None) -> ToolListing:
+    """Every tool the harness offers to run. Read, and **never raises** -- an
+    unreachable harness is a reason, the same as reading its queue is."""
+    root = (base or base_url()).rstrip("/")
+    where = f"{root}/v1/tools"
+    document, problem, remedy = _get(where)
+    if document is None:
+        return ToolListing(reachable=False, problem=problem, remedy=remedy)
+    found = []
+    for row in document.get("tools") or []:
+        if isinstance(row, dict) and row.get("name"):
+            found.append(Tool(name=str(row["name"]),
+                              description=str(row.get("description", ""))))
+    return ToolListing(tools=tuple(found))
+
+
+@dataclass(frozen=True)
+class Ran:
+    """The harness's answer to a request to run a tool."""
+
+    tool: str
+    accepted: bool
+    invocation_id: str = ""
+    detail: str = ""
+
+
+def run_tool(name: str, params: dict[str, Any] | None = None,
+             base: str | None = None) -> Ran:
+    """Ask the harness to run one tool.
+
+    **The one act in this module that starts something rather than reading it**,
+    so it names the invocation it began -- an invocation id is how the run is
+    reviewed afterward through `/v1/invocations`. Never raises: an unreachable
+    harness, a refused run, and a tool that errored are three reasons, not a
+    crash. The harness owns whether the tool ran; this reports what it said.
+    """
+    root = (base or base_url()).rstrip("/")
+    where = f"{root}/v1/tools/{name}"
+    payload = json.dumps({"input": params or {}}).encode("utf-8")
+    request = urllib.request.Request(
+        where, data=payload, method="POST",
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as reply:
+            data = json.loads(reply.read())
+    except urllib.error.HTTPError as error:
+        detail = ""
+        try:
+            detail = str(json.loads(error.read()).get("detail", ""))
+        except Exception:                              # noqa: BLE001
+            pass
+        return Ran(tool=name, accepted=False,
+                   detail=detail or f"the harness answered {error.code}")
+    except Exception:                                  # noqa: BLE001
+        return Ran(tool=name, accepted=False,
+                   detail=f"nothing is answering at {root}")
+    if isinstance(data, dict) and data.get("error"):
+        return Ran(tool=name, accepted=False, detail=str(data["error"]))
+    inv = str(data.get("invocation_id", "")) if isinstance(data, dict) else ""
+    return Ran(tool=name, accepted=True, invocation_id=inv)
+
+
+@dataclass(frozen=True)
+class Step:
+    """One step of a plan the harness drafted from a goal."""
+
+    number: str
+    action: str
+    description: str = ""
+
+
+@dataclass(frozen=True)
+class Planned:
+    """The harness's answer to a new goal: the plan it drafted, or why not.
+
+    A goal reaches the `planner` tool, which the harness describes as "Create a
+    step-by-step execution plan from a goal". `steps` is that plan;
+    `invocation_id` is how the run is read afterward. **Nothing is executed** --
+    approving the plan is a later act at the human queue, where this estate's
+    attested approval already lives. That separation is the point: originating a
+    goal drafts, it does not commit.
+    """
+
+    accepted: bool
+    goal: str = ""
+    invocation_id: str = ""
+    steps: tuple[Step, ...] = ()
+    estimated: int = 0
+    detail: str = ""
+
+
+def send_goal(goal: str, context: str = "", base: str | None = None) -> Planned:
+    """Send the harness a new goal, and read the plan it drafts.
+
+    **The one outbound origination in this module.** Everything else here reads
+    the harness or answers a question it raised; this *starts* something by
+    naming a goal. It reaches `planner`, whose contract is a required `goal` and
+    an optional `context`. A goal with no words is refused here rather than
+    sent, the way an unnamed answer is -- an empty goal is not a plan request.
+
+    Never raises past that guard: an unreachable harness, a refused run and a
+    planner that errored are three reasons, the same contract `run_tool` keeps.
+    """
+    if not goal.strip():
+        raise ValueError(
+            "a goal needs words. The planner turns a goal into a plan, and "
+            "there is nothing to plan from an empty one.")
+    params: dict[str, Any] = {"goal": goal.strip()}
+    if context.strip():
+        params["context"] = context.strip()
+    root = (base or base_url()).rstrip("/")
+    where = f"{root}/v1/tools/planner"
+    payload = json.dumps({"input": params}).encode("utf-8")
+    request = urllib.request.Request(
+        where, data=payload, method="POST",
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as reply:
+            data = json.loads(reply.read())
+    except urllib.error.HTTPError as error:
+        detail = ""
+        try:
+            detail = str(json.loads(error.read()).get("detail", ""))
+        except Exception:                              # noqa: BLE001
+            pass
+        return Planned(accepted=False, goal=goal.strip(),
+                       detail=detail or f"the harness answered {error.code}")
+    except Exception:                                  # noqa: BLE001
+        return Planned(accepted=False, goal=goal.strip(),
+                       detail=f"nothing is answering at {root}")
+    if not isinstance(data, dict) or data.get("error"):
+        detail = (str(data.get("error")) if isinstance(data, dict)
+                  else "the harness sent no plan")
+        return Planned(accepted=False, goal=goal.strip(), detail=detail)
+    result = data.get("result") or {}
+    steps = tuple(
+        Step(number=str(s.get("step", "")), action=str(s.get("action", "")),
+             description=str(s.get("description", "")))
+        for s in (result.get("steps") or []) if isinstance(s, dict))
+    estimated = result.get("estimated_steps")
+    return Planned(
+        accepted=True, goal=str(result.get("goal") or goal.strip()),
+        invocation_id=str(data.get("invocation_id", "")), steps=steps,
+        estimated=int(estimated) if isinstance(estimated, int) else len(steps))
+
+
+@dataclass(frozen=True)
+class Monitor:
+    """A live reading of what the harness is doing, or why it could not be read.
+
+    `by_status` counts the invocations the harness holds by their status;
+    `running` is how many are not yet finished. An unreachable harness is a
+    reason, not a crash -- the same contract every read here keeps.
+    """
+
+    reachable: bool = False
+    problem: str = ""
+    remedy: str = ""
+    by_status: tuple[tuple[str, int], ...] = ()
+    running: int = 0
+    total: int = 0
+
+
+def monitor(base: str | None = None) -> Monitor:
+    """What the harness is running now, read live. **Never raises.**"""
+    root = (base or base_url()).rstrip("/")
+    where = f"{root}/v1/invocations?limit=200"
+    document, problem, remedy = _get(where)
+    if document is None:
+        return Monitor(problem=problem, remedy=remedy)
+    invocations = document.get("invocations") or []
+    counts: dict[str, int] = {}
+    for row in invocations:
+        status = (str(row.get("status", "unknown"))
+                  if isinstance(row, dict) else "unknown")
+        counts[status] = counts.get(status, 0) + 1
+    running = sum(n for s, n in counts.items()
+                  if s in ("running", "pending", "in_progress"))
+    return Monitor(reachable=True, running=running, total=len(invocations),
+                   by_status=tuple(sorted(counts.items())))
+
+
 def render(reading: Reading) -> str:
     """The queue, for the person who is going to answer it."""
     if not reading.reachable:

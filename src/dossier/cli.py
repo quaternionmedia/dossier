@@ -874,8 +874,11 @@ def projects_rename(old_name: str, new_name: str) -> None:
               help="Include forks in scope.")
 @click.option("--fast", is_flag=True, default=False,
               help="Skip the readings that spawn git or dial the harness.")
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="Emit the reading as the data seam a second window reads, "
+                   "already redacted, instead of the text table.")
 def overview(owner: Optional[str], limit: int, only: Optional[str],
-             forks: bool, fast: bool) -> None:
+             forks: bool, fast: bool, as_json: bool) -> None:
     """Every repository in one reading: the org overview, as text.
 
     **THE OVERVIEW EXISTED AND ONLY THE TUI COULD SHOW IT.** `overview.build`
@@ -897,6 +900,15 @@ def overview(owner: Optional[str], limit: int, only: Optional[str],
         picture = build(session, limit=limit, owner=scope_owner,
                         include_forks=forks, beyond_the_database=not fast)
 
+        if as_json:
+            # The seam, not the table. `build` already redacted the picture, so
+            # this carries a safe reading that `codecartographer` renders as a
+            # graph and that this window renders as the table below.
+            import json
+            from dossier.overview import as_dict
+            click.echo(json.dumps(as_dict(picture), indent=2))
+            return
+
         click.echo("=" * 78)
         click.echo(f"  {picture.scope}")
         click.echo(f"  read from a sync {picture.generated_from}")
@@ -911,9 +923,19 @@ def overview(owner: Optional[str], limit: int, only: Optional[str],
                 click.echo(f"  {label:<28} {value}"
                            + (f"   {note}" if note else ""))
 
+        # The report reads in the ring's job-groups: a heading opens each one,
+        # so Triage's readings sit together and Seams' sit together, the same
+        # order a person navigates. A `--section` filter is answering about one
+        # reading, so the group banners are suppressed under it.
+        current_group = None
         for section in picture.sections:
             if only and only.lower() not in section.title.lower():
                 continue
+            if not only and section.group and section.group != current_group:
+                current_group = section.group
+                click.echo()
+                click.echo(f"=== {section.group} "
+                           + "=" * max(0, 74 - len(section.group)))
             click.echo()
             click.echo(f"--- {section.title} " + "-" * max(0, 74 - len(section.title)))
             if section.is_empty:
@@ -945,6 +967,25 @@ def overview(owner: Optional[str], limit: int, only: Optional[str],
         click.echo("  Every figure is from the last sync, not from now. A section's")
         click.echo("  note says what its rows do and do not mean; read it before")
         click.echo("  quoting a number out of the table above it.")
+
+
+@cli.command("numpad")
+@click.argument("seam", type=click.Path(exists=True, dir_okay=False))
+@click.option("--title", default="", help="A heading printed above the grid.")
+def numpad_cmd(seam: str, title: str) -> None:
+    """Render a graph seam as a numpad -- the terminal's resolution.
+
+    The other window, `codecartographer`, draws a graph on a canvas. This one
+    reads the same seam -- its gjgf graph, or any `{nodes, edges}` object of
+    that shape -- and shows it as rad's numpad: eight cells around a centre that
+    holds no node. A graph larger than eight nodes is not squeezed in: the
+    render says how many it stood for. That is the deliberate limit of a numpad,
+    not a shortfall.
+    """
+    import json
+    from dossier.numpad_graph import render
+    data = json.loads(Path(seam).read_text(encoding="utf-8"))
+    click.echo(render(data, title=title))
 
 
 @cli.command("clone")
@@ -1665,6 +1706,7 @@ def github_sync(
                 existing.github_repo = repo.name
                 existing.github_stars = repo.stars
                 existing.is_fork = repo.is_fork
+                existing.is_private = repo.is_private
                 existing.is_archived = repo.is_archived
                 existing.github_language = repo.language
                 existing.last_synced_at = utcnow()
@@ -1690,6 +1732,7 @@ def github_sync(
                     github_repo=repo.name,
                     github_stars=repo.stars,
                     is_fork=repo.is_fork,
+                    is_private=repo.is_private,
                     is_archived=repo.is_archived,
                     github_language=repo.language,
                     last_synced_at=utcnow(),
@@ -2052,6 +2095,7 @@ def _sync_repos_batch(
                                 github_repo=repo.name,
                                 github_stars=repo.stars,
                                 is_fork=repo.is_fork,
+                                is_private=repo.is_private,
                                 is_archived=repo.is_archived,
                                 github_language=repo.language,
                                 last_synced_at=utcnow(),
@@ -4976,7 +5020,7 @@ def disk_dashboard(
 
     from dossier.tui import DossierApp
 
-    DossierApp(initial_tab="tab-disk").run()
+    DossierApp(initial_tab="tab-sweep").run()
 
 
 @disk_group.command(name="cookbook")
@@ -5510,6 +5554,48 @@ def harness_ingest(payload: Path, write: bool) -> None:
             session.add(target)
 
         session.commit()
+
+
+@harness.command("goal")
+@click.argument("goal")
+@click.option("--context", default="",
+              help="Optional context to inform the plan -- a repo, a delta, "
+                   "a constraint.")
+@click.option("--base", default=None,
+              help="A harness other than the one on this machine.")
+def harness_goal(goal: str, context: str, base: str | None) -> None:
+    """Send the harness a new goal, and print the plan it drafts.
+
+    **The outbound side of the seam.** `queue` and `answer` read the harness
+    and answer what it asked; this starts something by naming a goal. It
+    reaches the `planner` tool, which turns the goal into a step-by-step plan.
+
+    **Nothing is executed.** Approving the plan is a later act at the human
+    queue (`dossier harness queue`, then `answer`), which is where this
+    estate's attested approval lives. This drafts; it does not commit.
+    """
+    from dossier.human import send_goal
+
+    try:
+        planned = send_goal(goal, context=context, base=base)
+    except ValueError as refusal:
+        raise click.ClickException(str(refusal))
+
+    if not planned.accepted:
+        click.echo(f"  the goal was not planned: {planned.detail}", err=True)
+        raise SystemExit(1)
+
+    where = (f" (invocation {planned.invocation_id})"
+             if planned.invocation_id else "")
+    click.echo(f"  planned -- {planned.estimated} step(s){where}")
+    click.echo(f"  goal: {planned.goal}")
+    for step in planned.steps:
+        head = (f"  {step.number}. {step.action}" if step.number
+                else f"  {step.action}")
+        click.echo(head)
+        if step.description:
+            click.echo(f"      {step.description}")
+    click.echo("  Nothing ran. Approve the plan at `dossier harness queue`.")
 
 
 # Last in the file, deliberately. Commands appended after this guard are not

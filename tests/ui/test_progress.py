@@ -30,7 +30,7 @@ def app_for():
 
 
 async def open_threads(pilot, app):
-    app.query_one("#project-tabs").active = "tab-threads"
+    app._activate_tab("tab-harness")
     await pilot.pause()
     await pilot.pause()
 
@@ -78,9 +78,9 @@ async def test_the_application_still_responds_while_an_import_runs(monkeypatch):
         assert started.is_set(), "the import never began"
 
         # The loop is alive: this only happens if something is pumping it.
-        app.query_one("#project-tabs").active = "tab-overview"
+        app._activate_tab("tab-overview")
         await pilot.pause()
-        assert app.query_one("#project-tabs").active == "tab-overview", (
+        assert app._get_active_tab_id() == "tab-overview", (
             "the event loop was blocked by the import")
 
         holding.set()

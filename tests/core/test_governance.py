@@ -426,8 +426,7 @@ async def test_governance_tab_populates_with_no_project_selected(tmp_path):
     app = DossierApp(session_factory=session_factory)
     async with app.run_test(size=(160, 50)) as pilot:
         await pilot.pause()
-        tabs = app.query_one("#project-tabs")
-        tabs.active = "tab-governance"
+        app._activate_tab("tab-governance")
         await pilot.pause()
 
         table = app.query_one("#governance-table")
@@ -450,7 +449,7 @@ async def test_governance_tab_says_so_when_nothing_has_been_loaded():
     app = DossierApp(session_factory=lambda: Session(engine))
     async with app.run_test(size=(160, 50)) as pilot:
         await pilot.pause()
-        app.query_one("#project-tabs").active = "tab-governance"
+        app._activate_tab("tab-governance")
         await pilot.pause()
 
         message = str(app.query_one("#governance-age").content)
@@ -767,7 +766,7 @@ async def test_the_dashboard_can_open_directly_on_the_governance_tab(tmp_path):
     app = DossierApp(session_factory=lambda: Session(engine), initial_tab="tab-governance")
     async with app.run_test(size=(160, 50)) as pilot:
         await pilot.pause()
-        assert app.query_one("#project-tabs").active == "tab-governance"
+        assert app._get_active_tab_id() == "tab-governance"
         assert app.query_one("#governance-table").row_count == 1
 
 

@@ -114,7 +114,7 @@ def _tour(*pairs: tuple[str, str]) -> tuple[Step, ...]:
 #                              port -- which is very often not running. An
 #                              empty panel there is the honest state of this
 #                              machine rather than a defect;
-#   tab-details, tab-docs      fill from a project selection, which a tour
+#   tab-dossier, tab-docs      fill from a project selection, which a tour
 #                              that sets `tabs.active` never makes;
 #   tab-waiting                fills from the overview's reading and stays
 #                              empty when the tab is switched to directly.
@@ -143,8 +143,8 @@ NARRATIVES: tuple[Narrative, ...] = (
             ("tab-dossier", "Dossier: one project's own record"),
             ("tab-branches", "Branches: what carries work nowhere else"),
             ("tab-governance", "Governance: where each project stands"),
-            ("tab-disk", "Disk: what is eating the workstation"),
-            ("tab-threads", "Threads: the conversations behind the work"),
+            ("tab-sweep", "Sweep: one change across the estate, and disk reclaim"),
+            ("tab-deltas", "On deck: the work in flight, and the threads behind it"),
         ),
     ),
     Narrative(
@@ -245,14 +245,17 @@ async def tour_frames(narrative: Narrative, size: tuple[int, int] = TERMINAL
     app = DossierApp()
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
-        tabs = app.query_one("#project-tabs", TabbedContent)
         for step in narrative.steps:
-            tabs.active = step.tab
+            # The strip is two layers now; `_activate_tab` selects the view's
+            # group and then the view, and `_get_active_tab_id` reads back the
+            # view of the active group.
+            app._activate_tab(step.tab)
             await pilot.pause()
-            if tabs.active != step.tab:
+            shown = app._get_active_tab_id()
+            if shown != step.tab:
                 raise AssertionError(
-                    f"asked for {step.tab} and the container is showing "
-                    f"{tabs.active}; the frame would be of the wrong view")
+                    f"asked for {step.tab} and the strip is showing "
+                    f"{shown}; the frame would be of the wrong view")
             frames.append(Frame(svg=await _settled(app, pilot, step.tab),
                                 hold_ms=step.hold_ms, note=step.caption))
     return frames

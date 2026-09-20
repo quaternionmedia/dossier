@@ -220,8 +220,7 @@ async def test_a_step_whose_pane_never_fills_is_refused():
     app = DossierApp()
     async with app.run_test(size=narratives.TERMINAL) as pilot:
         await pilot.pause()
-        tabs = app.query_one("#project-tabs", TabbedContent)
-        tabs.active = "tab-topology"
+        app._activate_tab("tab-topology")
         await pilot.pause()
 
         with pytest.raises(AssertionError, match="never filled"):

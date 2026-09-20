@@ -214,11 +214,11 @@ async def test_it_clears_the_caches_of_tabs_nobody_is_looking_at(
     stub(monkeypatch)
     async with app.run_test(size=(110, 40)) as pilot:
         await pilot.pause()
-        app._tabs_loaded = {"tab-languages", "tab-issues"}
+        app._tabs_loaded = {"tab-dossier", "tab-issues"}
         app._apply_rad_intent(Intent("reach.reconcile"))
         for _ in range(300):
             await pilot.pause()
-            if not app._tabs_loaded - {"tab-threads"}:
+            if not app._tabs_loaded - {"tab-deltas"}:
                 break
-        assert "tab-languages" not in app._tabs_loaded
+        assert "tab-dossier" not in app._tabs_loaded
         assert "tab-issues" not in app._tabs_loaded

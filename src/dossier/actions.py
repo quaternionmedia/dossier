@@ -163,6 +163,9 @@ FIELDS_WITH_THEIR_OWN_MEANING: dict[str, str] = {
     "topology-subject": "draws the topology for that subject",
     "sweep-package": "reviews a sweep of that package",
     "thread-export-path": "writes the export to that path",
+    "harness-answer": "sends the typed text to the harness's waiting question",
+    "goal-input": "sends the goal to the harness's planner and draws the plan",
+    "goal-context": "sends the goal, with this as its context, to the planner",
     # Settings, not a form. Both carry `@on(Input.Changed)` handlers that
     # validate and `_auto_save()` on every keystroke, so the value is already
     # persisted by the time Enter could do anything. Declared rather than
@@ -207,9 +210,16 @@ REGISTRY: tuple[Action, ...] = (
                 "no button of its own; the ring is where it is asked for"),
 
     # --- Show: what to include -------------------------------------------
-    Action("filter.all", "All", key="f", button="btn-filter-all"),
-    Action("filter.synced", "Synced only", button="btn-filter-synced",),
-    Action("filter.drifting", "Drifting", button="btn-filter-unsynced",),
+    # The status filter is folded into the tree now: a node that cycles All ->
+    # Synced -> Unsynced when selected. `f` cycles it too; the individual states
+    # have no button of their own any more and are reached from the ring here.
+    Action("filter.all", "All", key="f"),
+    Action("filter.synced", "Synced only",
+           only="the status filter is a tree node that cycles the states now; "
+                "the ring, `f` and the `filter` command reach it"),
+    Action("filter.drifting", "Drifting",
+           only="the status filter is a tree node that cycles the states now; "
+                "the ring and the `filter` command reach it"),
 
     # --- Reach: across the seam ------------------------------------------
     Action("reach.qmcp", "Open in qmcp", only="not applied yet; the ring says so rather than hiding it"),

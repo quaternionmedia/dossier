@@ -128,15 +128,16 @@ def test_a_submenu_counts_as_handled():
 
 
 def test_the_fifth_child_lands_on_a_diagonal_not_on_five():
-    """`Go` has five children, so one of them is past the cardinals. Reading
-    the list in order would number that one `5`, which is the centre.
+    """`Go` has five groups, so one of them is past the cardinals. Reading the
+    list in order would number that one `5`, which is the centre.
 
     This is the bug the cell lookup in `_walk` exists to prevent, and it is
     only reachable with a menu of more than four.
     """
-    fifth = by_number()["8.8.9"]
-    assert fifth.path == ("Go", "Repositories", "Languages")
-    assert fifth.cells == (8, 8, 9)
+    fifth = by_number()["8.9"]
+    assert fifth.path == ("Go", "Seams")
+    assert fifth.cells == (8, 9)
+    assert "8.5" not in by_number(), "a group was numbered onto the centre"
 
 
 def test_a_menu_too_big_to_lay_out_raises_rather_than_losing_an_item():

@@ -389,7 +389,7 @@ def test_composing_only_unavailable_deltas_says_so(session, tmp_path: Path) -> N
 async def disk_app(engine, corpus: Path):
     from dossier.tui import DossierApp
 
-    app = DossierApp(session_factory=lambda: Session(engine), initial_tab="tab-disk")
+    app = DossierApp(session_factory=lambda: Session(engine), initial_tab="tab-sweep")
     app._disk_corpus_override = corpus
     return app
 
@@ -543,7 +543,7 @@ async def test_the_keys_do_nothing_off_the_disk_tab(
     app = await disk_app(engine, fake_corpus(tmp_path, [400, 100]))
     async with app.run_test(size=(200, 50)) as pilot:
         await pilot.pause()
-        app.query_one("#project-tabs").active = "tab-governance"
+        app._activate_tab("tab-governance")
         await pilot.pause()
         app.action_disk_plan()
         await app.workers.wait_for_complete()

@@ -128,7 +128,7 @@ async def test_it_opens_the_tab_and_fills_it(session):
         app._apply_rad_intent(Intent("sweep.review"))
         assert await settle(pilot, app), "the review never arrived"
 
-        assert app.query_one("#project-tabs").active == "tab-sweep"
+        assert app._get_active_tab_id() == "tab-sweep"
         assert app.query_one("#sweep-table", DataTable).row_count > 0
 
 
@@ -197,7 +197,7 @@ async def test_before_any_sweep_the_tab_says_how_to_ask_for_one(session):
     app = app_for(session)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        app.query_one("#project-tabs").active = "tab-sweep"
+        app._activate_tab("tab-sweep")
         app.reload_tab("tab-sweep")
         await pilot.pause()
 
@@ -226,9 +226,9 @@ async def test_the_application_responds_while_the_sweep_is_worked_out(session):
         app._apply_rad_intent(Intent("sweep.review"))
         await pilot.pause()
 
-        app.query_one("#project-tabs").active = "tab-overview"
+        app._activate_tab("tab-overview")
         await pilot.pause()
-        assert app.query_one("#project-tabs").active == "tab-overview", (
+        assert app._get_active_tab_id() == "tab-overview", (
             "the event loop was blocked while the sweep was worked out")
         assert await settle(pilot, app)
 
@@ -320,7 +320,7 @@ async def test_a_typed_package_is_what_gets_swept(session):
     app = app_for(session)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        app.query_one("#project-tabs").active = "tab-sweep"
+        app._activate_tab("tab-sweep")
         app.query_one("#sweep-package", Input).value = "sqlmodel"
         app._apply_rad_intent(Intent("sweep.review"))
         assert await settle(pilot, app), "the review never arrived"
@@ -372,7 +372,7 @@ async def test_enter_in_the_field_runs_the_review(session):
     app = app_for(session)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        app.query_one("#project-tabs").active = "tab-sweep"
+        app._activate_tab("tab-sweep")
         field = app.query_one("#sweep-package", Input)
         field.value = "httpx"
         field.focus()

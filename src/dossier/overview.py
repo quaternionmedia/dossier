@@ -31,7 +31,8 @@ can see how old the whole picture is before reading any number in it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import re
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Sequence
 
@@ -77,6 +78,11 @@ class Section:
     headers: tuple[str, ...]
     rows: tuple[tuple[str, ...], ...]
     note: str = ""
+    group: str = ""
+    """Which job-group this reading serves, from `views.GROUPS`. The overview
+    clusters its sections under these so the report reads in the same order the
+    ring is navigated. Empty means ungrouped -- it sorts to the end rather than
+    inventing a heading."""
 
     @property
     def is_empty(self) -> bool:
@@ -411,6 +417,22 @@ def _facet_section(facet: Any, session: Any, ids: Any, limit: int,
     return facet.at(session, ids=ids, limit=limit)
 
 
+def _in_group_order(labelled: Sequence[tuple[Section, str]],
+                    groups: Sequence[str]) -> tuple[Section, ...]:
+    """Stamp each section with its group and order the report by the ring's.
+
+    The reader navigates the ring Triage, Plan, Explore, Health, Seams; the
+    report reads in that same order, so the two are one taxonomy rather than two
+    that happen to overlap. Order is stable within a group -- the sections keep
+    the order they were assembled in -- and a section whose group is unknown
+    sorts to the end rather than being dropped or inventing a heading.
+    """
+    order = {name: i for i, name in enumerate(groups)}
+    stamped = [replace(section, group=group) for section, group in labelled]
+    return tuple(sorted(stamped,
+                        key=lambda s: order.get(s.group, len(order))))
+
+
 def build(session: Any, limit: int = 12, now: datetime | None = None,
           owner: str | None = None, include_forks: bool = False,
           beyond_the_database: bool = False) -> OrgOverview:
@@ -424,21 +446,34 @@ def build(session: Any, limit: int = 12, now: datetime | None = None,
     # cycle. The registry is the single definition of each kind of fact; this
     # module owns only the sections that exist at org scope alone.
     from dossier.facets import FACETS
+    from dossier import views
 
     now = now or datetime.now(timezone.utc)
     ids = scope_ids(session, owner, include_forks=include_forks)
     horizon = _one(session, _in_scope(
         select(func.max(Project.last_synced_at)), Project.id, ids), default=None)
-    return OrgOverview(
+
+    # Every section carries the job-group it serves, resolved through the one
+    # registry: a facet knows its tab, and the view on that tab knows its group,
+    # so the overview and the ring cannot name the same reading two jobs. The
+    # sections without a facet -- governance, the delta summary, the harness
+    # totals, attention -- name their group directly, because they have no tab
+    # to look one up by.
+    def _group_of(tab: str) -> str:
+        view = views.BY_TAB.get(tab)
+        return view.group if view else ""
+
+    labelled = (
+        (_governance(session, now), "Health"),
+        *((_facet_section(facet, session, ids, limit, beyond_the_database),
+           _group_of(facet.tab)) for facet in FACETS),
+        (_deltas(session, now, ids), "Plan"),
+        (_harness_totals(session, now), "Seams"),
+        (_attention(session, now, limit, ids), "Triage"),
+    )
+    picture = OrgOverview(
         masthead=_masthead(session, now, ids),
-        sections=(
-            _governance(session, now),
-            *(_facet_section(facet, session, ids, limit, beyond_the_database)
-              for facet in FACETS),
-            _deltas(session, now, ids),
-            _harness_totals(session, now),
-            _attention(session, now, limit, ids),
-        ),
+        sections=_in_group_order(labelled, views.GROUPS),
         generated_from=_horizon_phrase(_age_days(horizon, now)) if horizon
         else "nothing synced yet",
         scope=(
@@ -447,3 +482,110 @@ def build(session: Any, limit: int = 12, now: datetime | None = None,
             + ("" if include_forks else ", forks excluded")
         ),
     )
+    return _redact_private(picture, session)
+
+
+def _private_map(session: Any) -> dict[str, str]:
+    """Every string a private repository is known by, mapped to a reference.
+
+    **A PRIVATE REPOSITORY'S NAME IS NOT THIS ORG'S TO PUBLISH**, and the
+    overview is meant to be pasted into a pull request or shared. The governance
+    facet already reads a pre-redacted corpus document and shows `private-NN`;
+    every other facet reads this store, which carries real names from the sync —
+    so before this pass those facets leaked two private names in a shared report.
+
+    dossier does not hold the corpus's `private-NN` mapping (that is an
+    uncommitted companion), so it references by its own stable id: `private/<id>`.
+    Different scheme, same guarantee — the name never leaves.
+    """
+    mapping: dict[str, str] = {}
+    for project in session.exec(select(Project).where(Project.is_private == True)):  # noqa: E712
+        ref = f"private/{project.id}"
+        for token in (project.name, project.full_name, project.github_repo,
+                      (f"{project.github_owner}/{project.github_repo}"
+                       if project.github_owner and project.github_repo else None)):
+            if token:
+                mapping[token] = ref
+    return mapping
+
+
+def _redact_private(picture: OrgOverview, session: Any) -> OrgOverview:
+    """Rewrite every private repository name in the built overview to a
+    reference, at one choke point, so no facet can leak regardless of how it
+    renders a name."""
+    mapping = _private_map(session)
+    if not mapping:
+        return picture
+    # Longest first: `owner/repo` before `repo`, so the qualified form is
+    # replaced whole rather than leaving a dangling owner.
+    pairs = sorted(mapping.items(), key=lambda kv: len(kv[0]), reverse=True)
+    # A private name is also redacted when it is the leading segment of a longer
+    # token — a `factorio-server-v1` tag names the private `factorio-server` just
+    # as plainly as the repo cell does. The trailing group consumes `-`/`_`/`.`
+    # delimited suffixes (a version, a variant) but stops at `/`, so `owner/repo`
+    # forms stay whole and are handled by their own longer key first.
+    patterns = [(re.compile(rf"(?<![A-Za-z0-9_./-]){re.escape(name)}(?:[._-][A-Za-z0-9]+)*(?![A-Za-z0-9])"), ref)
+                for name, ref in pairs]
+
+    def scrub(text: str) -> str:
+        if not text:
+            return text
+        for pattern, ref in patterns:
+            text = pattern.sub(ref, text)
+        return text
+
+    return OrgOverview(
+        masthead=tuple(Cell(c.label, scrub(c.value), scrub(c.note)) for c in picture.masthead),
+        sections=tuple(
+            Section(s.title, s.headers,
+                    tuple(tuple(scrub(cell) for cell in row) for row in s.rows),
+                    scrub(s.note), s.group)
+            for s in picture.sections
+        ),
+        generated_from=picture.generated_from,
+        scope=scrub(picture.scope),
+    )
+
+
+# The seam version. A consumer that reads an unknown number should decline
+# rather than guess; bump it when a field's meaning changes, not when a facet
+# is added (a new section is data, not a schema change).
+OVERVIEW_SCHEMA = 1
+
+
+def as_dict(picture: OrgOverview) -> dict[str, Any]:
+    """The overview as the data seam a second window reads.
+
+    **THIS IS THE SAME INFORMATION THE TERMINAL PRINTS, AS DATA.** `dossier` is
+    one window onto the org registry and `codecartographer` is the other; the
+    terminal renders these sections as tables and the canvas renders them as a
+    graph, but both must show the same reading or the two windows disagree about
+    one estate. So this serialises the built picture and computes nothing —
+    a second way of deriving a figure is how two views of one number start to
+    diverge.
+
+    **REDACTION IS INHERITED, NOT REPEATED.** `build` returns a picture that has
+    already been through `_redact_private`, so every name here is whatever the
+    producer decided to publish. A consumer shows these bytes verbatim and needs
+    no private-repository policy of its own — the seam carries a safe reading or
+    it carries none.
+    """
+    return {
+        "schema": OVERVIEW_SCHEMA,
+        "scope": picture.scope,
+        "generated_from": picture.generated_from,
+        "masthead": [
+            {"label": c.label, "value": c.value, "note": c.note}
+            for c in picture.masthead
+        ],
+        "sections": [
+            {
+                "title": s.title,
+                "group": s.group,
+                "headers": list(s.headers),
+                "rows": [list(row) for row in s.rows],
+                "note": s.note,
+            }
+            for s in picture.sections
+        ],
+    }

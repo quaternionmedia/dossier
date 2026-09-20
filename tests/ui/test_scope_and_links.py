@@ -74,8 +74,19 @@ def app_for(session):
 
 def org_node(app):
     tree = app.query_one("#project-tree", Tree)
-    return next(n for n in tree.root.children
-                if n.data and n.data.get("type") == "group")
+
+    # Owner groups live under the Explore ring group now, so the search is
+    # recursive rather than over the tree's direct children.
+    def walk(node):
+        for child in node.children:
+            if child.data and child.data.get("type") == "group":
+                return child
+            found = walk(child)
+            if found is not None:
+                return found
+        return None
+
+    return walk(tree.root)
 
 
 # --- the org is a selectable thing -------------------------------------------
@@ -107,9 +118,9 @@ async def test_selecting_the_owner_scopes_the_whole_screen(session):
         await pilot.pause()
         # Start somewhere else: the app opens on the overview, so asserting it
         # is active afterwards would pass whether or not selecting did anything.
-        app._activate_tab("tab-languages")
+        app._activate_tab("tab-dossier")
         await pilot.pause()
-        assert app.query_one("#project-tabs").active == "tab-languages"
+        assert app._get_active_tab_id() == "tab-dossier"
 
         tree = app.query_one("#project-tree", Tree)
         node = org_node(app)
@@ -120,7 +131,7 @@ async def test_selecting_the_owner_scopes_the_whole_screen(session):
         assert app._scope_owner == "org"
         assert app._current_project is None, "the org replaced the project selection"
         assert app.query_one(OverviewPanel).owner == "org"
-        assert app.query_one("#project-tabs").active == "tab-overview"
+        assert app._get_active_tab_id() == "tab-overview"
 
 
 @pytest.mark.asyncio
@@ -135,7 +146,7 @@ async def test_a_facet_tab_reads_the_org_when_the_org_is_selected(session):
         tree.cursor_line = node.line
         await pilot.press("enter")
         await pilot.pause()
-        app._load_tab_data("tab-languages")
+        app._load_tab_data("tab-dossier")
         await pilot.pause()
         table = app.query_one("#languages-table", DataTable)
         assert table.row_count == 2, "both repositories' languages, not one's"
@@ -155,13 +166,20 @@ def test_every_facet_names_the_same_columns_at_both_scopes(session):
 
 
 def test_every_facet_tab_exists_in_the_app():
-    """A facet pointing at a tab nothing renders is a dead link."""
-    from dossier.tui.app import DossierApp
+    """A facet pointing at a tab nothing renders is a dead link.
 
+    `compose` builds a `TabPane` per view in `dossier.views`, so a facet's tab
+    exists when a view declares it; its table is still a literal `_compose_pane`
+    yields, so that stays a source check.
+    """
+    from dossier.tui.app import DossierApp
+    from dossier import views
+
+    composed = {view.tab for view in views.VIEWS}
     source = __import__("pathlib").Path("src/dossier/tui/app.py").read_text(
         encoding="utf-8")
     for facet in FACETS:
-        assert f'id="{facet.tab}"' in source, f"{facet.key} names a tab that is not composed"
+        assert facet.tab in composed, f"{facet.key} names a tab no view composes"
         assert f'id="{facet.table}"' in source, f"{facet.key} names a table that is not composed"
     assert set(BY_TAB) <= {f.tab for f in FACETS}
     assert DossierApp is not None
@@ -191,7 +209,7 @@ async def test_selecting_an_overview_row_opens_the_tab_holding_its_detail(sessio
         table.action_select_cursor()
         await pilot.pause()
         await pilot.pause()
-        assert app.query_one("#project-tabs").active == "tab-deltas"
+        assert app._get_active_tab_id() == "tab-deltas"
         assert app.selected_project.full_name == "org/one", (
             "the row named a repository, so that repository is now selected")
 
@@ -301,3 +319,30 @@ async def test_scoping_to_an_owner_redraws_what_is_on_screen(session):
         assert before != after, (
             f"the screen still reads {after!r} after scoping to another owner")
         assert "other" in after
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tab,table", [
+    ("tab-harness", "harness-table"),
+    ("tab-waiting", "waiting-table"),
+])
+async def test_a_global_tab_fills_without_a_selection(session, tab, table):
+    """The harness and the outstanding queue are global readings -- each row
+    names its own owner/repo and is not scoped to a project -- so their tabs
+    must fill with nothing selected. Neither had a loader, so both drew blank
+    until an owner was chosen; this is the guard against that.
+
+    Mutation: drop the tab's branch in `_on_view_shown` and this fails, because
+    the table renders no columns when loading never fires.
+    """
+    app = app_for(session)
+    # The Harness tab's live refresh reads the harness over the network; this
+    # test is about the facet table filling, not the live half, so stub it --
+    # a lingering worker thread otherwise slows unrelated captures under load.
+    app._refresh_harness_live = lambda: None
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        app._activate_tab(tab)
+        await pilot.pause()
+        assert len(app.query_one(f"#{table}", DataTable).columns) > 0, \
+            f"{tab} drew blank -- loading never fired"

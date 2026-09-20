@@ -200,6 +200,7 @@ class GitHubRepo:
     # aggregates counted a fork's upstream authors as organisation members.
     is_fork: bool = False
     is_archived: bool = False
+    is_private: bool = False
     
     @property
     def full_name(self) -> str:
@@ -391,6 +392,7 @@ class GitHubClient:
             stars=data.get("stargazers_count", 0),
             is_fork=data.get("fork", False),
             is_archived=data.get("archived", False),
+            is_private=data.get("private", False),
         )
     
     def get_repo_from_url(self, url: str) -> GitHubRepo:
@@ -550,6 +552,7 @@ class GitHubClient:
                     stars=item.get("stargazers_count", 0),
                     is_fork=item.get("fork", False),
                     is_archived=item.get("archived", False),
+                    is_private=item.get("private", False),
                 )
             )
         
@@ -604,6 +607,7 @@ class GitHubClient:
                         stars=item.get("stargazers_count", 0),
                         is_fork=item.get("fork", False),
                         is_archived=item.get("archived", False),
+                        is_private=item.get("private", False),
                     )
                 )
             
@@ -663,6 +667,7 @@ class GitHubClient:
                         stars=item.get("stargazers_count", 0),
                         is_fork=item.get("fork", False),
                         is_archived=item.get("archived", False),
+                        is_private=item.get("private", False),
                     )
                 )
             

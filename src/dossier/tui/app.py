@@ -88,14 +88,15 @@ def extract_file_path(source_file: str | None) -> str | None:
 
 
 from dossier import actions
-from dossier.views import VIEWS
+from dossier.views import VIEWS, grouped as _grouped_views
+from dossier.views import BY_TAB as VIEW_BY_TAB
 from dossier.tui.widgets import (ChatScreen, ContentViewerScreen, DraggableSplitter,
                                   ProjectDetailPanel, ProjectListItem, StatsWidget,
                                   SyncStatusWidget, WorkProgress)
-from dossier.facets import (BY_TAB as FACET_BY_TAB,
+from dossier.facets import (BY_KEY as FACET_BY_KEY,
+                            BY_TAB as FACET_BY_TAB,
                             BY_TITLE as FACET_BY_TITLE,
                             only_on)
-from dossier.tui.delta_board import DeltaBoard
 from dossier.tui.intersections_panel import IntersectionsPanel
 
 # The prefix `load_projects` puts on an owner group node.
@@ -254,16 +255,6 @@ class DossierApp(App):
         width: 1fr;
     }
 
-    #filter-bar {
-        height: auto;
-        width: 100%;
-        margin: 0;
-    }
-
-    #filter-bar Button {
-        margin: 0 1 0 0;
-        min-width: 6;
-    }
     
     SyncStatusWidget {
         dock: bottom;
@@ -353,14 +344,45 @@ class DossierApp(App):
         padding: 1;
     }
 
-    #tab-details {
-        padding: 0;
-    }
-    
     #dossier-layout {
+        height: 2fr;
+    }
+
+    /* In flight: the deltas census and the two graph windows, sharing the
+       lower third of the tab with the overview above. */
+    #inflight-heading {
+        padding: 1 1 0 1;
+        text-style: bold;
+    }
+
+    #dossier-deltas-table {
+        height: 8;
+    }
+
+    #dossier-graphs {
         height: 1fr;
     }
-    
+
+    #dossier-delta-graph-pane, #dossier-topology-pane {
+        width: 1fr;
+        height: 1fr;
+    }
+
+    #dossier-delta-graph-heading, #dossier-topology-heading {
+        padding: 0 1;
+        text-style: bold;
+        color: $text-muted;
+    }
+
+    #dossier-delta-graph, #dossier-topology-drawing {
+        padding: 0 1;
+    }
+
+    #dossier-delta-graph-note, #dossier-topology-note {
+        padding: 0 1;
+        color: $text-muted;
+    }
+
     #dossier-scroll {
         width: 2fr;
         height: 1fr;
@@ -438,6 +460,56 @@ class DossierApp(App):
         padding: 1 1 0 1;
         text-style: bold;
     }
+
+    /* The Harness tab's live console: a status line, the question it is
+       holding, and the field that answers it. */
+    #harness-status {
+        color: $text-muted;
+        padding: 0 1;
+    }
+
+    #harness-question {
+        color: $warning;
+        padding: 0 1;
+    }
+
+    #harness-answer {
+        margin: 0 1;
+    }
+
+    /* The Goals tab: a goal, its context, the send, and the plan that comes
+       back. The plan scrolls inside its own region so the page does not. */
+    #goals-intro {
+        color: $text-muted;
+        padding: 1 1 0 1;
+    }
+
+    #goal-input, #goal-context {
+        margin: 0 1;
+    }
+
+    #goal-buttons {
+        height: auto;
+        padding: 1 1;
+    }
+
+    #goal-status {
+        color: $warning;
+        padding: 0 1;
+    }
+
+    #goal-plan-scroll {
+        height: 1fr;
+    }
+
+    #goal-plan {
+        padding: 0 1;
+    }
+
+    #goal-history {
+        color: $text-muted;
+        padding: 1 1;
+    }
     """
     
     BINDINGS = [
@@ -449,6 +521,13 @@ class DossierApp(App):
         Binding("/", "search", "Search", show=True),
         Binding("f", "cycle_filter", "Filter", show=True),
         Binding("m", "rad_menu", "Menu (rad)", show=True),
+        # The middle rank, reachable from the keyboard as well as the buttons
+        # beside the search box: 4 opens the ring on Reach, 6 on Do, 5 closes
+        # it. Which cell each opens is `RANK_KEYS`, so a rebind moves the key
+        # and the button together.
+        Binding("4", "rank('4')", "Reach", show=False),
+        Binding("5", "rank('5')", "Close", show=False),
+        Binding("6", "rank('6')", "Do", show=False),
         Binding("?", "help", "Help", show=True),
         Binding("`", "settings", "Settings", show=False),
         Binding("l", "link_selected", "Link as Project", show=False),
@@ -521,6 +600,182 @@ class DossierApp(App):
         except Exception:
             return False
     
+    def _compose_pane(self, tab: str) -> ComposeResult:
+        """The widgets inside one tab. `compose` supplies the `TabPane` and the
+        order -- both from `dossier.views` -- and this supplies the body, so a
+        tab lands in the ring's job-group without a second list to keep in step.
+        """
+        if tab == "tab-overview":
+            # Org-wide and first, so a reader arriving cold gets the shape of the
+            # organisation before being asked to pick a repository.
+            yield OverviewPanel(self.session_factory, id="org-overview")
+        elif tab == "tab-waiting":
+            # The one thing on the screen waiting for the reader; a queue nobody
+            # goes looking for is a queue nobody empties.
+            yield DataTable(id="waiting-table")
+        elif tab == "tab-issues":
+            yield DataTable(id="issues-table")
+        elif tab == "tab-deltas":
+            # The units of work on deck: a repository's open deltas, or the
+            # estate's. The harness's thread archive used to share this tab; a
+            # thread is a delta, but it is the harness's, so it moved to Harness
+            # in Seams with the rest of what the harness reports.
+            with Vertical():
+                yield DataTable(id="deltas-table")
+        elif tab == "tab-sweep":
+            # Two sweeps in one view: a dependency change across the estate, and
+            # a reclaim across this workstation's disk. A review is a thing you
+            # leave and return to, so it is a tab rather than a modal.
+            with Vertical():
+                with Horizontal(id="sweep-picker"):
+                    yield Input(
+                        placeholder="a package, to sweep; blank "
+                                    "takes the widest-shared",
+                        id="sweep-package")
+                yield Static("", id="sweep-summary")
+                yield DataTable(id="sweep-table")
+                yield Static("", id="sweep-note")
+                yield Static("Disk -- what a cleanup of this workstation would "
+                             "get back", id="disk-heading")
+                yield Static("", id="disk-age")
+                yield DataTable(id="disk-volumes-table")
+                yield Static("", id="disk-delta-age")
+                yield DataTable(id="disk-targets-table")
+        elif tab == "tab-dossier":
+            # One repository in one reading: its own facts (the detail panel),
+            # the document and the parts it is composed of, and the languages it
+            # is written in -- the consistent overview Dossier folded Details and
+            # Languages into.
+            with Vertical():
+                yield ProjectDetailPanel(id="project-detail")
+                with Horizontal(id="dossier-layout"):
+                    with VerticalScroll(id="dossier-scroll"):
+                        yield Markdown("", id="dossier-view")
+                        yield Static("Languages -- by share of bytes",
+                                     id="languages-heading")
+                        yield DataTable(id="languages-table")
+                    yield DraggableSplitter("dossier-scroll", "dossier-components", id="dossier-splitter")
+                    # The components pane: the tree keeps the hierarchy, the
+                    # table is the flat editable reading, and the buttons are the
+                    # only route to create or remove a link.
+                    with Vertical(id="dossier-components"):
+                        yield Tree("Components", id="component-tree")
+                        yield IntersectionsPanel(self.session_factory,
+                                                 id="intersections")
+                        yield DataTable(id="components-table")
+                        with Horizontal(id="component-buttons"):
+                            yield Button("Add Component", id="btn-add-component", variant="primary")
+                            yield Button("Link as Parent", id="btn-link-parent", variant="default")
+                            yield Button("Remove", id="btn-remove-component", variant="error")
+                # In flight: this repository's deltas as a census, then the two
+                # windows on how they connect -- dossier's own delta-link graph,
+                # which is always here, and the harness topology, when qmcp is
+                # up. Both drawn as the same boxes and arrows so a reader moves
+                # between them without re-learning the notation.
+                yield Static("This repository's deltas -- every phase -- and "
+                             "the graph they form", id="inflight-heading")
+                yield DataTable(id="dossier-deltas-table")
+                with Horizontal(id="dossier-graphs"):
+                    with Vertical(id="dossier-delta-graph-pane"):
+                        yield Static("Deltas & links -- recorded here, no "
+                                     "harness needed",
+                                     id="dossier-delta-graph-heading")
+                        with VerticalScroll():
+                            yield Static("", id="dossier-delta-graph")
+                        yield Static("", id="dossier-delta-graph-note")
+                    with Vertical(id="dossier-topology-pane"):
+                        yield Static("Harness topology -- the same repository, "
+                                     "when qmcp is up",
+                                     id="dossier-topology-heading")
+                        with VerticalScroll():
+                            yield Static("", id="dossier-topology-drawing")
+                        yield Static("", id="dossier-topology-note")
+        elif tab == "tab-docs":
+            yield Tree("📄 Documentation", id="docs-tree")
+        elif tab == "tab-branches":
+            # The sync reading, then the clone reading. Both are about branches;
+            # only one can say whether the commits exist anywhere else.
+            with Vertical():
+                yield DataTable(id="branches-table")
+                yield Static("Branch hygiene -- read from the "
+                             "clones on this machine",
+                             id="hygiene-heading")
+                yield DataTable(id="hygiene-table")
+        elif tab == "tab-dependencies":
+            yield DataTable(id="dependencies-table")
+        elif tab == "tab-contributors":
+            yield DataTable(id="contributors-table")
+        elif tab == "tab-releases":
+            yield DataTable(id="releases-table")
+        elif tab == "tab-governance":
+            with Vertical():
+                yield Static("", id="governance-age")
+                yield DataTable(id="governance-table")
+                yield Static("", id="governance-threads-age")
+                yield DataTable(id="governance-threads-table")
+        elif tab == "tab-harness":
+            # A live harness console, all on this screen: a status line polled
+            # while the tab is open, the invocations it reports, the question it
+            # is holding for a person, and a field to answer it. The harness half
+            # of the pair qmcp reports, read through the address that names the
+            # same row on both sides.
+            with Vertical():
+                yield Static("", id="harness-status")
+                yield DataTable(id="harness-table")
+                yield Static("", id="harness-question")
+                yield Input(
+                    placeholder="answer the harness's question, then Enter",
+                    id="harness-answer")
+                # The archive: the conversations the harness has kept, as
+                # deltas. A harness reading like the invocations above, moved
+                # here from On deck so Seams holds what the harness reports.
+                yield Static("Thread archive -- conversations the harness kept, "
+                             "as deltas", id="threads-heading")
+                yield DataTable(id="threads-table")
+                with Horizontal(id="thread-buttons"):
+                    yield Input(placeholder="path to an export "
+                                            "(conversations.json or the "
+                                            "folder holding it)",
+                                id="thread-export-path")
+                    yield Button("Ingest", id="btn-ingest-threads",
+                                 variant="primary")
+                    yield Button("Read", id="btn-read-thread",
+                                 variant="default")
+                yield WorkProgress(id="thread-progress")
+        elif tab == "tab-topology":
+            with Vertical():
+                yield Static("", id="topology-caveat")
+                with Horizontal(id="topology-picker"):
+                    yield Input(
+                        placeholder="a project, to read the archive "
+                                    "for; blank draws a shape",
+                        id="topology-subject")
+                    yield Button("Draw", id="btn-draw-topology",
+                                 variant="primary")
+                    yield Button("Mermaid", id="btn-topology-mermaid")
+                yield Static("", id="topology-drawing")
+                yield Static("", id="topology-note")
+        elif tab == "tab-goals":
+            # Where a person originates work: a goal, optional context, and the
+            # plan the harness drafts from it. The plan is shown, not run --
+            # approving it is the human queue's act (Outstanding), and this
+            # screen ends at the draft on purpose. It is the outbound side of
+            # the seam every other Seams view reads.
+            with Vertical():
+                yield Static("Send the harness a new goal. It drafts a plan; "
+                             "approving that plan happens at Outstanding, not "
+                             "here.", id="goals-intro")
+                yield Input(placeholder="the goal, in your words",
+                            id="goal-input")
+                yield Input(placeholder="optional context -- a repo, a delta, "
+                                        "a constraint", id="goal-context")
+                with Horizontal(id="goal-buttons"):
+                    yield Button("Send goal", id="goal-send", variant="primary")
+                yield Static("", id="goal-status")
+                with VerticalScroll(id="goal-plan-scroll"):
+                    yield Static("", id="goal-plan")
+                yield Static("", id="goal-history")
+
     def compose(self) -> ComposeResult:
         yield Header()
         
@@ -529,18 +784,13 @@ class DossierApp(App):
         
         with Horizontal(id="main-layout"):
             with Vertical(id="sidebar"):
-                # The work board first: deltas are the unit of work, and the
-                # project tree below is how you reach a repository that has no
-                # delta open. The board reads `project_delta`; the sidebar's
-                # old entity filter matched project rows whose *names* were
-                # addresses, which is a shape `ingest.py` refuses to create.
-                with Container(id="delta-board-container"):
-                    yield DeltaBoard(self.session_factory, id="delta-board")
+                # One hierarchy: the ring's groups, the repositories under
+                # Explore, and every repository's aspects. The org work board
+                # the sidebar used to hold is folded into the On-deck node under
+                # Plan. `auto_expand` toggles a node when it is *selected*, so
+                # clicking an owner collapsed its repositories and read as
+                # "nothing happened"; expansion is the toggle arrow's job.
                 with Container(id="project-list-container"):
-                    # `auto_expand` toggles a node when it is *selected*, so
-                    # clicking an owner collapsed its repositories and the
-                    # selection read as "nothing happened". Expansion is the
-                    # toggle arrow's job.
                     project_tree = Tree("Projects", id="project-tree")
                     project_tree.auto_expand = False
                     yield project_tree
@@ -558,149 +808,22 @@ class DossierApp(App):
                             id="select-sort",
                             allow_blank=False,
                         )
-                    with Horizontal(id="filter-bar"):
-                        yield Button("All", id="btn-filter-all", variant="primary")
-                        yield Button("Synced", id="btn-filter-synced", variant="default")
-                        yield Button("Unsynced", id="btn-filter-unsynced", variant="default")
-                        yield Button("Star", id="btn-filter-starred", variant="default")
 
             with Vertical(id="main-content"):
-                with TabbedContent(id="project-tabs"):
-                    # First, and org-wide rather than per-project: a reader
-                    # arriving cold gets the shape of the organisation before
-                    # being asked to pick a repository out of 141.
-                    with TabPane("Overview", id="tab-overview"):
-                        yield OverviewPanel(self.session_factory, id="org-overview")
-                    with TabPane("Dossier", id="tab-dossier"):
-                        with Horizontal(id="dossier-layout"):
-                            yield VerticalScroll(Markdown("", id="dossier-view"), id="dossier-scroll")
-                            yield DraggableSplitter("dossier-scroll", "dossier-components", id="dossier-splitter")
-                            # **THE COMPONENTS TAB, MOVED HERE WHOLE.** It held
-                            # the same parent and child links this tree already
-                            # draws -- five of them across a hundred and fifteen
-                            # repositories -- and a top-level view that thin is
-                            # a cell spent on nothing. The tree keeps the
-                            # hierarchy and the grandchildren; the table is the
-                            # flat, editable reading and the buttons act on it.
-                            # Neither was dropped, because the tree's nodes
-                            # carry navigation and not link identity, and
-                            # selecting one already navigates away.
-                            with Vertical(id="dossier-components"):
-                                yield Tree("Components", id="component-tree")
-                                # What can be observed, above what was declared.
-                                yield IntersectionsPanel(self.session_factory,
-                                                         id="intersections")
-                                yield DataTable(id="components-table")
-                                # **THIS ROW STAYS, AND THE GUARD FROM #36 IS
-                                # WHY.** Consolidating the button rows removed
-                                # it, and `test_the_components_pane_moved_
-                                # rather_than_went` went red: these three are
-                                # the only way to create or remove a component
-                                # link, and none of them has a wedge. `Do`
-                                # already holds six children after `Add` and
-                                # `Remove`; three more would be nine, past the
-                                # eight cells a level has.
-                                #
-                                # So the consolidation stops where the ring
-                                # runs out of room, and says so, rather than
-                                # deleting the only route to an act.
-                                with Horizontal(id="component-buttons"):
-                                    yield Button("Add Component", id="btn-add-component", variant="primary")
-                                    yield Button("Link as Parent", id="btn-link-parent", variant="default")
-                                    yield Button("Remove", id="btn-remove-component", variant="error")
-                    with TabPane("Details", id="tab-details"):
-                        yield ProjectDetailPanel(id="project-detail")
-                    with TabPane("Documentation", id="tab-docs"):
-                        yield Tree("📄 Documentation", id="docs-tree")
-                    with TabPane("Languages", id="tab-languages"):
-                        yield DataTable(id="languages-table")
-                    with TabPane("Branches", id="tab-branches"):
-                        with Vertical():
-                            # The sync reading, then the clone reading. Both
-                            # are about branches; only one of them can say
-                            # whether the commits exist anywhere else.
-                            yield DataTable(id="branches-table")
-                            yield Static("Branch hygiene -- read from the "
-                                         "clones on this machine",
-                                         id="hygiene-heading")
-                            yield DataTable(id="hygiene-table")
-                    with TabPane("Dependencies", id="tab-dependencies"):
-                        yield DataTable(id="dependencies-table")
-                    with TabPane("Contributors", id="tab-contributors"):
-                        yield DataTable(id="contributors-table")
-                    with TabPane("Issues", id="tab-issues"):
-                        yield DataTable(id="issues-table")
-                    with TabPane("Releases", id="tab-releases"):
-                        yield DataTable(id="releases-table")
-                    # The harness half of the pair: what qmcp reports having
-                    # run, read through the address that names the same row on
-                    # both sides.
-                    with TabPane("Harness", id="tab-harness"):
-                        yield DataTable(id="harness-table")
-                    # Its own tab rather than a second table under Harness:
-                    # this is the one thing on the screen that is waiting for
-                    # the reader, and a queue somebody has to go looking for is
-                    # a queue nobody empties.
-                    with TabPane("Waiting", id="tab-waiting"):
-                        yield DataTable(id="waiting-table")
-                    # The harness's thread archive, read over the seam. This is
-                    # the only human surface for it: a second one would be a
-                    # second definition of what a figure means, and the CLI
-                    # beside it is for machines and for debugging.
-                    # One sweep: what may be approved together, and what may
-                    # not. Its own tab rather than a modal, because a person
-                    # comes back to a review and a modal is a thing you are
-                    # inside of rather than a thing you can leave and return to.
-                    with TabPane("Sweep", id="tab-sweep"):
-                        with Vertical():
-                            with Horizontal(id="sweep-picker"):
-                                yield Input(
-                                    placeholder="a package, to sweep; blank "
-                                                "takes the widest-shared",
-                                    id="sweep-package")
-                            yield Static("", id="sweep-summary")
-                            yield DataTable(id="sweep-table")
-                            yield Static("", id="sweep-note")
-                    with TabPane("Topology", id="tab-topology"):
-                        with Vertical():
-                            yield Static("", id="topology-caveat")
-                            with Horizontal(id="topology-picker"):
-                                yield Input(
-                                    placeholder="a project, to read the archive "
-                                                "for; blank draws a shape",
-                                    id="topology-subject")
-                                yield Button("Draw", id="btn-draw-topology",
-                                             variant="primary")
-                                yield Button("Mermaid", id="btn-topology-mermaid")
-                            yield Static("", id="topology-drawing")
-                            yield Static("", id="topology-note")
-                    with TabPane("Threads", id="tab-threads"):
-                        yield DataTable(id="threads-table")
-                        with Horizontal(id="thread-buttons"):
-                            yield Input(placeholder="path to an export "
-                                                    "(conversations.json or the "
-                                                    "folder holding it)",
-                                        id="thread-export-path")
-                            yield Button("Ingest", id="btn-ingest-threads",
-                                         variant="primary")
-                            yield Button("Read", id="btn-read-thread",
-                                         variant="default")
-                        yield WorkProgress(id="thread-progress")
-                    with TabPane("Governance", id="tab-governance"):
-                        with Vertical():
-                            yield Static("", id="governance-age")
-                            yield DataTable(id="governance-table")
-                            yield Static("", id="governance-threads-age")
-                            yield DataTable(id="governance-threads-table")
-                    with TabPane("Disk", id="tab-disk"):
-                        with Vertical():
-                            yield Static("", id="disk-age")
-                            yield DataTable(id="disk-volumes-table")
-                            yield Static("", id="disk-delta-age")
-                            yield DataTable(id="disk-targets-table")
-                    with TabPane("Deltas", id="tab-deltas"):
-                        with Vertical():
-                            yield DataTable(id="deltas-table")
+                # Two layers, mirroring the ring: an outer strip of the job
+                # groups, and inside each an inner strip of that group's views.
+                # `m` `8` `2` `8` in the ring is Go, Explore, Dossier; here it is
+                # the Explore group tab, then the Dossier view tab -- the same
+                # two presses. Both strips are the registry's, in its order, so a
+                # view added to `dossier.views` gets a tab with no second edit.
+                with TabbedContent(id="group-tabs"):
+                    for group, group_views in _grouped_views():
+                        slug = group.lower()
+                        with TabPane(group, id=f"group-{slug}"):
+                            with TabbedContent(id=f"views-{slug}"):
+                                for view in group_views:
+                                    with TabPane(view.title, id=view.tab):
+                                        yield from self._compose_pane(view.tab)
 
         # **ONE ROW, AND IT IS THE RING'S MIDDLE RANK.** Four buttons here
         # and nine more scattered across three tabs were thirteen affordances
@@ -720,43 +843,46 @@ class DossierApp(App):
         
         yield Footer()
     
-    # Which verb each button in the row opens the ring at. The numbers are
-    # the numpad's, so the label a person clicks and the digit they would have
-    # pressed are the same character.
-    RANK = {"btn-rank-4": 4, "btn-rank-6": 6}
+    # Which ring cell each middle-rank digit opens on. Digit-keyed so the
+    # keyboard binding, the button beside the search box, and any rebind read
+    # one mapping -- the label a person clicks and the digit they would press
+    # are the same character. `5` is the centre; it closes the ring and opens
+    # nothing, so it is not here. Configurable: override to remap the rank.
+    RANK_KEYS: dict[str, int] = {"4": 4, "6": 6}
 
-    # Set by the row, read once by the next open. See `action_rad_menu`.
+    # Set by the row or a key, read once by the next open. See `action_rad_menu`.
     _rad_open_at_cell = None
+
+    def action_rank(self, key: str) -> None:
+        """The middle-rank shortcut, from a digit key or its button alike.
+
+        **TWO INPUTS, BECAUSE IT IS TWO INPUTS.** It opens the ring on the cell
+        `RANK_KEYS` names; the open and the cell are the two presses `m` then
+        `6` are, and rad charges for both. Jumping straight to a verb would be
+        one press on screen and a cost ledger that disagreed with the keyboard.
+        `5` is the centre: it closes the ring, and says so when nothing is open.
+        """
+        if key == "5":
+            self.notify("Nothing to close. 5 backs out of the ring when it is "
+                        "open, at any depth.", timeout=4)
+            return
+        cell = self.RANK_KEYS.get(key)
+        if cell is not None:
+            self._rad_open_at_cell = cell
+            self.action_rad_menu()
 
     @on(Button.Pressed, "#btn-rank-4")
     @on(Button.Pressed, "#btn-rank-6")
     def on_rank_pressed(self, event: Button.Pressed) -> None:
-        """Open the ring, then press the cell the button names.
-
-        **TWO INPUTS, BECAUSE IT IS TWO INPUTS.** The click opens the menu and
-        the cell chooses a verb, exactly as `m` then `6` does, and rad charges
-        for both. Jumping straight to the verb would be one press on screen and
-        a cost ledger that quietly disagreed with the keyboard.
-        """
+        """The button takes the same route its digit key does."""
         event.stop()
-        cell = self.RANK.get(event.button.id)
-        if cell is None:
-            return
-        self._rad_open_at_cell = cell
-        self.action_rad_menu()
+        self.action_rank(event.button.id.removeprefix("btn-rank-"))
 
     @on(Button.Pressed, "#btn-rank-5")
     def on_rank_five_pressed(self, event: Button.Pressed) -> None:
-        """`5` closes, at every depth and from outside as well.
-
-        The centre of the ring is the one cell whose meaning never changes, so
-        the button carrying its number does not get a second meaning here. With
-        the ring shut there is nothing to back out of, and it says so rather
-        than opening the menu a person just declined to open.
-        """
+        """`5` closes; with the ring shut there is nothing to back out of."""
         event.stop()
-        self.notify("Nothing to close. 5 backs out of the ring when it is "
-                    "open, at any depth.", timeout=4)
+        self.action_rank("5")
 
     def on_mouse_down(self, event) -> None:
         """Right-click opens the ring, on whatever is under the pointer.
@@ -801,7 +927,87 @@ class DossierApp(App):
         # and a cell that survived one use would silently steer it.
         opening_on = self._rad_open_at_cell
         self._rad_open_at_cell = None
-        self.push_screen(RingScreen(self._rad, opening_on=opening_on), applied)
+        self.push_screen(
+            RingScreen(self._rad, context=self._rad_context(),
+                       opening_on=opening_on),
+            applied)
+
+    def _rad_context(self) -> dict:
+        """What the ring should know about where it was opened. `seams` is true
+        on the Harness and Topology screens, where the ring offers the acts that
+        run and review the harness."""
+        view = VIEW_BY_TAB.get(self._get_active_tab_id())
+        return {"seams": bool(view and view.group == "Seams")}
+
+    def _review_harness(self) -> None:
+        """`harness.review`. Show what the harness ran, to review it. Offered by
+        the ring's Reach only on the Seams screen."""
+        self._activate_tab("tab-harness")
+
+    def _run_harness_tool(self) -> None:
+        """`harness.run`. Choose a harness tool and start it.
+
+        The tools are read in a worker and the run started in another, so the
+        loop a person is looking at never stops for the network; the picker in
+        between only chooses which tool. Starting a run is a write to the
+        harness, so the outcome names the invocation it began.
+        """
+        self._fetch_harness_tools()
+
+    @work(thread=True, exclusive=True, group="harness-tools")
+    def _fetch_harness_tools(self) -> None:
+        from dossier import human
+        listing = human.tools()
+        self.call_from_thread(self._show_tool_ring, listing)
+
+    def _show_tool_ring(self, listing) -> None:
+        """Choose the tool through a rad ring, following rad's protocol like
+        every other act here: a numpad of options, one metered press each, and
+        the eight-cell limit that says a resolver offering more than eight
+        should have grouped them. Not a bespoke list -- a list is unmetered and
+        unbounded, which is the shape rad exists to replace.
+        """
+        if not listing.reachable:
+            self.notify(f"harness: {listing.problem}", severity="warning", timeout=6)
+            return
+        if not listing.tools:
+            self.notify("harness: no tools to run", severity="warning", timeout=4)
+            return
+
+        from dossier.rad.ring import RingScreen
+        from dossier.rad.session import RadSession, Wedge
+
+        shown = listing.tools[:8]  # rad's numpad holds eight around a centre
+        wedges = tuple(Wedge(id=f"harness-tool.{tool.name}", label=tool.name,
+                             action=tool.name) for tool in shown)
+        session = RadSession(resolve=lambda ctx: wedges)
+
+        def chosen(intent):
+            # The wedge's action is the tool name; a metered press selected it.
+            if intent is not None:
+                self.notify(f"harness: starting {intent.action}…", timeout=3)
+                self._run_harness_tool_worker(intent.action)
+
+        if len(listing.tools) > 8:
+            self.notify(f"{len(listing.tools)} tools; the ring shows eight. "
+                        "Fewer, grouped, is the rad answer to more.", timeout=5)
+        self.push_screen(RingScreen(session), chosen)
+
+    @work(thread=True, exclusive=True, group="harness-run")
+    def _run_harness_tool_worker(self, name: str) -> None:
+        from dossier import human
+        ran = human.run_tool(name)
+        self.call_from_thread(self._harness_ran, ran)
+
+    def _harness_ran(self, ran) -> None:
+        if ran.accepted:
+            where = (f" -- invocation {ran.invocation_id}"
+                     if ran.invocation_id else "")
+            self.notify(f"harness ran {ran.tool}{where}", timeout=5)
+            self._activate_tab("tab-harness")
+        else:
+            self.notify(f"{ran.tool} did not run: {ran.detail}",
+                        severity="warning", timeout=6)
 
     # One rad session for the app's lifetime, so the cost ledger accumulates
     # across actions rather than resetting each time the ring opens. A class
@@ -848,6 +1054,10 @@ class DossierApp(App):
         "filter.all": "_show_all_projects",
         "filter.synced": "_show_synced_projects",
         "filter.drifting": "_show_drifting_projects",
+        # Seams: run the harness, and review what it is holding. Offered by the
+        # ring only on the Seams screen (see `dossier.rad.palette.resolve`).
+        "harness.run": "_run_harness_tool",
+        "harness.review": "_review_harness",
     }
 
     # Every ring action this app actually does something with. Declared rather
@@ -889,11 +1099,12 @@ class DossierApp(App):
         it, which is the whole complaint `PRINCIPLES.md` P13 is about.
         """
         try:
-            self.query_one("#project-tabs").active = "tab-threads"
+            self._activate_tab("tab-harness")
             # Filled on arrival rather than left to whatever fires on a tab
             # change: a person routed here by `4.6` should see the archive they
-            # are about to add to, not an empty table.
-            self._load_tab_data("tab-threads")
+            # are about to add to, not an empty table. The archive lives under
+            # Harness now, in Seams, with the rest of what the harness reports.
+            self._load_tab_data("tab-harness")
         except Exception:
             pass
 
@@ -980,7 +1191,7 @@ class DossierApp(App):
         # watching stayed empty while the message said two hundred and three.
         # Measured: rows after a real ingest were 0.
         self.action_refresh()
-        self.reload_tab("tab-threads")
+        self.reload_tab("tab-deltas")
         self.notify(line, title="Ingested")
 
     def reload_tab(self, tab_id: str) -> None:
@@ -1111,7 +1322,7 @@ class DossierApp(App):
         is not something to do on the loop a person is looking at.
         """
         try:
-            self.query_one("#project-tabs").active = "tab-sweep"
+            self._activate_tab("tab-sweep")
         except Exception:
             pass
         try:
@@ -1224,8 +1435,8 @@ class DossierApp(App):
         export somebody might not still have.
         """
         try:
-            self.query_one("#project-tabs").active = "tab-threads"
-            self._load_tab_data("tab-threads")
+            self._activate_tab("tab-harness")
+            self._load_tab_data("tab-harness")
         except Exception:
             pass
         self._progress_start(self.RECONCILE_STAGES[0][1],
@@ -1269,7 +1480,7 @@ class DossierApp(App):
         except Exception:
             pass
         self.action_refresh()
-        self.reload_tab("tab-threads")
+        self.reload_tab("tab-deltas")
 
         reachable = "" if archive.reachable else "  (the archive did not answer)"
         self._progress_finish(line + reachable)
@@ -1309,18 +1520,42 @@ class DossierApp(App):
             panel.finish(said)
 
     def rad_can_apply(self, wedge) -> bool:
-        """Whether this app can act on one leaf wedge.
+        """Whether this app can act on one leaf wedge *right now*.
 
         Passed to `RadSession`, which greys out what comes back false and
         refuses to select it. Submenus are not asked about -- the session works
         those out from their descendants, because a verb whose every child is
         dead should be dead too rather than open onto a level of dead cells.
 
-        `wedge.action or wedge.id` is the same fallback `RadSession.enter` uses
-        to build the intent. Reading it differently here would grey out a wedge
-        the dispatch would in fact have handled, or the reverse.
+        Two conditions, both required. First the app must have a handler for the
+        act -- `wedge.action or wedge.id`, the same fallback `RadSession.enter`
+        uses to build the intent, so reading it differently would grey a wedge
+        the dispatch would in fact have handled. Second the act's context must
+        hold: Remove needs a repository chosen, Sweep a dependency, the delta
+        acts a repository, Read a conversation. A verb offered with nothing to
+        act on is a click that ends in a warning, and rad greys it instead.
         """
-        return (wedge.action or wedge.id) in self.RAD_HANDLED
+        action = wedge.action or wedge.id
+        return action in self.RAD_HANDLED and self._rad_context_ok(action)
+
+    def _rad_context_ok(self, action: str) -> bool:
+        """Whether one act's context holds now. Everything not named is
+        context-free -- a view, a sync, an add -- and available whenever its
+        handler exists, which keeps every group's middle rank reachable."""
+        if action == "project.remove":
+            return self.selected_project is not None
+        if action in ("delta.advance", "delta.note"):
+            return self.selected_project is not None
+        if action == "sweep.review":
+            return bool(self.selected_dependency)
+        if action == "reach.read":
+            # A conversation is chosen when the threads table has a row under
+            # its cursor. Defensive: the table may not be composed yet.
+            try:
+                return self.query_one("#threads-table", DataTable).cursor_row is not None
+            except Exception:
+                return False
+        return True
 
     # How many repositories `6.2` will fetch off two keystrokes without asking
     # again. Above this it states the plan and waits for the same two keys a
@@ -1339,7 +1574,7 @@ class DossierApp(App):
         if tab is not None:
             self._sync_pending = None
             try:
-                self.query_one("#project-tabs").active = tab
+                self._activate_tab(tab)
             except Exception:
                 pass
             self.notify(f"{intent.action}  (ipa {intent.ipa})", timeout=3)
@@ -1375,7 +1610,7 @@ class DossierApp(App):
         from dossier.freshness import plan_for
 
         try:
-            tab = self.query_one("#project-tabs").active
+            tab = self._get_active_tab_id()
         except Exception:
             tab = None
 
@@ -1591,8 +1826,7 @@ class DossierApp(App):
         # applied last for that reason: _restore_view_state may select a
         # project, which switches to the configured default tab.
         if self._initial_tab:
-            tabs = self.query_one("#project-tabs", TabbedContent)
-            tabs.active = self._initial_tab
+            self._activate_tab(self._initial_tab)
             self._load_tab_data(self._initial_tab)
 
     def _populate_language_filter(self) -> None:
@@ -1680,6 +1914,38 @@ class DossierApp(App):
         # Standard owner/repo format - return as-is
         return name
     
+    def _populate_on_deck(self, node) -> None:
+        """Fill the On-deck tree node with every open delta by phase, org-wide.
+
+        This is the board the sidebar `DeltaBoard` used to draw, folded into the
+        one hierarchy. Forks are excluded here as well as at derivation, because
+        a database synced before that rule existed still holds their deltas.
+        """
+        if not self._delta_tables_exist:
+            return
+        from dossier.tui.delta_board import (CLOSED_PHASES, group_by_phase,
+                                             label_for)
+        from dossier.models.schemas import DeltaPhase
+
+        with self.session_factory() as session:
+            deltas = list(session.exec(
+                select(ProjectDelta).order_by(ProjectDelta.updated_at.desc())).all())
+            projects = list(session.exec(select(Project)).all())
+            names = {p.id: (p.full_name or p.name) for p in projects}
+            forks = {p.id for p in projects if p.is_fork}
+            deltas = [d for d in deltas if d.project_id not in forks]
+            for delta in deltas:
+                session.expunge(delta)
+
+        closed = {p.value for p in CLOSED_PHASES}
+        for phase, rows in group_by_phase(deltas):
+            branch = node.add(f"{phase}  ({len(rows)})", expand=phase not in closed)
+            for delta in rows:
+                branch.add_leaf(
+                    label_for(delta, names.get(delta.project_id)),
+                    data={"type": "work-delta", "delta": delta,
+                          "project_id": delta.project_id})
+
     def load_projects(self, search: str = "", auto_select: bool = False, offset: int = 0) -> None:
         """Load projects into the tree view with filtering, sorting, and hierarchical grouping.
         
@@ -1696,6 +1962,43 @@ class DossierApp(App):
         project_tree = self.query_one("#project-tree", Tree)
         project_tree.clear()
         project_tree.root.expand()
+
+        # The status filter, folded in from the old button row: a node that
+        # shows its state and cycles All -> Synced -> Unsynced when selected.
+        _status = {None: "All", True: "Synced", False: "Unsynced"}[self.filter_synced]
+        if self.filter_starred is True:
+            _status += " · Starred"
+        elif self.filter_starred is False:
+            _status += " · Unstarred"
+        project_tree.root.add_leaf(f"🔎 Filter: {_status}",
+                                   data={"type": "filter-cycle"})
+
+        # The tree mirrors the ring: a node per job group, in the ring's order.
+        # Every group but Explore holds its views as leaves that open the tab;
+        # Explore is the repository hierarchy -- owner, repo, and each repo's
+        # aspects are the Explore views scoped to that repo. So the left panel,
+        # the tab strip and the ring are one taxonomy.
+        explore_node = None
+        for group, group_views in _grouped_views():
+            gnode = project_tree.root.add(
+                group, expand=(group == "Explore"),
+                data={"type": "ring-group", "group": group})
+            if group == "Explore":
+                explore_node = gnode
+            else:
+                for view in group_views:
+                    if view.tab == "tab-deltas":
+                        # On deck folds in the org work board: an expandable node
+                        # of every open delta by phase. Selecting the node opens
+                        # the tab; expanding it reads the board the sidebar used
+                        # to hold.
+                        node = gnode.add(view.title, expand=False,
+                                         data={"type": "view", "tab": view.tab})
+                        self._populate_on_deck(node)
+                    else:
+                        gnode.add_leaf(view.title, data={"type": "view", "tab": view.tab})
+        if explore_node is None:  # a registry with no Explore group; never happens
+            explore_node = project_tree.root
 
         # Pre-fetch deltas in a separate session to avoid corrupting main session
         # if delta tables don't exist
@@ -2072,7 +2375,7 @@ class DossierApp(App):
                 if not project_langs:
                     return
                 langs_folder = parent_node.add(f"💻 Languages ({len(project_langs)})", expand=False)
-                langs_folder.data = {"type": "section", "section": "tab-languages"}
+                langs_folder.data = {"type": "section", "section": "tab-dossier"}
                 for lang in project_langs[:10]:  # Limit to 10
                     bar_width = int(lang.percentage / 10) if lang.percentage else 0
                     bar = "█" * bar_width
@@ -2085,7 +2388,7 @@ class DossierApp(App):
                     }
                 if len(project_langs) > 10:
                     more = langs_folder.add_leaf(f"... {len(project_langs) - 10} more")
-                    more.data = {"type": "section", "section": "tab-languages"}
+                    more.data = {"type": "section", "section": "tab-dossier"}
             
             def add_deps_to_node(parent_node, project):
                 """Add dependencies as children of a project node."""
@@ -2422,7 +2725,7 @@ class DossierApp(App):
                     if isinstance(subgroup_items, list) and subgroup_items != group_data.get("_items"):
                         item_count += len(subgroup_items)
                 
-                group_node = project_tree.root.add(f"{group} ({item_count})", expand=group.startswith("🏢"))
+                group_node = explore_node.add(f"{group} ({item_count})", expand=group.startswith("🏢"))
                 # A category is a selectable thing, not just a heading. An
                 # owner group carries its owner so selecting it can show the
                 # aggregate for that owner rather than doing nothing -- the
@@ -2855,28 +3158,6 @@ class DossierApp(App):
             # Select the new project
             self.selected_project = project
 
-    @on(Tree.NodeSelected, "#delta-board")
-    def on_delta_board_selected(self, event: Tree.NodeSelected) -> None:
-        """Selecting a delta selects the project it belongs to.
-
-        Every per-project tab reads `selected_project`. A board that set only
-        the delta would leave the rest of the screen describing whatever was
-        selected before -- stale content that looks current.
-        """
-        data = event.node.data
-        if not data or data.get("type") != "delta":
-            return
-        project_id = data.get("project_id")
-        if project_id is None:
-            return
-        with self.session_factory() as session:
-            project = session.get(Project, project_id)
-            if project is None:
-                return
-            session.expunge(project)
-        self.selected_project = project
-        self.show_project_details(project)
-
     @on(Tree.NodeSelected, "#project-tree")
     def on_project_tree_selected(self, event: Tree.NodeSelected) -> None:
         """Handle project tree node selection."""
@@ -2886,8 +3167,24 @@ class DossierApp(App):
         
         nav_data = node.data
         nav_type = nav_data.get("type")
-        
-        if nav_type == "project":
+
+        if nav_type == "view":
+            # A group's view leaf opens that view's tab. This is how the tree
+            # reaches the org-wide readings -- Overview, Governance, Harness --
+            # that are not scoped to one repository.
+            self._activate_tab(nav_data["tab"])
+
+        elif nav_type == "ring-group":
+            # A group node is a heading you expand; selecting Explore does
+            # nothing on its own, and the others opened their leaves already.
+            node.toggle()
+
+        elif nav_type == "filter-cycle":
+            # The status filter, folded into the tree: cycle it and the rebuild
+            # relabels this node. `f` and the `filter` command reach it too.
+            self.action_cycle_filter()
+
+        elif nav_type == "project":
             project = nav_data.get("project")
             if project:
                 self.selected_project = project
@@ -3001,35 +3298,64 @@ class DossierApp(App):
             # Link delta as project and navigate to it
             self._link_delta_project(nav_data)
 
+        elif nav_type == "work-delta":
+            # A delta on the On-deck board selects the repository it belongs to,
+            # the way the sidebar board did: every per-repo tab reads the
+            # selection, so setting only the delta would leave the rest of the
+            # screen describing whatever was chosen before.
+            project_id = nav_data.get("project_id")
+            if project_id is not None:
+                with self.session_factory() as session:
+                    project = session.get(Project, project_id)
+                    if project is not None:
+                        session.expunge(project)
+                        self.selected_project = project
+                        self.show_project_details(project)
+
+    def _group_slug(self, tab_id: str) -> Optional[str]:
+        """The slug of the group a view tab sits under, from the registry."""
+        view = VIEW_BY_TAB.get(tab_id)
+        return view.group.lower() if view else None
+
     def _activate_tab(self, tab_id: str) -> None:
-        """Activate a main or project sub-tab by id."""
+        """Show a view, activating both layers of the strip.
+
+        The strip is two `TabbedContent`s: an outer one of groups and, inside
+        the active group, an inner one of that group's views. Reaching a view
+        means selecting its group first, then the view -- the same two presses
+        the ring takes. This is the routing the earlier nested design got wrong
+        by missing views and setting one widget twice; the group comes from the
+        registry, so no view is left unreachable.
+        """
         if not tab_id:
             return
+        slug = self._group_slug(tab_id)
+        if slug is None:
+            return
         try:
-            main_tabs = self.query_one("#project-tabs", TabbedContent)
+            outer = self.query_one("#group-tabs", TabbedContent)
+            inner = self.query_one(f"#views-{slug}", TabbedContent)
         except Exception:
             return
-        # There is one `TabbedContent`. The two-step routing this replaced was
-        # left over from a nested-tab design that was not adopted: it set the
-        # active tab to `tab-details` and then to the requested one on the same
-        # widget, and it listed neither `tab-overview` nor `tab-governance` --
-        # so activating either silently did nothing.
-        if any(pane.id == tab_id for pane in main_tabs.query(TabPane)):
-            main_tabs.active = tab_id
+        outer.active = f"group-{slug}"
+        inner.active = tab_id
 
     def _get_active_tab_id(self) -> Optional[str]:
-        """Return the active tab id across main and project tabs."""
+        """The active view tab -- the active view of the active group. Reads
+        both layers: the outer strip names the group, the group's inner strip
+        names the view."""
         try:
-            main_tabs = self.query_one("#project-tabs", TabbedContent)
+            outer = self.query_one("#group-tabs", TabbedContent)
         except Exception:
             return None
-        if main_tabs.active == "tab-details":
-            try:
-                project_tabs = self.query_one("#project-tabs", TabbedContent)
-                return project_tabs.active
-            except Exception:
-                return "tab-details"
-        return main_tabs.active
+        group_pane = outer.active
+        if not group_pane:
+            return None
+        slug = group_pane.removeprefix("group-")
+        try:
+            return self.query_one(f"#views-{slug}", TabbedContent).active
+        except Exception:
+            return None
 
     def show_project_details(self, project: Project) -> None:
         """Show details for the selected project.
@@ -3061,9 +3387,11 @@ class DossierApp(App):
         with self.session_factory() as session:
             detail_panel.governance = gov.governance_for_project(session, project)
         
-        # Load dossier view (always needed as default tab)
-        self.load_dossier_view(project)
-        
+        # Load the Dossier tab -- the repository's one-shot reading: the
+        # document, and the languages it folded in. The detail panel above was
+        # just filled; the markdown and language table are the rest of it.
+        self._load_dossier_tab(project)
+
         # Mark tabs as needing refresh
         self._tabs_loaded = {"tab-dossier"}
         
@@ -3072,38 +3400,62 @@ class DossierApp(App):
         if active_tab and active_tab != "tab-dossier":
             self._load_tab_data(active_tab)
 
-    @on(TabbedContent.TabActivated, "#project-tabs")
-    def on_main_tab_activated(self, event: TabbedContent.TabActivated) -> None:
-        """Lazy load tab data when a main tab is activated."""
-        if not hasattr(self, "_current_project_id"):
+    @on(TabbedContent.TabActivated)
+    def on_any_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        """One handler for both layers of the strip. A group tab becoming active
+        shows that group's currently-active view; a view tab becoming active
+        shows that view. Either way the shown view is what gets loaded, so a
+        person landing on a group sees its open view filled rather than blank.
+        """
+        pane_id = event.pane.id or ""
+        if pane_id.startswith("group-"):
+            slug = pane_id.removeprefix("group-")
+            try:
+                inner = self.query_one(f"#views-{slug}", TabbedContent)
+            except Exception:
+                return
+            self._on_view_shown(inner.active)
+        elif pane_id.startswith("tab-"):
+            self._on_view_shown(pane_id)
+
+    def _on_view_shown(self, view_tab: Optional[str]) -> None:
+        """Load a view when it becomes visible.
+
+        Governance and Sweep load even with nothing selected: they are org- and
+        machine-wide, and a blank table there reads as an empty estate rather
+        than an unmade selection. The rest fill from a repository, so they wait
+        on one -- `pane.id` (`tab-docs`), never `tab.id` (`--content-tab-...`).
+        """
+        # The harness monitoring heartbeat runs only while its tab is watched.
+        self._sync_harness_poll(view_tab)
+        if not view_tab:
             return
-        if event.pane.id == "tab-details":
-            project_tabs = self.query_one("#project-tabs", TabbedContent)
-            self._load_tab_data(project_tabs.active)
-        elif event.pane.id == "tab-deltas":
-            self._load_tab_data("tab-deltas")
-    
-    @on(TabbedContent.TabActivated, "#project-tabs")
-    def on_tab_activated(self, event: TabbedContent.TabActivated) -> None:
-        """Lazy load tab data when tab is activated."""
-        if event.pane.id == "tab-governance":
-            # Handled before the project guard below on purpose: governance is
-            # org-wide and has to render with nothing selected. Hanging it off
-            # the per-project path would leave it permanently blank, and blank
-            # reads as "nothing is wrong".
+        if view_tab == "tab-governance":
             self._load_governance_tab()
             return
-        if event.pane.id == "tab-disk":
-            # Same bypass, same reason: disk is machine-wide. It belongs to no
-            # project, so the guard below would leave it blank until somebody
-            # happened to select one -- and a blank disk table reads as a
-            # machine with nothing on it.
-            self._load_disk_tab()
+        if view_tab == "tab-sweep":
+            self._load_sweep_and_disk(getattr(self, "_current_project", None))
+            return
+        if view_tab == "tab-harness":
+            # The harness reading is global -- invocations name their own
+            # owner/repo and are not scoped to a project -- so it loads with
+            # nothing selected, the way Governance does. Without this it stayed
+            # blank until an owner was chosen, because it has no project loader.
+            self._load_harness_tab()
+            return
+        if view_tab == "tab-waiting":
+            # Outstanding is global for the same reason and had the same gap.
+            self._load_waiting_tab()
+            return
+        if view_tab == "tab-goals":
+            # Goals composes rather than reads: it fills with no selection
+            # because it has nothing to read until a goal is sent, and only
+            # prefills the context from whatever repo is selected.
+            self._load_goals_tab()
             return
         if hasattr(self, "_current_project_id"):
-            # Use pane.id (the TabPane ID like "tab-docs") not tab.id (which is "--content-tab-tab-docs")
-            self._load_tab_data(event.pane.id)
-    
+            self._load_tab_data(view_tab)
+
     def _load_tab_data(self, tab_id: str) -> None:
         """Load data for a specific tab if not already loaded."""
         if not hasattr(self, "_tabs_loaded"):
@@ -3114,12 +3466,23 @@ class DossierApp(App):
         
         self._tabs_loaded.add(tab_id)
 
-        if tab_id == "tab-disk":
-            self._load_disk_tab()
-            return
-
         if tab_id == "tab-governance":
             self._load_governance_tab()
+            return
+
+        if tab_id == "tab-harness":
+            self._load_harness_tab()
+            return
+
+        if tab_id == "tab-waiting":
+            self._load_waiting_tab()
+            return
+
+        # On-deck holds two readings, one of which asks the harness over HTTP.
+        # Routed to its own loader before the facet path below so the threads
+        # reading keeps its worker rather than blocking on the org path.
+        if tab_id == "tab-deltas":
+            self._load_on_deck_tab(getattr(self, "_current_project", None))
             return
 
         # A facet reads the same table at either scope, so the tab does not
@@ -3147,10 +3510,13 @@ class DossierApp(App):
         # neither is scoped to a project, and both drew blank on a fresh
         # installation because the gate below returned first. The gate is right
         # for the repository tabs and wrong for these.
+        # On-deck is here too: the deltas are org-wide and the threads read the
+        # harness over its seam, so neither is scoped to a project and both drew
+        # blank on a fresh install when the gate below returned first.
         unscoped = {
-            "tab-sweep": self._load_sweep_tab,
+            "tab-sweep": self._load_sweep_and_disk,
             "tab-topology": self._load_topology_tab,
-            "tab-threads": self._load_threads_tab,
+            "tab-deltas": self._load_on_deck_tab,
         }
         if tab_id in unscoped:
             unscoped[tab_id](getattr(self, "_current_project", None))
@@ -3163,19 +3529,17 @@ class DossierApp(App):
         # Map tab IDs to loader methods
         loaders = {
             "tab-docs": self._load_docs_tab,
-            "tab-languages": self._load_languages_tab,
+            "tab-dossier": self._load_dossier_tab,
             "tab-branches": self._load_branches_tab,
             "tab-dependencies": self._load_dependencies_tab,
             "tab-contributors": self._load_contributors_tab,
             "tab-issues": self._load_issues_tab,
             "tab-releases": self._load_releases_tab,
-            "tab-deltas": self._load_deltas_tab,
-            # Reads the harness over HTTP rather than the database, so it takes
-            # no project -- the archive is not scoped to one repository.
-            "tab-threads": self._load_threads_tab,
+            # On-deck (deltas + threads) is loaded unscoped above, before the
+            # project gate, because neither reading needs a repository.
             # Reads no database of its own: a review is arranged from a
             # dispatcher run, and is empty until somebody asks for one.
-            "tab-sweep": self._load_sweep_tab,
+            "tab-sweep": self._load_sweep_and_disk,
             "tab-topology": self._load_topology_tab,
         }
         
@@ -3338,14 +3702,208 @@ class DossierApp(App):
                             "doc_index": doc_index,
                         }
     
+    def _load_dossier_tab(self, project: Project) -> None:
+        """The Dossier tab is a repository's one-shot reading: its document
+        (the markdown), the languages it is written in, and the work in flight
+        -- its deltas and the graph they form. The detail panel at the top is
+        filled separately, on selection."""
+        self.load_dossier_view(project)
+        self._load_languages_tab(project)
+        self._load_dossier_inflight(project)
+
+    def _load_dossier_inflight(self, project: Project) -> None:
+        """The lower region: the deltas census, then the two windows on how
+        they connect. The delta-link graph is dossier's own data and is drawn
+        here and now; the harness topology crosses the seam, so it goes to a
+        worker and the pane fills when qmcp answers.
+        """
+        self._render_facet_for_project(FACET_BY_KEY["deltas"], project,
+                                       table_id="dossier-deltas-table")
+        self._draw_delta_graph(project)
+        self._run_dossier_topology(project.full_name or project.name)
+
+    def _draw_delta_graph(self, project: Project) -> None:
+        """dossier's own reading of how this repository's deltas connect.
+
+        No seam and no worker: every fact is a row this database holds, so a
+        harness being down leaves this pane full while the one beside it says
+        why it is empty. That difference is the reason both panes exist.
+        """
+        from dossier import delta_graph, topology
+
+        drawing = self.query_one("#dossier-delta-graph", Static)
+        note = self.query_one("#dossier-delta-graph-note", Static)
+        if not getattr(self, "_delta_tables_exist", True):
+            drawing.update("No deltas recorded here yet.")
+            note.update("")
+            return
+        try:
+            with self.session_factory() as session:
+                deltas = session.exec(
+                    select(ProjectDelta)
+                    .where(ProjectDelta.project_id == project.id)
+                    .order_by(ProjectDelta.updated_at.desc())
+                ).all()
+                ids = [d.id for d in deltas if d.id is not None]
+                links = []
+                if ids:
+                    for link in session.exec(
+                        select(DeltaLink).where(DeltaLink.delta_id.in_(ids))
+                    ).all():
+                        links.append((link.delta_id, link))
+                for delta in deltas:
+                    session.expunge(delta)
+                graph = delta_graph.build(deltas, links,
+                                          name=project.name)
+        except Exception as exc:                   # noqa: BLE001
+            drawing.update(f"The deltas could not be read: {exc}")
+            note.update("")
+            return
+
+        if not deltas:
+            drawing.update("No deltas recorded for this repository yet.")
+            note.update("")
+            return
+        drawing.update(topology.draw(graph.payload, width=48).text())
+        if graph.standalone:
+            # Named rather than dropped: `draw` is one line per edge, so an
+            # unlinked delta is not in the drawing. It is in the table above.
+            note.update(f"{len(graph.standalone)} delta(s) with no recorded "
+                        "link appear only in the table above.")
+        else:
+            note.update("")
+
+    @work(thread=True, exclusive=True, group="dossier-topology")
+    def _run_dossier_topology(self, subject: str) -> None:
+        """The harness's own reading of this repository, drawn beside dossier's.
+
+        The Topology tab draws the organisation's shape; this is the same
+        drawing narrowed to one repository, so the two panes on the Dossier tab
+        are one repository's connections from the two sides that can see them. A
+        harness that is not running is the ordinary case, and the pane says so
+        rather than drawing an empty shape that would read as "nothing here".
+        """
+        from dossier import threads, topology as drawing
+
+        answer = threads.topology(subject=subject)
+        if not answer.reachable:
+            self.call_from_thread(self._dossier_topology_failed,
+                                  answer.problem, answer.remedy, answer.where)
+            return
+        drawn = drawing.draw_flow(answer.payload, width=48)
+        self.call_from_thread(self._dossier_topology_drawn, drawn)
+
+    def _dossier_topology_drawn(self, drawn) -> None:
+        try:
+            self.query_one("#dossier-topology-drawing", Static).update(
+                drawn.text())
+            self.query_one("#dossier-topology-note", Static).update("")
+        except Exception:                          # noqa: BLE001
+            pass
+
+    def _dossier_topology_failed(self, problem: str, remedy: str,
+                                 where: str) -> None:
+        try:
+            self.query_one("#dossier-topology-drawing", Static).update(problem)
+            note = f"{remedy}  (tried {where})" if remedy else f"tried {where}"
+            self.query_one("#dossier-topology-note", Static).update(note)
+        except Exception:                          # noqa: BLE001
+            pass
+
+    # --- Goals: originating a new goal for the harness -----------------------
+
+    _goals_sent: tuple[str, ...] = ()
+    """The goals sent this session, newest first, for the small history the tab
+    keeps. A class attribute so it exists however the app was constructed."""
+
+    def _load_goals_tab(self) -> None:
+        """Prefill the context from whatever is selected, so a goal originates
+        from the triage base rather than a blank field. The tab is otherwise a
+        compose form -- nothing is read from the harness until a goal is sent,
+        which is why it fills with no selection where the other Seams views wait
+        on one.
+        """
+        try:
+            context = self.query_one("#goal-context", Input)
+        except Exception:                          # noqa: BLE001
+            return
+        project = getattr(self, "selected_project", None)
+        if project is not None and not context.value.strip():
+            context.value = f"repo {project.full_name or project.name}"
+
+    @on(Button.Pressed, "#goal-send")
+    def on_goal_send_pressed(self, event) -> None:
+        self._begin_send_goal()
+
+    @on(Input.Submitted, "#goal-input")
+    def on_goal_input_submitted(self, event) -> None:
+        self._begin_send_goal()
+
+    @on(Input.Submitted, "#goal-context")
+    def on_goal_context_submitted(self, event) -> None:
+        self._begin_send_goal()
+
+    def _begin_send_goal(self) -> None:
+        """Validate the goal on this side, then hand the send to a worker.
+
+        An empty goal is refused here rather than sent: the planner turns a goal
+        into a plan, and there is nothing to plan from an empty one -- the same
+        guard `human.send_goal` keeps, said before the network so the field can
+        show it.
+        """
+        goal = self.query_one("#goal-input", Input).value.strip()
+        context = self.query_one("#goal-context", Input).value.strip()
+        if not goal:
+            self.query_one("#goal-status", Static).update(
+                "a goal needs words before it can be sent")
+            return
+        self.query_one("#goal-status", Static).update(
+            "sending the goal to the harness's planner…")
+        self.query_one("#goal-plan", Static).update("")
+        self._send_goal_worker(goal, context)
+
+    @work(thread=True, exclusive=True, group="goal-send")
+    def _send_goal_worker(self, goal: str, context: str) -> None:
+        from dossier import human
+        planned = human.send_goal(goal, context)
+        self.call_from_thread(self._goal_planned, planned)
+
+    def _goal_planned(self, planned) -> None:
+        status = self.query_one("#goal-status", Static)
+        plan = self.query_one("#goal-plan", Static)
+        if not planned.accepted:
+            status.update(f"the goal was not planned: {planned.detail}")
+            plan.update("")
+            return
+        where = (f"  (invocation {planned.invocation_id})"
+                 if planned.invocation_id else "")
+        status.update(f"planned -- {planned.estimated} step(s){where}. "
+                      "Approve it at Outstanding to carry it further.")
+        lines = [f"Goal: {planned.goal}", ""]
+        for step in planned.steps:
+            head = (f"  {step.number}. {step.action}" if step.number
+                    else f"  {step.action}")
+            lines.append(head)
+            if step.description:
+                lines.append(f"      {step.description}")
+        plan.update("\n".join(lines))
+        self._goals_sent = (planned.goal,) + self._goals_sent
+        history = "Sent this session:\n" + "\n".join(
+            f"  - {g}" for g in self._goals_sent[:6])
+        self.query_one("#goal-history", Static).update(history)
+        # Clear the goal for the next one; keep the context, which is usually
+        # the same repo across a few goals in a sitting.
+        self.query_one("#goal-input", Input).value = ""
+
     def _load_languages_tab(self, project: Project) -> None:
-        """Render the `languages` facet for one repository.
+        """Render the `languages` facet for one repository, part of the Dossier
+        tab's reading.
 
         The query lives in `dossier.facets`, which the overview reads
         too. Two queries over one table drift into two vocabularies for
         the same column, and nothing fails when they do.
         """
-        self._render_facet_for_project(only_on("tab-languages"), project)
+        self._render_facet_for_project(FACET_BY_KEY["languages"], project)
 
     def _load_branches_tab(self, project: Project) -> None:
         """Render the `branches` facet for one repository.
@@ -3671,7 +4229,8 @@ class DossierApp(App):
 
     def _on_disk_tab(self) -> bool:
         try:
-            return self.query_one("#project-tabs", TabbedContent).active == "tab-disk"
+            # The disk reading lives on the Sweep tab now.
+            return self._get_active_tab_id() == "tab-sweep"
         except Exception:
             return False
 
@@ -3797,6 +4356,133 @@ class DossierApp(App):
                 "else writing counted too."
             )
         return f"Removed {claimed}; the volume gave back {freed}."
+
+    def _load_harness_tab(self) -> None:
+        """Render every invocation the harness has reported, at any scope.
+
+        The reading is global: `harness_org` reads the invocations whole because
+        each names its own `owner/repo` in its payload and is not a row in
+        `project`, so scoping by ids would return nothing and look like an idle
+        harness. It therefore loads with nothing selected, the way Governance
+        does -- an empty table here means no invocations were ingested, and the
+        section's own note says so rather than the tab drawing blank.
+        """
+        with self.session_factory() as session:
+            section = FACET_BY_KEY["harness"].at(session, ids=None, limit=self.TAB_ROWS)
+        self._render_section("harness-table", section)
+        # The archive: the conversations the harness has kept, as deltas. A
+        # harness reading like the invocations, moved here from On deck so Seams
+        # holds what the harness reports and Plan holds what dossier records.
+        self._load_threads_tab()
+        # The live half: what the harness is running now and what it is asking,
+        # read over the seam in a worker so the loop never stops for it.
+        self._refresh_harness_live()
+
+    # The pending request the answer field answers. Set by the live refresh from
+    # the oldest question the harness is holding; None when it is holding none.
+    _harness_request = None
+
+    @work(thread=True, exclusive=True, group="harness-live")
+    def _refresh_harness_live(self) -> None:
+        from dossier import human
+        status = human.monitor()
+        queue = human.waiting(limit=1)
+        self.call_from_thread(self._harness_live_drawn, status, queue)
+
+    def _harness_live_drawn(self, status, queue) -> None:
+        try:
+            status_line = self.query_one("#harness-status", Static)
+            question = self.query_one("#harness-question", Static)
+        except Exception:
+            return
+        if not status.reachable:
+            status_line.update(f"harness unreachable -- {status.problem}")
+        else:
+            by = ", ".join(f"{n} {s}" for s, n in status.by_status) or "none"
+            status_line.update(
+                f"harness reachable -- {status.total} invocation(s): {by}"
+                + (f"  ·  {status.running} running" if status.running else ""))
+        ask = queue.asks[0] if getattr(queue, "asks", ()) else None
+        self._harness_request = ask.id if ask else None
+        if ask:
+            options = f"  [{' / '.join(ask.options)}]" if ask.options else ""
+            question.update(f"waiting: {ask.prompt}{options}")
+        else:
+            question.update("no question is waiting.")
+
+    # The monitoring heartbeat, alive only while the Harness tab is watched.
+    _harness_poll_timer = None
+
+    def _sync_harness_poll(self, view_tab) -> None:
+        """Start the heartbeat behind 'monitoring status' when the Harness tab is
+        the one being watched, and stop it when it is not. A harness nobody is
+        looking at costs no requests, and no timer ticks behind another screen --
+        which is what kept the periodic tick out of the deterministic captures."""
+        on = view_tab == "tab-harness"
+        if on and self._harness_poll_timer is None:
+            self._harness_poll_timer = self.set_interval(
+                5.0, self._refresh_harness_live)
+        elif not on and self._harness_poll_timer is not None:
+            self._harness_poll_timer.stop()
+            self._harness_poll_timer = None
+
+    @on(Input.Submitted, "#harness-answer")
+    def on_harness_answer_submitted(self, event: Input.Submitted) -> None:
+        """Send text to the harness: answer its waiting question, as a named
+        person. The name is the workstation's git identity -- answering is an
+        attested act, and one with nobody's name on it asserts nothing."""
+        event.stop()
+        text = event.value.strip()
+        if not text:
+            return
+        if self._harness_request is None:
+            self.notify("No question is waiting to answer.", severity="warning")
+            return
+        by = self._harness_answerer()
+        if not by:
+            self.notify("Set a name to answer with: `git config user.name`.",
+                        severity="warning", timeout=6)
+            return
+        event.input.value = ""
+        self._answer_harness(self._harness_request, text, by)
+
+    @staticmethod
+    def _harness_answerer() -> str:
+        import subprocess
+        try:
+            out = subprocess.run(["git", "config", "user.name"],
+                                 capture_output=True, text=True, timeout=3)
+            return out.stdout.strip()
+        except Exception:                              # noqa: BLE001
+            return ""
+
+    @work(thread=True, exclusive=True, group="harness-answer")
+    def _answer_harness(self, request_id: str, response: str, by: str) -> None:
+        from dossier import human
+        outcome = human.answer(request_id, response, by=by)
+        self.call_from_thread(self._harness_answered, outcome)
+
+    def _harness_answered(self, outcome) -> None:
+        if outcome.accepted:
+            self.notify(f"answered {outcome.request_id} as {outcome.answered_by}",
+                        timeout=4)
+        else:
+            self.notify(f"not answered: {outcome.detail}",
+                        severity="warning", timeout=6)
+        self._refresh_harness_live()
+
+    def _load_waiting_tab(self) -> None:
+        """Render the outstanding queue, at any scope.
+
+        Global for the same reason as the harness: `waiting_org` reads the
+        queue whole -- a harness question names its own `owner/repo` and is not
+        a row in `project` -- and it also records the remedies in draw order for
+        the row handler to dispatch. So it loads with nothing selected rather
+        than drawing blank until an owner is chosen.
+        """
+        with self.session_factory() as session:
+            section = FACET_BY_KEY["waiting"].at(session, ids=None, limit=self.TAB_ROWS)
+        self._render_section("waiting-table", section)
 
     def _load_governance_tab(self) -> None:
         """Render what the corpus's generated documents say.
@@ -4366,6 +5052,14 @@ class DossierApp(App):
         event.stop()
         self._load_topology_tab()
 
+    def _load_sweep_and_disk(self, project=None) -> None:
+        """The Sweep tab holds two sweeps: a dependency change across the estate
+        (empty until a review is asked for) and the disk reclaim across this
+        workstation (read every time the tab is shown). Neither is scoped to a
+        repository."""
+        self._load_sweep_tab(project)
+        self._load_disk_tab()
+
     def _load_sweep_tab(self, project=None) -> None:
         """Draw the review: every batch, then everything waiting.
 
@@ -4427,32 +5121,78 @@ class DossierApp(App):
             "each row carrying why. Approving is a person's act -- "
             "governance/qm/ci/attested-registry.yaml.")
 
+    def _load_on_deck_tab(self, project=None) -> None:
+        """On deck is the units of work, from dossier's own record: a
+        repository's open deltas, or the estate's. The harness's thread archive
+        shared this tab before it moved to Harness in Seams, so nothing here
+        crosses the seam any more -- On deck is Plan's, and Plan is the work
+        dossier decides on.
+
+        It fills at either scope: a repository's deltas when one is selected,
+        and the open deltas across the estate when one is not, so the tab is not
+        blank where the archive used to fill it."""
+        if project is not None:
+            self._load_deltas_tab(project)
+            return
+        owner = getattr(self, "_scope_owner", None)
+        if owner:
+            self._render_facet_at_org(FACET_BY_KEY["deltas"], owner)
+            return
+        # Nothing selected at all: the open deltas across everything, so the tab
+        # answers rather than sitting blank until a scope is chosen.
+        with self.session_factory() as session:
+            section = FACET_BY_KEY["deltas"].at(session, ids=None,
+                                                limit=self.TAB_ROWS)
+        self._render_section("deltas-table", section)
+
     def _load_threads_tab(self, project=None) -> None:
-        """Fill the archive table from the same facet the overview reads.
+        """Fill the archive table from the harness, off the UI thread.
 
-        **THIS DID NOT EXIST, AND THAT IS WHY NOTHING EVER APPEARED HERE.** The
-        tab was composed, the columns were defined, the facet was written and
-        the overview drew its own section from it -- and `_load_tab_data` had no
-        entry for this tab, so the table was never filled. Ingesting an export
-        reported two hundred and three threads onto an empty screen, which is
-        the shape of failure somebody reported as "I cannot get an export to
-        display in threads".
+        **THE ARCHIVE IS FETCHED OVER THE HARNESS'S SEAM**, which is the facet's
+        `beyond_the_database` cost, and the Harness tab it now lives on is
+        loaded on the mount path (it is a global view). Rendering it inline
+        would block the whole application on an HTTP round trip before the first
+        frame -- so it loads in a worker the way the hygiene survey does, and
+        the invocations beside it, which are a database read, are already drawn.
 
-        One facet, not a second query. `threads_org` is what the overview's
-        section uses, so the tab and the overview cannot disagree about what a
-        row is -- which is the property the two axes of this screen are built
-        on.
+        `threads_org` is what the overview's section uses, so the tab and the
+        overview cannot disagree about what a row is. The archive is not scoped
+        to a repository, so `project` is ignored: both scopes see the same rows.
         """
-        from dossier.facets import BY_TAB
+        try:
+            table = self.query_one("#threads-table", DataTable)
+        except Exception:                          # noqa: BLE001
+            return
+        table.loading = True
+        self._read_threads()
 
-        # THROUGH THE FACET, NOT A SECOND QUERY. `_render_facet_at_org` already
-        # draws this table when an owner is in scope; the gap was only the
-        # project path, and filling it with its own query would give the same
-        # tab two ways of deciding what a row is. `threads_project` delegates to
-        # `threads_org` because an archive is not scoped to a repository, so
-        # both scopes see the same rows -- which is the honest answer and not a
-        # shortcut.
-        self._render_facet_for_project(only_on("tab-threads"), project)
+    @work(thread=True, exclusive=True, group="threads")
+    def _read_threads(self) -> None:
+        from dossier.facets import BY_KEY
+
+        facet = BY_KEY["threads"]
+        try:
+            with self.session_factory() as session:
+                section = facet.at(session, ids=None, limit=self.TAB_ROWS)
+        except Exception as exc:                    # noqa: BLE001
+            self.call_from_thread(self._threads_failed, f"{exc}")
+            return
+        self.call_from_thread(self._threads_read, facet, section)
+
+    def _threads_read(self, facet, section) -> None:
+        self._render_section(facet.table, section)
+        try:
+            self.query_one(f"#{facet.table}", DataTable).loading = False
+        except Exception:                          # noqa: BLE001
+            pass
+
+    def _threads_failed(self, said: str) -> None:
+        try:
+            self.query_one("#threads-table", DataTable).loading = False
+        except Exception:                          # noqa: BLE001
+            pass
+        self.notify(f"the archive could not be read: {said}",
+                    severity="error", title="Thread archive", timeout=8)
 
     def _load_deltas_tab(self, project: Project) -> None:
         """Load deltas tab."""
@@ -5040,7 +5780,7 @@ class DossierApp(App):
                     }
                 if has_more:
                     more_leaf = lang_node.add_leaf(f"... see Languages tab for all")
-                    more_leaf.data = {"type": "section", "section": "tab-languages"}
+                    more_leaf.data = {"type": "section", "section": "tab-dossier"}
             
             # === DEPENDENCIES - Linkable entities ===
             if dependencies:
@@ -5284,7 +6024,7 @@ class DossierApp(App):
             # Switch to the corresponding tab for section headers
             section = nav_data.get("section")
             tab_map = {
-                "languages": "tab-languages",
+                "languages": "tab-dossier",
                 "dependencies": "tab-dependencies", 
                 "contributors": "tab-contributors",
                 "docs": "tab-docs",
@@ -5293,7 +6033,11 @@ class DossierApp(App):
                 "issues": "tab-issues",
                 "prs": "tab-deltas",
             }
+            # A section value is either a short name in the map or a tab id
+            # itself (some trees carry the id directly). Either resolves here.
             tab_id = tab_map.get(section)
+            if tab_id is None and section and section.startswith("tab-"):
+                tab_id = section
             if tab_id:
                 self._activate_tab(tab_id)
         
@@ -6709,7 +7453,7 @@ class DossierApp(App):
 
         Args:
             name: The project name to select
-            target_tab: Optional tab to switch to after selection (e.g., 'tab-languages')
+            target_tab: Optional tab to switch to after selection (e.g., 'tab-dossier')
         """
         # Skip if already on this project
         if self.selected_project and self.selected_project.name == name:
@@ -6839,42 +7583,12 @@ class DossierApp(App):
     def _show_drifting_projects(self) -> None:
         self._apply_project_filter(False)
 
-    @on(Button.Pressed, "#btn-filter-all")
-    def on_filter_all_pressed(self) -> None:
-        """Show all projects (clear sync filter)."""
-        self._show_all_projects()
-
-    @on(Button.Pressed, "#btn-filter-synced")
-    def on_filter_synced_pressed(self) -> None:
-        """Show only synced projects."""
-        self._show_synced_projects()
-
-    @on(Button.Pressed, "#btn-filter-unsynced")
-    def on_filter_unsynced_pressed(self) -> None:
-        """Show only drifting projects -- declared and never synced."""
-        self._show_drifting_projects()
-
-    
-    @on(Button.Pressed, "#btn-filter-starred")
-    def on_filter_starred_pressed(self) -> None:
-        """Toggle starred filter: None -> True (starred) -> False (no stars) -> None."""
-        if self.filter_starred is None:
-            self.filter_starred = True
-        elif self.filter_starred is True:
-            self.filter_starred = False
-        else:
-            self.filter_starred = None
-        self._update_filter_buttons()
-        search_input = self.query_one("#search-input", Input)
-        self.load_projects(search=search_input.value)
-        
-        status = "starred only" if self.filter_starred is True else "no stars" if self.filter_starred is False else "all"
-        self.notify(f"Filter: {status}")
-    
-    # Sorting is a Select (`#select-sort`), not buttons. Three
-    # `@on(Button.Pressed, "#btn-sort-*")` handlers outlived the buttons they
-    # were written for and are gone: a handler for a widget that does not exist
-    # reads like a feature to anybody grepping for one.
+    # The status filter is folded into the tree now -- a node under its own
+    # heading that cycles All -> Synced -> Unsynced when selected, and `f` and
+    # the `filter`/`starred` commands still reach it. The four
+    # `@on(Button.Pressed, "#btn-filter-*")` handlers are gone with the buttons
+    # they answered, like the sort-button handlers before them: a handler for a
+    # widget that does not exist reads like a feature to anybody grepping.
 
     @on(Select.Changed, "#select-language")
     def on_language_changed(self, event: Select.Changed) -> None:
@@ -6892,28 +7606,10 @@ class DossierApp(App):
         self.load_projects(search=search_input.value)
     
     def _update_filter_buttons(self) -> None:
-        """Update filter button variants to show active state."""
-        btn_all = self.query_one("#btn-filter-all", Button)
-        btn_synced = self.query_one("#btn-filter-synced", Button)
-        btn_unsynced = self.query_one("#btn-filter-unsynced", Button)
-        btn_starred = self.query_one("#btn-filter-starred", Button)
-
-        # Update sync filter buttons
-        btn_all.variant = "primary" if self.filter_synced is None else "default"
-        btn_synced.variant = "primary" if self.filter_synced is True else "default"
-        btn_unsynced.variant = "primary" if self.filter_synced is False else "default"
-
-        # Update starred filter button (cycles through states)
-        if self.filter_starred is None:
-            btn_starred.variant = "default"
-            btn_starred.label = "Star"
-        elif self.filter_starred is True:
-            btn_starred.variant = "primary"
-            btn_starred.label = "Starred"
-        else:
-            btn_starred.variant = "warning"
-            btn_starred.label = "Unstarred"
-
+        """No-op: the status filter is shown in the tree now (a node
+        rebuilt by `load_projects`), so there are no buttons to restyle.
+        Kept because several filter paths still call it."""
+        return
     def _update_filter_ui(self) -> None:
         """Update all filter UI elements to match current filter state."""
         self._update_filter_buttons()
@@ -7030,11 +7726,16 @@ class DossierApp(App):
     # failure this corpus keeps naming.
     TAB_ROWS = 500
 
-    def _render_facet_for_project(self, facet, project, limit=None) -> None:
+    def _render_facet_for_project(self, facet, project, limit=None,
+                                  table_id=None) -> None:
+        # `table_id` overrides the facet's own table for the one case where a
+        # facet is shown twice: the deltas facet has its home on the On-deck
+        # tab and a second reading on the Dossier tab, and two tables cannot
+        # share an id.
         with self.session_factory() as session:
             section = facet.at(session, project=project,
                                limit=self.TAB_ROWS if limit is None else limit)
-        self._render_section(facet.table, section)
+        self._render_section(table_id or facet.table, section)
 
     def show_org_overview(self, owner: str) -> None:
         """Select the organisation itself, and show it.

@@ -34,8 +34,12 @@ GONE = frozenset({"tab-prs", "tab-components", "tab-hygiene"})
 
 
 def _composed() -> set[str]:
-    text = APP.read_text(encoding="utf-8")
-    return set(re.findall(r'TabPane\([^)]*id="(tab-[a-z-]+)"', text))
+    """The tabs the dashboard builds. `compose` iterates `dossier.views`, so a
+    tab is composed exactly when a view declares it -- reading the registry is
+    reading what the strip renders, and the two cannot disagree the way a
+    hand-kept list and a hand-written strip once did."""
+    from dossier import views
+    return {view.tab for view in views.VIEWS}
 
 
 # --- the three that went ------------------------------------------------------
@@ -87,11 +91,13 @@ def test_the_components_pane_moved_rather_than_went():
     Mutation: remove the components pane from the Dossier tab and this fails.
     """
     text = APP.read_text(encoding="utf-8")
-    dossier_tab = text[text.index('TabPane("Dossier"'):
-                       text.index('TabPane("Details"')]
+    dossier_tab = text[text.index('tab == "tab-dossier"'):
+                       text.index('tab == "tab-docs"')]
     for needed in ('id="components-table"', 'id="btn-add-component"',
                    'id="btn-link-parent"', 'id="btn-remove-component"',
-                   "IntersectionsPanel", 'id="component-tree"'):
+                   "IntersectionsPanel", 'id="component-tree"',
+                   # Details and Languages folded into the Dossier tab.
+                   'id="project-detail"', 'id="languages-table"'):
         assert needed in dossier_tab, f"{needed} did not move with the tab"
 
 
@@ -108,7 +114,8 @@ def test_both_branch_readings_are_on_the_branches_tab():
     assert on_branches == ["branches", "hygiene"], on_branches
 
     text = APP.read_text(encoding="utf-8")
-    tab = text[text.index('TabPane("Branches"'):text.index('TabPane("Dep')]
+    tab = text[text.index('tab == "tab-branches"'):
+               text.index('tab == "tab-dependencies"')]
     assert 'id="branches-table"' in tab and 'id="hygiene-table"' in tab
     assert "hygiene-heading" in tab, (
         "two tables with no heading between them is one table with a gap")
@@ -164,3 +171,38 @@ class _AnyProject:
     id = 1
     name = "org/one"
     full_name = "org/one"
+
+
+@pytest.mark.asyncio
+async def test_the_tab_strip_is_two_layers_in_the_registrys_order(test_session, no_close):
+    """**THE STRIP IS TWO LAYERS, BOTH THE REGISTRY'S, IN ITS ORDER.** compose()
+    nests a view strip inside each group, mirroring the ring: an outer strip of
+    groups (Triage, Plan, Explore, Health, Seams) and, inside each, its views.
+    Reordering the registry moves both layers with it. This is the guard the
+    hand-written strip never had, which is how it drifted from the ring.
+
+    Mutation: flatten compose() back to one strip and the interleaving of group
+    panes with view panes below fails.
+    """
+    from textual.widgets import TabPane
+    from dossier import views
+
+    app = DossierApp(session_factory=lambda: no_close(test_session))
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        composed = [pane.id for pane in app.query(TabPane)]
+
+        # Every view is reachable through both layers -- the failure that sank
+        # the earlier nested design was a view the routing never selected.
+        for view in views.VIEWS:
+            app._activate_tab(view.tab)
+            await pilot.pause()
+            assert app._get_active_tab_id() == view.tab, view.tab
+
+    # The DOM order is: each group pane, then that group's view panes, in the
+    # registry's group order and view order.
+    expected: list[str] = []
+    for group, group_views in views.grouped():
+        expected.append(f"group-{group.lower()}")
+        expected.extend(view.tab for view in group_views)
+    assert composed == expected, composed

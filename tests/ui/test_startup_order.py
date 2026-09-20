@@ -100,6 +100,6 @@ async def test_the_shell_is_on_screen_before_the_data(test_session, no_close):
     app = DossierApp(session_factory=lambda: no_close(test_session))
     async with app.run_test(size=(160, 50)) as pilot:
         # Before any pause: mount has run, the after-refresh work has not.
-        assert app.query("#project-tabs"), "no tab bar in the first frame"
+        assert app.query("#group-tabs"), "no tab bar in the first frame"
         assert app.query("#project-tree"), "no sidebar in the first frame"
         await pilot.pause()

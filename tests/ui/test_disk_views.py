@@ -216,7 +216,7 @@ async def test_the_disk_tab_says_so_when_nothing_has_been_stored(engine) -> None
     app_under_test = DossierApp(session_factory=lambda: Session(engine))
     async with app_under_test.run_test(size=(200, 50)) as pilot:
         await pilot.pause()
-        app_under_test.query_one("#project-tabs").active = "tab-disk"
+        app_under_test._activate_tab("tab-sweep")
         await pilot.pause()
 
         message = str(app_under_test.query_one("#disk-age").content)
@@ -239,7 +239,7 @@ async def test_the_disk_tab_renders_with_no_project_selected(
     async with app_under_test.run_test(size=(200, 50)) as pilot:
         await pilot.pause()
         assert not hasattr(app_under_test, "_current_project_id")
-        app_under_test.query_one("#project-tabs").active = "tab-disk"
+        app_under_test._activate_tab("tab-sweep")
         await pilot.pause()
         assert app_under_test.query_one("#disk-targets-table").row_count == 1
 
@@ -254,11 +254,11 @@ async def test_the_dashboard_can_open_directly_on_the_disk_tab(
     load_two(engine, tmp_path, [measured_target("c", 100)], [measured_target("c", 400)])
 
     app_under_test = DossierApp(
-        session_factory=lambda: Session(engine), initial_tab="tab-disk"
+        session_factory=lambda: Session(engine), initial_tab="tab-sweep"
     )
     async with app_under_test.run_test(size=(200, 50)) as pilot:
         await pilot.pause()
-        assert app_under_test.query_one("#project-tabs").active == "tab-disk"
+        assert app_under_test._get_active_tab_id() == "tab-sweep"
         assert app_under_test.query_one("#disk-volumes-table").row_count == 1
 
 
@@ -273,7 +273,7 @@ async def test_only_one_reading_says_there_is_nothing_to_compare(
         disk_store.load_document(session, document(tmp_path), machine="box")
 
     app_under_test = DossierApp(
-        session_factory=lambda: Session(engine), initial_tab="tab-disk"
+        session_factory=lambda: Session(engine), initial_tab="tab-sweep"
     )
     async with app_under_test.run_test(size=(200, 50)) as pilot:
         await pilot.pause()
@@ -291,7 +291,7 @@ async def test_the_tab_always_states_the_reading_age(engine, tmp_path: Path) -> 
     load_two(engine, tmp_path, [measured_target("c", 100)], [measured_target("c", 400)])
 
     app_under_test = DossierApp(
-        session_factory=lambda: Session(engine), initial_tab="tab-disk"
+        session_factory=lambda: Session(engine), initial_tab="tab-sweep"
     )
     async with app_under_test.run_test(size=(200, 50)) as pilot:
         await pilot.pause()
@@ -323,7 +323,7 @@ async def test_a_reading_past_its_budget_says_so_rather_than_looking_current(
         )
 
     app_under_test = DossierApp(
-        session_factory=lambda: Session(engine), initial_tab="tab-disk"
+        session_factory=lambda: Session(engine), initial_tab="tab-sweep"
     )
     async with app_under_test.run_test(size=(200, 50)) as pilot:
         await pilot.pause()
