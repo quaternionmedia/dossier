@@ -95,6 +95,13 @@ class OrgOverview:
     sections: tuple[Section, ...] = ()
     generated_from: str = ""
     scope: str = ""
+    generated_at: str = ""
+    """When this reading was built, ISO-8601 in UTC, from the `now` that built
+    it. `generated_from` says how far back the sync reached; this says when
+    the picture was taken. A second window showing a masthead figure needs the
+    second to say how old the figure is, and until this existed it had only
+    the seam file's modification time -- a fact about a file, which a copy
+    renews."""
 
     def section(self, title: str) -> Section | None:
         for s in self.sections:
@@ -476,6 +483,8 @@ def build(session: Any, limit: int = 12, now: datetime | None = None,
         sections=_in_group_order(labelled, views.GROUPS),
         generated_from=_horizon_phrase(_age_days(horizon, now)) if horizon
         else "nothing synced yet",
+        generated_at=now.astimezone(timezone.utc).isoformat(timespec="seconds")
+        if now.tzinfo else now.replace(tzinfo=timezone.utc).isoformat(timespec="seconds"),
         scope=(
             f"{_count(session, Project, ids=ids, column=Project.id)} repositories "
             + (f"owned by {owner}" if owner else "in this dossier")
@@ -574,6 +583,9 @@ def as_dict(picture: OrgOverview) -> dict[str, Any]:
         "schema": OVERVIEW_SCHEMA,
         "scope": picture.scope,
         "generated_from": picture.generated_from,
+        # Additive within schema 1: a consumer that does not know the key reads
+        # the seam as before, and one that does can say how old the reading is.
+        "generated_at": picture.generated_at,
         "masthead": [
             {"label": c.label, "value": c.value, "note": c.note}
             for c in picture.masthead

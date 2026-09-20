@@ -138,3 +138,20 @@ def test_the_data_seam_carries_the_redacted_reading_not_the_names():
     assert seam["schema"] == overview.OVERVIEW_SCHEMA
     assert "sections" in seam and isinstance(seam["sections"], list)
     assert "hidden-svc" not in blob, "a private name reached the shared data seam"
+
+
+def test_the_seam_says_when_the_reading_was_made():
+    """`generated_from` says how far back the sync reached; `generated_at` says
+    when the picture was taken, from the injected clock, in UTC. A consumer
+    showing a masthead figure shows this beside it, so a stale number is
+    delivered with its date. Mutation: build without stamping `generated_at`
+    and the field is empty."""
+    from datetime import datetime, timezone
+
+    session = _session()
+    when = datetime(2026, 9, 20, 18, 30, 0, tzinfo=timezone.utc)
+    seam = overview.as_dict(overview.build(session, now=when))
+    assert seam["generated_at"] == "2026-09-20T18:30:00+00:00"
+    # A naive clock is read as UTC rather than guessed at.
+    naive = overview.as_dict(overview.build(session, now=datetime(2026, 9, 20, 18, 30, 0)))
+    assert naive["generated_at"] == "2026-09-20T18:30:00+00:00"
