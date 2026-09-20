@@ -144,14 +144,24 @@ def test_the_seam_says_when_the_reading_was_made():
     """`generated_from` says how far back the sync reached; `generated_at` says
     when the picture was taken, from the injected clock, in UTC. A consumer
     showing a masthead figure shows this beside it, so a stale number is
-    delivered with its date. Mutation: build without stamping `generated_at`
-    and the field is empty."""
+    delivered with its date. Mutations: build without stamping `generated_at`
+    and the field is empty; rebuild the picture in `_redact_private` without
+    carrying it and the field is empty on every real database -- which is what
+    the first version did, and what the private project here is for."""
     from datetime import datetime, timezone
+    from json import dumps as _json_dumps
 
     session = _session()
+    # A private project, so the picture goes through `_redact_private`, which
+    # rebuilds it field by field -- the branch that first dropped the stamp.
+    session.add(Project(name="hidden-svc", full_name="quaternionmedia/hidden-svc",
+                        github_owner="quaternionmedia", github_repo="hidden-svc",
+                        is_private=True))
+    session.commit()
     when = datetime(2026, 9, 20, 18, 30, 0, tzinfo=timezone.utc)
-    seam = overview.as_dict(overview.build(session, now=when))
+    seam = overview.as_dict(overview.build(session, now=when, owner="quaternionmedia"))
     assert seam["generated_at"] == "2026-09-20T18:30:00+00:00"
+    assert "hidden-svc" not in _json_dumps(seam)
     # A naive clock is read as UTC rather than guessed at.
     naive = overview.as_dict(overview.build(session, now=datetime(2026, 9, 20, 18, 30, 0)))
     assert naive["generated_at"] == "2026-09-20T18:30:00+00:00"

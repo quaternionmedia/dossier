@@ -552,6 +552,11 @@ def _redact_private(picture: OrgOverview, session: Any) -> OrgOverview:
             for s in picture.sections
         ),
         generated_from=picture.generated_from,
+        # Carried, not scrubbed: a timestamp names nobody. The first version of
+        # the stamp was set in `build` and lost here, because this rebuilds the
+        # picture field by field and the test that pinned the stamp had no
+        # private project, so it never crossed this branch.
+        generated_at=picture.generated_at,
         scope=scrub(picture.scope),
     )
 
