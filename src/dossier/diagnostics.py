@@ -372,14 +372,36 @@ def wired_actions_exist_in_the_menu() -> Result:
     except Exception as exc:                      # noqa: BLE001
         return Result("wired-actions", UNKNOWN, f"{type(exc).__name__}", because)
 
-    named = {c.action for c in index() if c.action}
+    # **ACROSS EVERY CONTEXT, NOT ONE.** `RAD_HANDLED` is context-free and
+    # the palette's children are not: `harness.run` and `harness.review`
+    # exist only where `seams` is set. Resolving once with the default
+    # context reported both as dead dispatch -- a wrong answer about working
+    # code, from a check reading its own default rather than the palette.
+    contexts: tuple[object, ...] = (None, {"seams": True})
+    named: set[str] = set()
+    for context in contexts:
+        named |= {c.action for c in index(context=context) if c.action}
+
+    # The contexts above are enumerated by hand because `resolve` reads one
+    # key. If it grows another, this check would silently cover less than it
+    # claims, so it says so rather than going quietly green.
+    import inspect
+
+    from dossier.rad import palette
+
+    keys = set(re.findall(r'context\.get\(["\'](\w+)["\']', inspect.getsource(palette.resolve)))
+    if keys - {"seams"}:
+        return Result("wired-actions", UNKNOWN,
+                      f"the palette now varies on {sorted(keys)}; this check "
+                      f"enumerates only 'seams'", because)
+
     dangling = sorted(set(DossierApp.RAD_HANDLED) - named)
     if dangling:
         return Result("wired-actions", FAIL,
                       f"dispatched but in no wedge: {dangling}", because)
     return Result("wired-actions", PASS,
                   f"{len(DossierApp.RAD_HANDLED)} handled actions, each named "
-                  f"by a wedge", because)
+                  f"by a wedge in some context", because)
 
 
 def the_database_being_read_is_the_one_with_the_data() -> Result:

@@ -51,6 +51,7 @@ nav:
       - Overview: overview.md
       - Dashboard guide: dashboard.md
   - Doing things:
+      - Development loop: dev-loop.md
       - Workflows: workflows.md
       - Workflow cookbook: cookbook.md
       - Disk cookbook: disk.md
