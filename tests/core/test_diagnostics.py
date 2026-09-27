@@ -190,3 +190,58 @@ def test_every_check_reports_one_of_the_three_states():
 def test_check_names_are_unique_so_a_reader_can_cite_one():
     names = [r.name for r in run().results]
     assert len(names) == len(set(names))
+
+
+# ─── wired-actions, across every context the palette varies on ───────────────
+#
+# The check resolved the ring once, with the default context, and compared it
+# against a context-free set of handled actions. Two actions that exist only
+# on the Seams screen were therefore reported as dead dispatch: a wrong answer
+# about working code, from a check reading its own default.
+
+def test_wired_actions_counts_context_conditional_wedges():
+    """`harness.run` and `harness.review` are wired, and the check must see it."""
+    from dossier.diagnostics import wired_actions_exist_in_the_menu
+
+    result = wired_actions_exist_in_the_menu()
+
+    assert result.state == PASS, result.detail
+
+
+def test_the_conditional_actions_really_are_absent_from_the_default_context():
+    """The premise. Without this the test above could pass for the wrong reason.
+
+    If these ever became unconditional, the check would pass whether or not it
+    walked more than one context, and the guard would stop guarding.
+    """
+    from dossier.rad.index import index
+
+    default = {c.action for c in index() if c.action}
+
+    assert "harness.run" not in default
+    assert "harness.review" not in default
+
+
+def test_the_conditional_actions_appear_when_the_context_says_seams():
+    from dossier.rad.index import index
+
+    seams = {c.action for c in index(context={"seams": True}) if c.action}
+
+    assert "harness.run" in seams
+    assert "harness.review" in seams
+
+
+def test_wired_actions_reports_unknown_if_the_palette_grows_a_second_context():
+    """The check enumerates contexts by hand, so it must notice when it undercounts."""
+    import inspect
+
+    from dossier.rad import palette
+
+    source = inspect.getsource(palette.resolve)
+
+    # If this fires, `wired_actions_exist_in_the_menu` needs the new context
+    # added to its list -- and it reports UNKNOWN until somebody does.
+    assert source.count("context.get(") == 1, (
+        "the palette reads more than one context key; the diagnostic "
+        "enumerates only 'seams' and will report UNKNOWN"
+    )

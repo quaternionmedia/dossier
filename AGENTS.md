@@ -308,6 +308,8 @@ writes a BOM). Hand-editing the page fails the suite.
 - `uv run dossier tui` — launch Trogon command explorer
 - `uv run dossier serve --reload` — run API server
 - `uv run dossier view owner/repo` — view docs in frogmouth (installed separately)
+- `uv run dossier dev doctor` — is the three-process loop wired, and is the
+  database in use one the suite may purge
 - `uv run dossier dev status` — show database stats
 - `uv run dossier dev reset -y` — reset database (recreates schema)
 - `uv run dossier dev purge -p "test" -y` — purge test projects from database
@@ -327,11 +329,19 @@ frogmouth`.
 
 ## Testing
 
-> **The suite purges the operator's real database.** `pytest_configure` in
-> `tests/conftest.py` shells `dossier dev purge` against `./dossier.db`
-> before the run, and `pytest_unconfigure` does it again after. On a machine
-> with data you care about, that data is gone. Know this before running the
-> suite.
+> **The suite purges matching projects from the operator's real database.**
+> `pytest_configure` in `tests/conftest.py` shells `dossier dev purge -p ...`
+> against whatever database the CLI resolves, once per pattern, and
+> `pytest_unconfigure` does it again after. It is not a wipe: the patterns
+> are `test`, `add-`, `list-`, `show-`, `new-`, `old-`, `doc/`, `user/`,
+> `pr/`, `branch/`, `issue/` and the rest of the list in that file. A real
+> project whose name contains one of them is deleted along with the test
+> data, and several of them are ordinary words.
+>
+> The subprocess inherits the environment, so `DOSSIER_DATABASE_URL` is
+> honoured and is how to make the run touch nothing that matters.
+> `dossier dev doctor` says which database is about to be used and whether
+> it is that one.
 
 - Tests use in-memory SQLite databases to avoid file creep
 - Test fixtures are in `tests/conftest.py`

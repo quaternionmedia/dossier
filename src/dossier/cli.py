@@ -2837,6 +2837,78 @@ def dev_status() -> None:
     click.echo()
 
 
+@dev.command("doctor")
+@click.option("--timeout", default=2.0, type=float, help="seconds to wait for each service")
+@click.option("--static/--no-static", default=True, help="also run the checks that need nothing running")
+def dev_doctor(timeout: float, static: bool) -> None:
+    """Whether the three-process loop is wired, and what is missing by name.
+
+    Iterating on dossier against a live harness means three servers on one
+    workstation that cannot import each other. This says which are up, which
+    is which, and whether the database in use is the one the suite destroys.
+
+    Exits non-zero when a required service is absent or is something else,
+    or when the loop would run against the operator's real database.
+    """
+    from dossier import diagnostics, loop
+
+    ok = True
+
+    click.echo(click.style("Ports", bold=True) + "  (declared in dossier.threads)")
+    for name, declared, now, var in loop.allocation():
+        moved = "" if declared == now else click.style(f"  moved from {declared}", fg="yellow")
+        click.echo(f"  {name:18s} {now:5d}  via {var}{moved}")
+
+    click.echo()
+    click.echo(click.style("Services", bold=True))
+    for probe in loop.survey(timeout=timeout):
+        state = probe.state
+        if state == "pass":
+            click.echo(click.style(f"  [ok]    {probe.service.role:8s}", fg="green")
+                       + f" {probe.service.title} at {probe.url}")
+        elif state == "wrong":
+            # The case reachability checks cannot see: something answered.
+            ok = False
+            click.echo(click.style(f"  [WRONG] {probe.service.role:8s}", fg="red")
+                       + f" {probe.url}: {probe.detail}")
+        elif state == "absent":
+            ok = False
+            click.echo(click.style(f"  [fail]  {probe.service.role:8s}", fg="red")
+                       + f" nothing at {probe.url} -- {probe.service.start} (in ../{probe.service.repo})")
+        else:
+            click.echo(click.style(f"  [off]   {probe.service.role:8s}", fg="yellow")
+                       + f" nothing at {probe.url}; optional -- {probe.service.start}")
+
+    click.echo()
+    click.echo(click.style("Database", bold=True))
+    iso = loop.isolation()
+    if iso.isolated:
+        click.echo(click.style("  [ok]    ", fg="green") + iso.detail)
+    else:
+        ok = False
+        rows = f" ({iso.rows} project rows)" if iso.rows else ""
+        click.echo(click.style("  [fail]  ", fg="red") + iso.detail + rows)
+        click.echo("          the suite purges this file before and after every run")
+        click.echo("          set DOSSIER_DATABASE_URL to a scratch database first")
+
+    if static:
+        click.echo()
+        click.echo(click.style("Static checks", bold=True) + "  (dossier.diagnostics)")
+        for result in diagnostics.run().results:
+            if result.state == diagnostics.PASS:
+                continue
+            ok = ok and result.state != diagnostics.FAIL
+            colour = "red" if result.state == diagnostics.FAIL else "yellow"
+            click.echo(click.style(f"  [{result.state}]  {result.name}", fg=colour) + f": {result.detail}")
+        click.echo("  (passing checks are not listed; `--no-static` skips these)")
+
+    click.echo()
+    if ok:
+        click.echo(click.style("Ready.", fg="green") + " `dossier harness queue` reads the harness.")
+    else:
+        raise SystemExit(1)
+
+
 @dev.command("vacuum")
 def dev_vacuum() -> None:
     """Optimize database by running VACUUM.
