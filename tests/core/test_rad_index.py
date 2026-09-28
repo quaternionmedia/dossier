@@ -189,7 +189,9 @@ def test_the_command_sheet_is_recorded():
 
     SHEET.parent.mkdir(parents=True, exist_ok=True)
     rendered = as_markdown(DossierApp.RAD_HANDLED)
-    SHEET.write_text(rendered, encoding="utf-8")
+    # newline="\n": a Windows text write is CRLF, and a recorded artifact
+    # that churns by line endings teaches a reader to ignore its diff.
+    SHEET.write_text(rendered, encoding="utf-8", newline="\n")
 
     assert SHEET.stat().st_size > 0
     assert "`6.2`" in rendered
