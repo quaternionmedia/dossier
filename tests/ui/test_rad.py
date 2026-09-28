@@ -785,7 +785,9 @@ class TestTheRingIsRecorded:
         drawn = app.export_screenshot(
             title=f"dossier — {name.replace('_', ' ')}")
         drawn = re.sub(r"terminal-\d+-", f"{name.replace('_', '-')}-", drawn)
-        (self.OUTPUT / f"{name}.svg").write_text(drawn, encoding="utf-8")
+        # newline="\n": a Windows text write is CRLF, and a recorded artifact
+        # that churns by line endings teaches a reader to ignore its diff.
+        (self.OUTPUT / f"{name}.svg").write_text(drawn, encoding="utf-8", newline="\n")
 
     async def _app(self):
         from sqlmodel import Session, SQLModel, create_engine
