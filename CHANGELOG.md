@@ -76,6 +76,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fixed `published_at` attribute error in TUI (field names corrected to `release_published_at`)
+- The corpus's governance and harness status documents are read and refreshed at `status/governance.yaml`
+  and `status/harness.yaml`, where the corpus keeps them, rather than at root names it no longer has.
+
+### Technical
+
+- **rad conformance** - The terminal rad port replays rad's governed `cells` vectors in its own test run,
+  pinned to the vector version they came from, and states which half of the governed set this host proves.
+  The vectors are read from a rad clone beside this one.
+- **Families as data** - A test reaches the corpus's families through its data files, without importing the corpus.
 
 ## [0.1.0] - 2026-01-17
 

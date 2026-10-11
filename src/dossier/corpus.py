@@ -44,9 +44,12 @@ from typing import Optional
 #: Governance first: the harness generator can read the governance document,
 #: so refreshing in the other order would build the harness view on a stale
 #: input and report it as current.
+# The post-migration paths: the corpus's config standard moved both under
+# status/ on 2026-08-31. A refresh that wrote the old root names would
+# recreate the exact layout the migration removed, inside the corpus checkout.
 GENERATORS = (
-    ("governance-status.yaml", "ci/governance_status.py", ("--write", "governance-status.yaml")),
-    ("harness-status.json", "ci/harness_status.py", ("--no-local", "--write", "harness-status.json")),
+    ("status/governance.yaml", "ci/governance_status.py", ("--write", "status/governance.yaml")),
+    ("status/harness.yaml", "ci/harness_status.py", ("--no-local", "--write", "status/harness.yaml")),
 )
 
 #: The generators query every repository in the org over the network. This is

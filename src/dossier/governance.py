@@ -40,23 +40,41 @@ from dossier.parsers.governance import (
     load_harness,
 )
 
-GOVERNANCE_FILENAME = "governance-status.yaml"
-HARNESS_FILENAME = "harness-status.json"
+#: The post-migration names first: the corpus's config standard moved every
+#: generated document under `status/` on 2026-08-31, and this reader looked
+#: only at the root -- so the migration broke the load with a message telling
+#: the operator the documents did not exist while they sat one directory down.
+#: The old names stay as a fallback because a project's pinned corpus may
+#: predate the move, and a reader that serves only the newest layout would
+#: refuse every pin that has not been bumped yet.
+GOVERNANCE_CANDIDATES = ("status/governance.yaml", "governance-status.yaml")
+HARNESS_CANDIDATES = ("status/harness.yaml", "harness-status.json")
 
 #: Where the corpus is mounted in a project that has adopted it.
 DEFAULT_CORPUS_DIR = Path("governance/qm")
 
 
+def _first_present(root: Path, candidates: tuple[str, ...]) -> Path:
+    """The first candidate that exists, or the first candidate as the name to
+    report when none do -- an error message should name the current layout,
+    not the fallback."""
+    for relative in candidates:
+        found = root / relative
+        if found.exists():
+            return found
+    return root / candidates[0]
+
+
 def default_paths(corpus_dir: Path | str | None = None) -> tuple[Path, Path]:
     """The two document paths, given where the corpus is mounted.
 
-    Both documents live at the corpus root. In a project that vendors the
-    corpus that is `governance/qm`; pointing at a corpus checkout directly
-    also works, which is how this is usable before a pin bump carries the
-    documents into the submodule.
+    In a project that vendors the corpus that is `governance/qm`; pointing at
+    a corpus checkout directly also works, which is how this is usable before
+    a pin bump carries the documents into the submodule.
     """
     root = Path(corpus_dir) if corpus_dir else DEFAULT_CORPUS_DIR
-    return root / GOVERNANCE_FILENAME, root / HARNESS_FILENAME
+    return (_first_present(root, GOVERNANCE_CANDIDATES),
+            _first_present(root, HARNESS_CANDIDATES))
 
 
 def has_documents(corpus_dir: Path | str) -> bool:

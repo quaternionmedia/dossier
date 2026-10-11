@@ -730,8 +730,11 @@ def test_refresh_fetches_before_it_measures(tmp_path):
     # The fetch is reported as its own outcome, and reported first.
     assert outcomes[0].document == "refs"
     assert [o.document for o in outcomes[1:]] == [
-        "governance-status.yaml",
-        "harness-status.json",
+        # The migrated paths: the corpus moved both under status/ and a
+        # refresh that wrote the old root names would recreate the layout the
+        # migration removed.
+        "status/governance.yaml",
+        "status/harness.yaml",
     ]
     # ...and it happened before any generator ran.
     assert order.read_text().split() == ["governance_status.py", "harness_status.py"]
