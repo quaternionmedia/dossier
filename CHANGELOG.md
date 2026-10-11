@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`dossier deltas drift`** - Reports where the delta board and the repositories it describes disagree,
+  read from the clones rather than from the two stored tables: a merged pull request whose delta never
+  left review, and work merged before a sync that never got a delta.
 - **Frogmouth Integration** - Optional markdown viewer for enhanced document viewing:
   - `pip install frogmouth` to install separately (has older textual/httpx constraints)
   - `dossier view <project>` - CLI command to view docs in frogmouth
