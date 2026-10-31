@@ -376,7 +376,7 @@ uv run dossier dev purge         # Remove test projects
 
 ## 🌐 API Reference
 
-Start the API server with `uv run dossier serve --reload`. Access interactive docs at http://localhost:8000/docs
+Start the API server with `uv run dossier serve --reload`. Access interactive docs at http://127.0.0.1:1618/docs. 1618 is φ, the panel's port in qm's allocation; `DOSSIER_PORT` moves it, and [the dev loop](docs/dev-loop.md) lists the others.
 
 ### Endpoints
 

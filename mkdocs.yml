@@ -23,6 +23,8 @@ repo_url: https://github.com/quaternionmedia/dossier
 edit_uri: blob/main/docs/
 
 docs_dir: docs
+# `dossier.cli.DOCS_PORT`, the one after the panel's 1618; a test holds the two together.
+dev_addr: 127.0.0.1:1619
 
 theme:
   name: material

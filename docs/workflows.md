@@ -318,8 +318,8 @@ uv run dossier export dossier ${{ github.repository }} -o ./artifacts/
 
 # Or use API for integrations
 uv run dossier serve &
-curl http://localhost:8000/projects
-curl http://localhost:8000/dossier/${{ github.repository }}
+curl http://127.0.0.1:1618/projects
+curl http://127.0.0.1:1618/dossier/${{ github.repository }}
 ```
 
 **GitHub Actions example**:
@@ -381,26 +381,26 @@ uv run dossier serve --reload
 
 # Terminal 2: Use the API
 # List projects
-curl http://localhost:8000/projects | jq
+curl http://127.0.0.1:1618/projects | jq
 
 # Get specific project
-curl http://localhost:8000/projects/astral-sh/uv | jq
+curl http://127.0.0.1:1618/projects/astral-sh/uv | jq
 
 # Get project dossier
-curl http://localhost:8000/dossier/astral-sh/uv | jq
+curl http://127.0.0.1:1618/dossier/astral-sh/uv | jq
 
 # Sync a repo via API
-curl -X POST "http://localhost:8000/github/sync?repo=owner/repo"
+curl -X POST "http://127.0.0.1:1618/github/sync?repo=owner/repo"
 
 # Search GitHub
-curl "http://localhost:8000/github/search?q=python+cli" | jq
+curl "http://127.0.0.1:1618/github/search?q=python+cli" | jq
 ```
 
 **Python client example**:
 ```python
 import httpx
 
-client = httpx.Client(base_url="http://localhost:8000")
+client = httpx.Client(base_url="http://127.0.0.1:1618")
 
 # List all projects
 projects = client.get("/projects").json()

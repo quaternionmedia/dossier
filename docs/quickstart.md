@@ -355,9 +355,9 @@ uv run dossier serve --reload
 ```
 
 Access:
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-- **Health Check**: http://localhost:8000/health
+- **Swagger UI**: http://127.0.0.1:1618/docs
+- **ReDoc**: http://127.0.0.1:1618/redoc
+- **Health Check**: http://127.0.0.1:1618/health
 
 ### API Endpoints
 

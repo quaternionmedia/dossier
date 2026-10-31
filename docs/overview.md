@@ -197,7 +197,7 @@ FastAPI server for integrations:
 
 ```bash
 uv run dossier serve --reload
-# Swagger UI at http://localhost:8000/docs
+# Swagger UI at http://127.0.0.1:1618/docs
 ```
 
 ### Command Explorer

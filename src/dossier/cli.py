@@ -22,6 +22,7 @@ from dossier.models import (
     ProjectPullRequest,
     ProjectRelease,
 )
+from dossier.threads import OWN_PORT
 
 
 # Database setup
@@ -1099,9 +1100,13 @@ def _mkdocs(*args: str) -> int:
     return subprocess.run(cmd).returncode
 
 
+# The site preview, beside the panel. mkdocs.yml's `dev_addr` says the same.
+DOCS_PORT = OWN_PORT + 1
+
+
 @docs.command("serve")
-@click.option("--port", default=8000, show_default=True,
-              help="The port to serve on.")
+@click.option("--port", default=DOCS_PORT, show_default=True,
+              help="The port to serve on, the one after the panel's.")
 @click.option("--host", default="127.0.0.1", show_default=True,
               help="Loopback by default. This is a local preview.")
 def docs_serve(port: int, host: str) -> None:
@@ -1625,7 +1630,9 @@ def query(
 
 @cli.command()
 @click.option("--host", default="127.0.0.1", help="Host to bind to")
-@click.option("--port", default=8000, help="Port to bind to")
+@click.option("--port", default=OWN_PORT, envvar="DOSSIER_PORT", show_default=True,
+              help="Port to bind to: the panel's, where `dossier dev doctor` looks. "
+                   "DOSSIER_PORT moves both.")
 @click.option("--reload", is_flag=True, help="Enable auto-reload")
 def serve(host: str, port: int, reload: bool) -> None:
     """Start the Dossier API server."""
