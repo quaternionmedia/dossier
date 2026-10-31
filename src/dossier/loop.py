@@ -27,7 +27,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from dossier.threads import CODECARTO_PORT, DEFAULT_PORT, HOST, OWN_PORT
+from dossier.threads import CODECARTO_PORT, DEFAULT_PORT, HOST, OWN_PORT, SPEECH_PORT
 
 REAL_DATABASE = "dossier.db"
 """What the CLI reads with no `DOSSIER_DATABASE_URL` set, relative to the cwd.
@@ -78,7 +78,7 @@ SPEECH = Service(
     role="speech",
     repo="joe",
     env_var="JOE_PORT",
-    default_port=8000,
+    default_port=SPEECH_PORT,
     title="Joe API",
     start="uv run joe backend",
     required=False,
@@ -236,7 +236,7 @@ def allocation() -> list[tuple[str, int, int, str]]:
     rows = [
         ("harness (qmcp)", DEFAULT_PORT, port_for(HARNESS), HARNESS.env_var),
         ("panel (dossier)", OWN_PORT, port_for(PANEL), PANEL.env_var),
-        ("speech (joe)", SPEECH.default_port, port_for(SPEECH), SPEECH.env_var),
+        ("speech (joe)", SPEECH_PORT, port_for(SPEECH), SPEECH.env_var),
         ("maps (codecarto)", CODECARTO_PORT, CODECARTO_PORT, "CODECARTO_PORT"),
     ]
     return rows
