@@ -50,11 +50,11 @@ HOST = "127.0.0.1"
 # about the problem. `tests/e2e/test_seam_port.py` reads qmcp's own config when
 # the sibling clone is present and fails when these two disagree, which is the
 # only way a copied constant stays true.
-# WHERE THE HARNESS ANSWERS: PI. Three services, three constants somebody can
+# WHERE THE HARNESS ANSWERS: PI. Four services, four constants somebody can
 # recall without looking -- 3141 the harness, 1618 this panel when it serves,
-# 2718 the code maps. The joke port `1337` was already in use on the machine
-# this was chosen on, which is the argument against the port everybody thinks
-# of first.
+# 2718 the code maps, 1059 the speech engine. The joke port `1337` was already
+# in use on the machine this was chosen on, which is the argument against the
+# port everybody thinks of first.
 #
 # **THIS IS STILL A SECOND COPY OF SOMEBODY ELSE'S CONSTANT.** `qmcp/config.py`
 # holds `port: int = 3141` and the two repositories cannot import each other.
@@ -67,7 +67,7 @@ HOST = "127.0.0.1"
 DEFAULT_PORT = 3141
 
 # This panel's own port, for when it serves rather than reads. Reserved here so
-# the three are declared in one place a reader can find, and so nothing later
+# the four are declared in one place a reader can find, and so nothing later
 # picks it by accident. Override with `DOSSIER_PORT`.
 OWN_PORT = 1618
 
@@ -75,6 +75,12 @@ OWN_PORT = 1618
 # Declared so the allocation is written down once rather than rediscovered.
 # Override with `CODECARTO_PORT`.
 CODECARTO_PORT = 2718
+
+# The speech engine, joe, which answers the harness queue by voice and is not
+# this repository's to start either. The twelfth root of two, 2^(1/12) =
+# 1.0594..., one semitone. Each of these is a constant's first four digits, the
+# allocation qm's `ci/dashboard.py` holds. Override with `JOE_PORT`.
+SPEECH_PORT = 1059
 
 
 def base_url() -> str:

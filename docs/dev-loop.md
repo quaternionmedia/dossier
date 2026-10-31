@@ -32,16 +32,17 @@ reads it from there:
 | harness | 3141 | `DOSSIER_HARNESS_PORT` |
 | panel | 1618 | `DOSSIER_PORT` |
 | maps | 2718 | `CODECARTO_PORT` |
-| speech | 8000 | `JOE_PORT` |
+| speech | 1059 | `JOE_PORT` |
 
 Other sessions run on this workstation at the same time. Each variable moves
 one process, so a second loop can be stood up beside the first without either
 touching the other's ports — and `dossier dev doctor` prints what each
 resolved to, so a moved port is visible rather than inferred.
 
-Speech is on 8000 and the other three are not, which is deliberate: 8000 is
-the port anything grabs, and it is the one the historical collision was
-about. It is the first place to move when two loops are running.
+Each is a constant's first four digits, the allocation qm's `ci/dashboard.py`
+holds: π, φ, e, and for speech the twelfth root of two, 2^(1/12) = 1.0594…,
+one semitone. None is 8000, the port anything grabs and the one the
+historical collision was about.
 
 ## Asking what is listening
 
