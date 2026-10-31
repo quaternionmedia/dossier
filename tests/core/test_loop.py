@@ -49,8 +49,10 @@ def _answers(monkeypatch, response):
 
 def test_a_service_sits_on_its_declared_port_by_default(monkeypatch):
     monkeypatch.delenv(HARNESS.env_var, raising=False)
+    monkeypatch.delenv(SPEECH.env_var, raising=False)
 
     assert loop.port_for(HARNESS) == 3141
+    assert loop.port_for(SPEECH) == 1059
 
 
 def test_an_env_var_moves_one_service_and_not_the_others(monkeypatch):
@@ -76,6 +78,7 @@ def test_the_allocation_is_read_from_where_it_is_declared():
 
     assert rows["harness (qmcp)"] == threads.DEFAULT_PORT
     assert rows["panel (dossier)"] == threads.OWN_PORT
+    assert rows["speech (joe)"] == threads.SPEECH_PORT
     assert rows["maps (codecarto)"] == threads.CODECARTO_PORT
 
 
